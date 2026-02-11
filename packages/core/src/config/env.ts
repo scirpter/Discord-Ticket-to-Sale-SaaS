@@ -38,6 +38,27 @@ export type AppEnv = z.infer<typeof envSchema> & {
 let cachedEnv: AppEnv | null = null;
 let envBootstrapped = false;
 
+function normalizeEnvKeys(): void {
+  const bomPrefix = /^\uFEFF+/;
+
+  for (const key of Object.keys(process.env)) {
+    if (!bomPrefix.test(key)) {
+      continue;
+    }
+
+    const normalizedKey = key.replace(bomPrefix, '');
+    if (!normalizedKey) {
+      continue;
+    }
+
+    if (process.env[normalizedKey] == null) {
+      process.env[normalizedKey] = process.env[key];
+    }
+
+    delete process.env[key];
+  }
+}
+
 function bootstrapEnv(): void {
   if (envBootstrapped) {
     return;
@@ -59,6 +80,7 @@ function bootstrapEnv(): void {
     }
 
     process.loadEnvFile(candidatePath);
+    normalizeEnvKeys();
     envBootstrapped = true;
     return;
   }
