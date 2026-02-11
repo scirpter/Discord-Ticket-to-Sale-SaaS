@@ -1,4 +1,6 @@
-﻿import { z } from 'zod';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { z } from 'zod';
 
 const envSchema = z.object({
   DISCORD_TOKEN: z.string().min(1).default('MISSING_DISCORD_TOKEN'),
@@ -34,11 +36,42 @@ export type AppEnv = z.infer<typeof envSchema> & {
 };
 
 let cachedEnv: AppEnv | null = null;
+let envBootstrapped = false;
+
+function bootstrapEnv(): void {
+  if (envBootstrapped) {
+    return;
+  }
+
+  const explicitEnvPath = process.env.VOODOO_ENV_FILE?.trim();
+  const candidatePaths = explicitEnvPath
+    ? [explicitEnvPath]
+    : [
+        resolve(process.cwd(), '.env'),
+        resolve(process.cwd(), '..', '.env'),
+        resolve(process.cwd(), '..', '..', '.env'),
+        resolve(process.cwd(), '..', '..', '..', '.env'),
+      ];
+
+  for (const candidatePath of candidatePaths) {
+    if (!existsSync(candidatePath)) {
+      continue;
+    }
+
+    process.loadEnvFile(candidatePath);
+    envBootstrapped = true;
+    return;
+  }
+
+  envBootstrapped = true;
+}
 
 export function getEnv(): AppEnv {
   if (cachedEnv) {
     return cachedEnv;
   }
+
+  bootstrapEnv();
 
   const parsed = envSchema.parse(process.env);
   cachedEnv = {
@@ -54,4 +87,3 @@ export function getEnv(): AppEnv {
 export function resetEnvForTests(): void {
   cachedEnv = null;
 }
-
