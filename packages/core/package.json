@@ -1,0 +1,31 @@
+{
+  "name": "@voodoo/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.44.7",
+    "mysql2": "3.15.2",
+    "neverthrow": "8.2.0",
+    "p-queue": "8.1.1",
+    "p-retry": "7.1.0",
+    "pino": "10.1.0",
+    "ulid": "3.0.1",
+    "zod": "4.1.12"
+  }
+}

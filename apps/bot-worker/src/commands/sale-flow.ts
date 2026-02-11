@@ -1,0 +1,224 @@
+﻿import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+  PermissionFlagsBits,
+  StringSelectMenuBuilder,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  type GuildMember,
+  type GuildTextBasedChannel,
+} from 'discord.js';
+import { SaleService, TenantRepository } from '@voodoo/core';
+
+import { canStartSale } from '../permissions/sale-permissions.js';
+import { createSaleDraft } from '../flows/sale-draft-store.js';
+
+const tenantRepository = new TenantRepository();
+const saleService = new SaleService();
+
+async function resolveTenantFromGuild(guildId: string): Promise<{ tenantId: string; guildId: string } | null> {
+  return tenantRepository.getTenantByGuildId(guildId);
+}
+
+async function enforceSalePreconditions(input: {
+  guildId: string;
+  channelId: string;
+  member: GuildMember;
+}): Promise<{ ok: true; tenantId: string } | { ok: false; message: string }> {
+  const tenant = await resolveTenantFromGuild(input.guildId);
+  if (!tenant) {
+    return { ok: false, message: 'This guild is not connected to any tenant in the SaaS dashboard.' };
+  }
+
+  const configResult = await saleService.getGuildRuntimeConfig({
+    tenantId: tenant.tenantId,
+    guildId: input.guildId,
+  });
+
+  if (configResult.isErr()) {
+    return { ok: false, message: configResult.error.message };
+  }
+
+  if (!canStartSale(input.member, configResult.value.staffRoleIds)) {
+    return {
+      ok: false,
+      message:
+        'You are missing required permissions to start sales here. Configure staff roles or use Manage Server.',
+    };
+  }
+
+  const isTicket = await saleService.isTicketChannel({
+    tenantId: tenant.tenantId,
+    guildId: input.guildId,
+    channelId: input.channelId,
+  });
+
+  if (!isTicket) {
+    return {
+      ok: false,
+      message:
+        'This channel is not marked as a ticket channel in ticket metadata. /sale is restricted to ticket channels.',
+    };
+  }
+
+  return {
+    ok: true,
+    tenantId: tenant.tenantId,
+  };
+}
+
+async function runSaleStart(input: {
+  guildId: string;
+  channel: GuildTextBasedChannel;
+  member: GuildMember;
+  staffUserId: string;
+  customerUserId: string;
+  editReply: (payload: { content: string; components?: ActionRowBuilder<StringSelectMenuBuilder>[] }) => Promise<unknown>;
+}): Promise<void> {
+  const preconditions = await enforceSalePreconditions({
+    guildId: input.guildId,
+    channelId: input.channel.id,
+    member: input.member,
+  });
+
+  if (!preconditions.ok) {
+    await input.editReply({ content: preconditions.message, components: [] });
+    return;
+  }
+
+  const botMemberId = input.member.guild.members.me?.id;
+  const botPerms =
+    botMemberId && 'permissionsFor' in input.channel ? input.channel.permissionsFor(botMemberId) : null;
+
+  if (!botPerms?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
+    await input.editReply({
+      content: 'I am missing channel permissions (View Channel / Send Messages) to run sale actions in this ticket.',
+      components: [],
+    });
+    return;
+  }
+
+  const optionsResult = await saleService.getSaleOptions({
+    tenantId: preconditions.tenantId,
+    guildId: input.guildId,
+  });
+
+  if (optionsResult.isErr()) {
+    await input.editReply({ content: optionsResult.error.message, components: [] });
+    return;
+  }
+
+  const options = optionsResult.value.flatMap((product) =>
+    product.variants.map((variant) => ({
+      label: `${product.name} • ${variant.label}`.slice(0, 100),
+      description: `${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`.slice(0, 100),
+      value: `${product.productId}|${variant.variantId}`,
+    })),
+  );
+
+  if (options.length === 0) {
+    await input.editReply({
+      content: 'No active products/variants are configured for this guild yet.',
+      components: [],
+    });
+    return;
+  }
+
+  const draft = createSaleDraft({
+    tenantId: preconditions.tenantId,
+    guildId: input.guildId,
+    ticketChannelId: input.channel.id,
+    staffDiscordUserId: input.staffUserId,
+    customerDiscordUserId: input.customerUserId,
+  });
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`sale:start:${draft.id}`)
+    .setPlaceholder('Select product & variant')
+    .addOptions(options.slice(0, 25));
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+
+  await input.editReply({
+    content: `Select the product/variant for <@${input.customerUserId}>`,
+    components: [row],
+  });
+}
+
+export async function startSaleFlowFromCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!interaction.inGuild() || !interaction.guildId || !interaction.channel || !interaction.guild) {
+    await interaction.reply({
+      content: 'This command can only be used inside a guild ticket channel.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const customer = interaction.options.getUser('customer') ?? interaction.user;
+
+  await runSaleStart({
+    guildId: interaction.guildId,
+    channel: interaction.channel,
+    member,
+    staffUserId: interaction.user.id,
+    customerUserId: customer.id,
+    editReply: interaction.editReply.bind(interaction),
+  });
+}
+
+export async function startSaleFlowFromButton(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.inGuild() || !interaction.guildId || !interaction.channel || !interaction.guild) {
+    await interaction.reply({
+      content: 'This button can only be used inside a guild ticket channel.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  await runSaleStart({
+    guildId: interaction.guildId,
+    channel: interaction.channel,
+    member,
+    staffUserId: interaction.user.id,
+    customerUserId: interaction.user.id,
+    editReply: interaction.editReply.bind(interaction),
+  });
+}
+
+export async function sendCheckoutMessage(
+  channel: GuildTextBasedChannel,
+  input: {
+    checkoutUrl: string;
+    orderSessionId: string;
+    customerDiscordUserId: string;
+  },
+): Promise<void> {
+  const payButton = new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Pay Now').setURL(input.checkoutUrl);
+
+  const cancelButton = new ButtonBuilder()
+    .setStyle(ButtonStyle.Danger)
+    .setCustomId('sale:cancel')
+    .setLabel('Cancel Sale');
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(payButton, cancelButton);
+
+  await channel.send({
+    content: [
+      `Sale created for <@${input.customerDiscordUserId}>.`,
+      `Order Session: \`${input.orderSessionId}\``,
+      'Click **Pay Now** to continue checkout.',
+    ].join('\n'),
+    components: [row],
+  });
+}

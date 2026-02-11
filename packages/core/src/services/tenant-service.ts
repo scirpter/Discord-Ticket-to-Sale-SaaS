@@ -1,0 +1,212 @@
+﻿import { err, ok, type Result } from 'neverthrow';
+
+import { AppError, fromUnknownError } from '../domain/errors.js';
+import { TenantRepository } from '../repositories/tenant-repository.js';
+import { UserRepository } from '../repositories/user-repository.js';
+import type { SessionPayload } from '../security/session-token.js';
+
+export type ActorContext = SessionPayload;
+
+export class TenantService {
+  private readonly tenantRepository = new TenantRepository();
+  private readonly userRepository = new UserRepository();
+
+  private async assertTenantAccess(
+    actor: ActorContext,
+    tenantId: string,
+    minimumRole: 'owner' | 'admin' | 'member',
+  ): Promise<Result<void, AppError>> {
+    if (actor.isSuperAdmin) {
+      return ok(undefined);
+    }
+
+    const role = await this.userRepository.getMemberRole({ tenantId, userId: actor.userId });
+    if (!role) {
+      return err(new AppError('TENANT_ACCESS_DENIED', 'You do not have access to this tenant', 403));
+    }
+
+    const hierarchy: Record<'owner' | 'admin' | 'member', number> = {
+      owner: 3,
+      admin: 2,
+      member: 1,
+    };
+
+    if (hierarchy[role] < hierarchy[minimumRole]) {
+      return err(new AppError('TENANT_ROLE_DENIED', 'Insufficient tenant role', 403));
+    }
+
+    return ok(undefined);
+  }
+
+  public async getMe(actor: ActorContext): Promise<Result<{ userId: string; isSuperAdmin: boolean; tenantIds: string[] }, AppError>> {
+    return ok({
+      userId: actor.userId,
+      isSuperAdmin: actor.isSuperAdmin,
+      tenantIds: actor.tenantIds,
+    });
+  }
+
+  public async listTenants(actor: ActorContext): Promise<Result<Array<{ id: string; name: string; status: string }>, AppError>> {
+    try {
+      if (actor.isSuperAdmin) {
+        const all = await this.tenantRepository.listAllTenants();
+        return ok(all.map((tenant) => ({ id: tenant.id, name: tenant.name, status: tenant.status })));
+      }
+
+      const rows = await this.tenantRepository.listTenantsForUser(actor.userId);
+      return ok(rows.map((tenant) => ({ id: tenant.id, name: tenant.name, status: tenant.status })));
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async createTenant(
+    actor: ActorContext,
+    input: { name: string },
+  ): Promise<Result<{ id: string; name: string; status: string }, AppError>> {
+    try {
+      const tenant = await this.tenantRepository.createTenant({
+        name: input.name,
+        ownerUserId: actor.userId,
+      });
+
+      return ok({
+        id: tenant.id,
+        name: tenant.name,
+        status: tenant.status,
+      });
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async updateTenant(
+    actor: ActorContext,
+    input: { tenantId: string; name?: string },
+  ): Promise<Result<void, AppError>> {
+    try {
+      const access = await this.assertTenantAccess(actor, input.tenantId, 'admin');
+      if (access.isErr()) {
+        return err(access.error);
+      }
+
+      await this.tenantRepository.updateTenant({ tenantId: input.tenantId, name: input.name });
+      return ok(undefined);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async setTenantStatus(
+    actor: ActorContext,
+    input: { tenantId: string; status: 'active' | 'disabled' },
+  ): Promise<Result<void, AppError>> {
+    if (!actor.isSuperAdmin) {
+      return err(new AppError('SUPER_ADMIN_REQUIRED', 'Super admin permission required', 403));
+    }
+
+    try {
+      await this.tenantRepository.setTenantStatus(input);
+      return ok(undefined);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async connectGuild(
+    actor: ActorContext,
+    input: {
+      tenantId: string;
+      guildId: string;
+      guildName: string;
+    },
+  ): Promise<Result<void, AppError>> {
+    try {
+      const access = await this.assertTenantAccess(actor, input.tenantId, 'admin');
+      if (access.isErr()) {
+        return err(access.error);
+      }
+
+      await this.tenantRepository.connectGuild({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        guildName: input.guildName,
+      });
+
+      return ok(undefined);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async updateGuildConfig(
+    actor: ActorContext,
+    input: {
+      tenantId: string;
+      guildId: string;
+      paidLogChannelId: string | null;
+      staffRoleIds: string[];
+      defaultCurrency: string;
+      ticketMetadataKey: string;
+    },
+  ): Promise<Result<{
+    paidLogChannelId: string | null;
+    staffRoleIds: string[];
+    defaultCurrency: string;
+    ticketMetadataKey: string;
+  }, AppError>> {
+    try {
+      const access = await this.assertTenantAccess(actor, input.tenantId, 'admin');
+      if (access.isErr()) {
+        return err(access.error);
+      }
+
+      const config = await this.tenantRepository.upsertGuildConfig(input);
+      return ok({
+        paidLogChannelId: config.paidLogChannelId,
+        staffRoleIds: config.staffRoleIds,
+        defaultCurrency: config.defaultCurrency,
+        ticketMetadataKey: config.ticketMetadataKey,
+      });
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async getGuildConfig(
+    actor: ActorContext,
+    input: { tenantId: string; guildId: string },
+  ): Promise<
+    Result<
+      {
+        paidLogChannelId: string | null;
+        staffRoleIds: string[];
+        defaultCurrency: string;
+        ticketMetadataKey: string;
+      },
+      AppError
+    >
+  > {
+    try {
+      const access = await this.assertTenantAccess(actor, input.tenantId, 'member');
+      if (access.isErr()) {
+        return err(access.error);
+      }
+
+      const config = await this.tenantRepository.getGuildConfig(input);
+      if (!config) {
+        return err(new AppError('GUILD_CONFIG_NOT_FOUND', 'Guild configuration not found', 404));
+      }
+
+      return ok({
+        paidLogChannelId: config.paidLogChannelId,
+        staffRoleIds: config.staffRoleIds,
+        defaultCurrency: config.defaultCurrency,
+        ticketMetadataKey: config.ticketMetadataKey,
+      });
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+}
+
