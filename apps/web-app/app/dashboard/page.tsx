@@ -41,6 +41,11 @@ type TenantSummary = {
   status: string;
 };
 
+type TenantGuildSummary = {
+  guildId: string;
+  guildName: string;
+};
+
 type MeResponse = {
   me: {
     userId: string;
@@ -134,6 +139,9 @@ export default function DashboardPage() {
   const [tenantId, setTenantId] = useState('');
   const [guildId, setGuildId] = useState('');
   const [myTenants, setMyTenants] = useState<TenantSummary[]>([]);
+  const [tenantGuilds, setTenantGuilds] = useState<TenantGuildSummary[]>([]);
+  const [guildsLoading, setGuildsLoading] = useState(false);
+  const [guildsError, setGuildsError] = useState('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [sessionError, setSessionError] = useState('');
@@ -214,13 +222,19 @@ export default function DashboardPage() {
         const mePayload = payload as MeResponse;
         if (!cancelled) {
           setIsSuperAdmin(Boolean(mePayload.me.isSuperAdmin));
-          setMyTenants(Array.isArray(mePayload.tenants) ? mePayload.tenants : []);
-          if (mePayload.me.tenantIds.length === 1) {
-            const onlyTenantId = mePayload.me.tenantIds[0];
-            if (onlyTenantId) {
-              setTenantId((current) => current || onlyTenantId);
+          const tenants = Array.isArray(mePayload.tenants) ? mePayload.tenants : [];
+          setMyTenants(tenants);
+          setTenantId((current) => {
+            if (current) {
+              return current;
             }
-          }
+
+            if (mePayload.me.tenantIds.length === 1) {
+              return mePayload.me.tenantIds[0] ?? '';
+            }
+
+            return tenants[0]?.id ?? '';
+          });
         }
       } catch (error) {
         if (!cancelled) {
@@ -240,13 +254,84 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTenantGuilds() {
+      const selectedTenantId = tenantId.trim();
+      if (!selectedTenantId) {
+        setTenantGuilds([]);
+        setGuildsError('');
+        setGuildId('');
+        return;
+      }
+
+      setGuildsLoading(true);
+      setGuildsError('');
+
+      try {
+        const payload = (await apiCall(
+          `/api/tenants/${encodeURIComponent(selectedTenantId)}/guilds`,
+        )) as { guilds?: TenantGuildSummary[] };
+        const guilds = Array.isArray(payload.guilds) ? payload.guilds : [];
+
+        if (cancelled) {
+          return;
+        }
+
+        setTenantGuilds(guilds);
+        setGuildId((current) => {
+          if (!current && guilds.length > 0) {
+            return guilds[0]?.guildId ?? '';
+          }
+
+          if (current && !guilds.some((guild) => guild.guildId === current)) {
+            return guilds[0]?.guildId ?? '';
+          }
+
+          return current;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setTenantGuilds([]);
+          setGuildsError(error instanceof Error ? error.message : 'Unable to load linked servers');
+          setGuildId('');
+        }
+      } finally {
+        if (!cancelled) {
+          setGuildsLoading(false);
+        }
+      }
+    }
+
+    void loadTenantGuilds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId]);
+
+  const selectedGuildName = useMemo(
+    () => tenantGuilds.find((guild) => guild.guildId === guildId)?.guildName ?? '',
+    [guildId, tenantGuilds],
+  );
+
+  useEffect(() => {
+    if (!selectedGuildName) {
+      return;
+    }
+
+    setConnectGuildName(selectedGuildName);
+  }, [selectedGuildName]);
+
   const contextPreview = useMemo(
     () => ({
       workspaceId: tenantId,
       discordServerId: guildId,
+      discordServerName: selectedGuildName,
       defaultCurrency,
     }),
-    [defaultCurrency, guildId, tenantId],
+    [defaultCurrency, guildId, selectedGuildName, tenantId],
   );
 
   function requireWorkspaceAndServer(): { workspaceId: string; discordServerId: string } {
@@ -410,27 +495,70 @@ export default function DashboardPage() {
                 <Store className="size-4 text-primary" />
                 Workspace + Server
               </CardTitle>
-              <CardDescription>Select workspace and target Discord server before saving config.</CardDescription>
+              <CardDescription>
+                Select workspace and target Discord server before saving config. Linked servers auto-fill here.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {myTenants.length > 0 ? (
-                <div className="space-y-2">
-                  <Label htmlFor="workspace-select">Your Workspace</Label>
-                  <select
-                    id="workspace-select"
-                    className={nativeSelectClass}
-                    value={tenantId}
-                    onChange={(event) => setTenantId(event.target.value)}
-                  >
-                    <option value="">Select workspace</option>
-                    {myTenants.map((tenant) => (
-                      <option key={tenant.id} value={tenant.id}>
-                        {tenant.name} ({tenant.status})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
+              <div className="space-y-2">
+                <Label htmlFor="workspace-select">Your Workspace</Label>
+                <select
+                  id="workspace-select"
+                  className={nativeSelectClass}
+                  value={tenantId}
+                  onChange={(event) => setTenantId(event.target.value)}
+                  disabled={myTenants.length === 0}
+                >
+                  <option value="">
+                    {myTenants.length === 0 ? 'No workspaces available yet' : 'Select workspace'}
+                  </option>
+                  {myTenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.name} ({tenant.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="guild-select">Linked Discord Server</Label>
+                <select
+                  id="guild-select"
+                  className={nativeSelectClass}
+                  value={guildId}
+                  onChange={(event) => {
+                    const nextGuildId = event.target.value;
+                    setGuildId(nextGuildId);
+
+                    const selectedGuild = tenantGuilds.find((guild) => guild.guildId === nextGuildId);
+                    if (selectedGuild) {
+                      setConnectGuildName(selectedGuild.guildName);
+                    }
+                  }}
+                  disabled={!tenantId || guildsLoading || tenantGuilds.length === 0}
+                >
+                  <option value="">
+                    {!tenantId
+                      ? 'Select workspace first'
+                      : guildsLoading
+                        ? 'Loading linked servers...'
+                        : tenantGuilds.length === 0
+                          ? 'No linked servers yet'
+                          : 'Select linked server'}
+                  </option>
+                  {tenantGuilds.map((guild) => (
+                    <option key={guild.guildId} value={guild.guildId}>
+                      {guild.guildName} ({guild.guildId})
+                    </option>
+                  ))}
+                </select>
+                {guildsError ? <p className="text-xs text-destructive">{guildsError}</p> : null}
+                {!guildsError && tenantId && !guildsLoading && tenantGuilds.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No linked servers for this workspace yet. Link one in the card on the right.
+                  </p>
+                ) : null}
+              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="workspace-id">Workspace ID (manual)</Label>
@@ -443,7 +571,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="guild-id">Discord Server ID</Label>
+                <Label htmlFor="guild-id">Discord Server ID (manual override)</Label>
                 <Input
                   id="guild-id"
                   value={guildId}

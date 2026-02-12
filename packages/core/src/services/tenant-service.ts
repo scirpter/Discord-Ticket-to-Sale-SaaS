@@ -46,6 +46,23 @@ export class TenantService {
     });
   }
 
+  public async listTenantGuilds(
+    actor: ActorContext,
+    input: { tenantId: string },
+  ): Promise<Result<Array<{ guildId: string; guildName: string }>, AppError>> {
+    try {
+      const access = await this.assertTenantAccess(actor, input.tenantId, 'member');
+      if (access.isErr()) {
+        return err(access.error);
+      }
+
+      const guilds = await this.tenantRepository.listGuildsForTenant(input.tenantId);
+      return ok(guilds);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
   public async listTenants(actor: ActorContext): Promise<Result<Array<{ id: string; name: string; status: string }>, AppError>> {
     try {
       if (actor.isSuperAdmin) {
