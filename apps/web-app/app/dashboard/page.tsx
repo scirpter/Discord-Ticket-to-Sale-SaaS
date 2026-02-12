@@ -1,6 +1,30 @@
-'use client';
+﻿'use client';
 
+import {
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  Globe,
+  Link2,
+  Loader2,
+  Plus,
+  Settings2,
+  Shield,
+  Store,
+  Wallet,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+
+import { ModeToggle } from '@/components/mode-toggle';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 type FieldType = 'short_text' | 'long_text' | 'email' | 'number';
 
@@ -46,6 +70,21 @@ const initialState: RequestState = {
   error: '',
 };
 
+const nativeSelectClass =
+  'dark:bg-input/30 dark:border-input dark:hover:bg-input/40 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
+
+function safeJsonParse(text: string): unknown {
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 async function apiCall(path: string, method = 'GET', body?: unknown): Promise<unknown> {
   const response = await fetch(path, {
     method,
@@ -58,11 +97,7 @@ async function apiCall(path: string, method = 'GET', body?: unknown): Promise<un
   const responseText = await response.text();
   const contentType = response.headers.get('content-type') ?? '';
   const isJson = contentType.includes('application/json');
-  let payload: unknown = null;
-
-  if (isJson && responseText.length > 0) {
-    payload = JSON.parse(responseText) as unknown;
-  }
+  const payload = isJson ? safeJsonParse(responseText) : null;
 
   if (!response.ok) {
     const message =
@@ -71,6 +106,7 @@ async function apiCall(path: string, method = 'GET', body?: unknown): Promise<un
         : responseText.startsWith('<!DOCTYPE') || responseText.startsWith('<html')
           ? `Request failed with ${response.status}. Server returned HTML instead of JSON. Check Workspace ID + Discord Server ID first.`
           : responseText || `Request failed with ${response.status}`;
+
     throw new Error(message);
   }
 
@@ -157,7 +193,7 @@ export default function DashboardPage() {
         const response = await fetch('/api/me');
         const responseText = await response.text();
         const isJson = (response.headers.get('content-type') ?? '').includes('application/json');
-        const payload = isJson && responseText.length > 0 ? (JSON.parse(responseText) as unknown) : null;
+        const payload = isJson ? safeJsonParse(responseText) : null;
 
         if (!response.ok) {
           const message =
@@ -203,13 +239,13 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const preview = useMemo(
+  const contextPreview = useMemo(
     () => ({
       workspaceId: tenantId,
       discordServerId: guildId,
       defaultCurrency,
     }),
-    [tenantId, guildId, defaultCurrency],
+    [defaultCurrency, guildId, tenantId],
   );
 
   function requireWorkspaceAndServer(): { workspaceId: string; discordServerId: string } {
@@ -217,7 +253,7 @@ export default function DashboardPage() {
     const discordServerId = guildId.trim();
 
     if (!workspaceId) {
-      throw new Error('Workspace ID is required.');
+      throw new Error('Workspace ID is required. Create or select a workspace first.');
     }
 
     if (!discordServerId) {
@@ -232,6 +268,7 @@ export default function DashboardPage() {
 
   async function runAction(action: () => Promise<unknown>) {
     setState({ loading: true, response: '', error: '' });
+
     try {
       const payload = await action();
       setState({ loading: false, response: JSON.stringify(payload, null, 2), error: '' });
@@ -244,7 +281,7 @@ export default function DashboardPage() {
     }
   }
 
-  function addPriceOption(): void {
+  function addPriceOption() {
     if (!variantLabelInput.trim()) {
       setState({ loading: false, response: '', error: 'Price option label is required.' });
       return;
@@ -271,11 +308,11 @@ export default function DashboardPage() {
     ]);
   }
 
-  function removePriceOption(index: number): void {
+  function removePriceOption(index: number) {
     setVariants((current) => current.filter((_, currentIndex) => currentIndex !== index));
   }
 
-  function addQuestion(): void {
+  function addQuestion() {
     if (!questionKeyInput.trim() || !questionLabelInput.trim()) {
       setState({ loading: false, response: '', error: 'Question key and question label are required.' });
       return;
@@ -294,7 +331,7 @@ export default function DashboardPage() {
     ]);
   }
 
-  function removeQuestion(index: number): void {
+  function removeQuestion(index: number) {
     setQuestions((current) =>
       current
         .filter((_, currentIndex) => currentIndex !== index)
@@ -304,430 +341,737 @@ export default function DashboardPage() {
 
   if (sessionLoading) {
     return (
-      <main className="grid" style={{ gap: '18px' }}>
-        <section className="card grid" style={{ gap: '12px' }}>
-          <h1>Loading Dashboard</h1>
-          <p>Checking your Discord login session...</p>
-        </section>
+      <main className="relative flex min-h-screen items-center justify-center px-4">
+        <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(45rem_30rem_at_10%_-10%,rgba(56,189,248,0.25),transparent),radial-gradient(40rem_30rem_at_90%_0%,rgba(20,184,166,0.2),transparent),radial-gradient(35rem_30rem_at_50%_120%,rgba(249,115,22,0.16),transparent)]" />
+        <Card className="w-full max-w-lg border-border/70 bg-card/80 shadow-2xl shadow-black/20 backdrop-blur">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Loader2 className="size-4 animate-spin" />
+              Loading Dashboard
+            </CardTitle>
+            <CardDescription>Checking your Discord login session...</CardDescription>
+          </CardHeader>
+        </Card>
       </main>
     );
   }
 
   if (sessionError) {
     return (
-      <main className="grid" style={{ gap: '18px' }}>
-        <section className="card grid" style={{ gap: '12px' }}>
-          <h1>Login Required</h1>
-          <p>{sessionError}</p>
-          <a href="/api/auth/discord/login">
-            <button type="button">Login with Discord</button>
-          </a>
-        </section>
+      <main className="relative flex min-h-screen items-center justify-center px-4">
+        <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(45rem_30rem_at_10%_-10%,rgba(56,189,248,0.25),transparent),radial-gradient(40rem_30rem_at_90%_0%,rgba(20,184,166,0.2),transparent),radial-gradient(35rem_30rem_at_50%_120%,rgba(249,115,22,0.16),transparent)]" />
+        <Card className="w-full max-w-lg border-border/70 bg-card/80 shadow-2xl shadow-black/20 backdrop-blur">
+          <CardHeader>
+            <CardTitle className="text-xl">Login Required</CardTitle>
+            <CardDescription>{sessionError}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <a href="/api/auth/discord/login">Login with Discord</a>
+            </Button>
+          </CardContent>
+        </Card>
       </main>
     );
   }
 
   return (
-    <main className="grid" style={{ gap: '18px' }}>
-      <section className="card grid" style={{ gap: '12px' }}>
-        <h1>Sales Dashboard</h1>
-        <p>
-          Plain language mapping: Workspace = tenant account, and Discord Server ID = guild ID.
-          Use this dashboard to set up products, prices, questions, and API payment integration.
-        </p>
-      </section>
+    <main className="relative min-h-screen overflow-x-hidden pb-10">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(45rem_30rem_at_10%_-10%,rgba(56,189,248,0.25),transparent),radial-gradient(40rem_30rem_at_90%_0%,rgba(20,184,166,0.2),transparent),radial-gradient(35rem_30rem_at_50%_120%,rgba(249,115,22,0.16),transparent)]" />
 
-      <section className="card grid" style={{ gap: '8px' }}>
-        <h3>Quick Setup Order</h3>
-        <p>
-          1) Pick your workspace and server. 2) Save server settings + payment integration. 3) Add product,
-          prices, and customer questions.
-        </p>
-      </section>
-
-      <section className="grid cols-3">
-        <div className="card grid" style={{ gap: '10px' }}>
-          <h3>Workspace + Server Context</h3>
-          {myTenants.length > 0 ? (
-            <div>
-              <label>Your Workspace</label>
-              <select value={tenantId} onChange={(event) => setTenantId(event.target.value)}>
-                <option value="">Select workspace</option>
-                {myTenants.map((tenant) => (
-                  <option key={tenant.id} value={tenant.id}>
-                    {tenant.name} ({tenant.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          <div>
-            <label>Workspace ID (manual)</label>
-            <input
-              value={tenantId}
-              onChange={(event) => setTenantId(event.target.value)}
-              placeholder="tenant_..."
-            />
-          </div>
-          <div>
-            <label>Discord Server ID</label>
-            <input value={guildId} onChange={(event) => setGuildId(event.target.value)} placeholder="1234567890" />
-          </div>
-          <pre className="code">{JSON.stringify(preview, null, 2)}</pre>
-        </div>
-
-        <div className="card grid" style={{ gap: '10px' }}>
-          <h3>Create Workspace</h3>
-          <div>
-            <label>Workspace Name</label>
-            <input value={createTenantName} onChange={(event) => setCreateTenantName(event.target.value)} />
-          </div>
-          <button
-            type="button"
-            onClick={() => runAction(() => apiCall('/api/tenants', 'POST', { name: createTenantName }))}
-          >
-            Create Workspace
-          </button>
-          <button type="button" className="secondary" onClick={() => runAction(() => apiCall('/api/tenants'))}>
-            List My Workspaces
-          </button>
-        </div>
-
-        <div className="card grid" style={{ gap: '10px' }}>
-          <h3>Link Discord Server</h3>
-          <div>
-            <label>Server Name</label>
-            <input value={connectGuildName} onChange={(event) => setConnectGuildName(event.target.value)} />
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              runAction(() => {
-                const context = requireWorkspaceAndServer();
-                return apiCall(`/api/guilds/${context.discordServerId}/connect`, 'POST', {
-                  tenantId: context.workspaceId,
-                  guildName: connectGuildName,
-                });
-              })
-            }
-          >
-            Link Server
-          </button>
-        </div>
-      </section>
-
-      <section className="grid cols-2">
-        <div className="card grid" style={{ gap: '10px' }}>
-          <h3>Server Sales Settings</h3>
-          <div>
-            <label>Paid Order Log Channel ID</label>
-            <input
-              value={paidLogChannelId}
-              onChange={(event) => setPaidLogChannelId(event.target.value)}
-              placeholder="1234567890"
-            />
-          </div>
-          <div>
-            <label>Staff Role IDs (comma-separated)</label>
-            <input value={staffRoleIds} onChange={(event) => setStaffRoleIds(event.target.value)} />
-          </div>
-          <div className="grid cols-2">
-            <div>
-              <label>Currency</label>
-              <input
-                value={defaultCurrency}
-                onChange={(event) => setDefaultCurrency(event.target.value.toUpperCase().slice(0, 3))}
-                maxLength={3}
-              />
-            </div>
-            <div>
-              <label>Ticket Flag Key (advanced)</label>
-              <input value={ticketMetadataKey} onChange={(event) => setTicketMetadataKey(event.target.value)} />
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-3">
+            <Badge variant="secondary" className="border border-border/60 bg-card/80 px-3 py-1 text-[11px] uppercase">
+              Multi-Tenant Sales Dashboard
+            </Badge>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Ticket Commerce Control Center</h1>
+              <p className="max-w-3xl text-sm text-muted-foreground sm:text-base">
+                Workspace means tenant account. Discord Server ID means guild ID. Configure integration, products,
+                prices, and customer questions from one place.
+              </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              runAction(() => {
-                const context = requireWorkspaceAndServer();
-                if (defaultCurrency.trim().length !== 3) {
-                  throw new Error('Currency must be a 3-letter code, for example GBP.');
-                }
 
-                return apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
-                  tenantId: context.workspaceId,
-                  paidLogChannelId: paidLogChannelId || null,
-                  staffRoleIds: staffRoleIds
-                    .split(',')
-                    .map((value) => value.trim())
-                    .filter(Boolean),
-                  defaultCurrency: defaultCurrency.trim().toUpperCase(),
-                  ticketMetadataKey,
-                });
-              })
-            }
-          >
-            Save Server Settings
-          </button>
-        </div>
+          <div className="flex items-center gap-2">
+            <Badge variant={isSuperAdmin ? 'default' : 'outline'} className="px-3 py-1">
+              {isSuperAdmin ? 'Super Admin Session' : 'Tenant Session'}
+            </Badge>
+            <ModeToggle />
+          </div>
+        </header>
 
-        <div className="card grid" style={{ gap: '10px' }}>
-          <h3>Voodoo Pay Integration</h3>
-          <p>Multi-provider checkout mode. Customer selects provider on hosted Voodoo Pay page.</p>
-          <div>
-            <label>Merchant Wallet Address (Polygon)</label>
-            <input
-              value={voodooMerchantWalletAddress}
-              onChange={(event) => setVoodooMerchantWalletAddress(event.target.value)}
-              placeholder="0x..."
-            />
-          </div>
-          <div>
-            <label>Checkout Domain</label>
-            <input
-              value={voodooCheckoutDomain}
-              onChange={(event) => setVoodooCheckoutDomain(event.target.value)}
-              placeholder="checkout.voodoo-pay.uk"
-            />
-          </div>
-          <div>
-            <label>Callback Secret</label>
-            <input
-              type="password"
-              value={voodooCallbackSecret}
-              onChange={(event) => setVoodooCallbackSecret(event.target.value)}
-              placeholder="at least 16 characters"
-            />
-            <p style={{ marginTop: '6px', fontSize: '0.85rem', opacity: 0.85 }}>
-              Use a random secret (32+ characters recommended). This app stores it and uses it to verify callback authenticity.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              runAction(() => {
-                const context = requireWorkspaceAndServer();
-                return apiCall(`/api/guilds/${context.discordServerId}/integrations/voodoopay`, 'PUT', {
-                  tenantId: context.workspaceId,
-                  merchantWalletAddress: voodooMerchantWalletAddress,
-                  checkoutDomain: voodooCheckoutDomain,
-                  callbackSecret: voodooCallbackSecret,
-                });
-              })
-            }
-          >
-            Save Voodoo Pay Integration
-          </button>
-        </div>
-      </section>
+        <section className="grid gap-6 lg:grid-cols-3">
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur lg:col-span-1">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Store className="size-4 text-primary" />
+                Workspace + Server
+              </CardTitle>
+              <CardDescription>Select workspace and target Discord server before saving config.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {myTenants.length > 0 ? (
+                <div className="space-y-2">
+                  <Label htmlFor="workspace-select">Your Workspace</Label>
+                  <select
+                    id="workspace-select"
+                    className={nativeSelectClass}
+                    value={tenantId}
+                    onChange={(event) => setTenantId(event.target.value)}
+                  >
+                    <option value="">Select workspace</option>
+                    {myTenants.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name} ({tenant.status})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
 
-      <section className={isSuperAdmin ? 'grid cols-2' : 'grid'}>
-        <div className="card grid" style={{ gap: '10px' }}>
-          <h3>Products, Prices, and Customer Questions</h3>
-          <div>
-            <label>Product Category</label>
-            <input value={productCategory} onChange={(event) => setProductCategory(event.target.value)} />
-          </div>
-          <div>
-            <label>Product Name</label>
-            <input value={productName} onChange={(event) => setProductName(event.target.value)} />
-          </div>
-          <div>
-            <label>Description</label>
-            <input value={productDescription} onChange={(event) => setProductDescription(event.target.value)} />
-          </div>
-          <label>
-            <input type="checkbox" checked={productActive} onChange={(event) => setProductActive(event.target.checked)} />{' '}
-            Product active
-          </label>
-
-          <div className="card grid" style={{ gap: '8px' }}>
-            <h3>Price Options</h3>
-            {variants.length === 0 ? <p>No price options yet.</p> : null}
-            {variants.map((variant, index) => (
-              <div key={`${variant.label}-${index}`} className="grid cols-2">
-                <p>
-                  {variant.label}: {variant.priceMajor} {variant.currency}
-                </p>
-                <button type="button" className="secondary" onClick={() => removePriceOption(index)}>
-                  Remove
-                </button>
-              </div>
-            ))}
-            <div className="grid cols-2">
-              <div>
-                <label>Price Label</label>
-                <input value={variantLabelInput} onChange={(event) => setVariantLabelInput(event.target.value)} />
-              </div>
-              <div>
-                <label>Price (major unit)</label>
-                <input
-                  value={variantPriceInput}
-                  onChange={(event) => setVariantPriceInput(event.target.value)}
-                  placeholder="9.99"
+              <div className="space-y-2">
+                <Label htmlFor="workspace-id">Workspace ID (manual)</Label>
+                <Input
+                  id="workspace-id"
+                  value={tenantId}
+                  onChange={(event) => setTenantId(event.target.value)}
+                  placeholder="tenant_..."
                 />
               </div>
-            </div>
-            <div>
-              <label>Currency</label>
-              <input
-                value={variantCurrencyInput}
-                onChange={(event) => setVariantCurrencyInput(event.target.value.toUpperCase().slice(0, 3))}
-                maxLength={3}
-              />
-            </div>
-            <button type="button" className="secondary" onClick={addPriceOption}>
-              Add Price Option
-            </button>
-          </div>
 
-          <div className="card grid" style={{ gap: '8px' }}>
-            <h3>Questions for Customer</h3>
-            {questions.length === 0 ? <p>No questions yet.</p> : null}
-            {questions.map((question, index) => (
-              <div key={`${question.key}-${index}`} className="grid cols-2">
-                <p>
-                  {question.label} ({question.fieldType})
-                </p>
-                <button type="button" className="secondary" onClick={() => removeQuestion(index)}>
-                  Remove
-                </button>
-              </div>
-            ))}
-            <div className="grid cols-2">
-              <div>
-                <label>Question Key</label>
-                <input
-                  value={questionKeyInput}
-                  onChange={(event) => setQuestionKeyInput(event.target.value)}
-                  placeholder="email"
+              <div className="space-y-2">
+                <Label htmlFor="guild-id">Discord Server ID</Label>
+                <Input
+                  id="guild-id"
+                  value={guildId}
+                  onChange={(event) => setGuildId(event.target.value)}
+                  placeholder="1234567890"
                 />
               </div>
-              <div>
-                <label>Question Label</label>
-                <input
-                  value={questionLabelInput}
-                  onChange={(event) => setQuestionLabelInput(event.target.value)}
-                  placeholder="What is your email?"
+
+              <div className="rounded-lg border border-border/60 bg-secondary/35 p-3">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">Current Context</p>
+                <pre className="whitespace-pre-wrap text-[11px] text-muted-foreground">
+                  {JSON.stringify(contextPreview, null, 2)}
+                </pre>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="text-lg">Create Workspace</CardTitle>
+              <CardDescription>Each merchant account should have its own workspace.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="workspace-name">Workspace Name</Label>
+                <Input
+                  id="workspace-name"
+                  value={createTenantName}
+                  onChange={(event) => setCreateTenantName(event.target.value)}
                 />
               </div>
-            </div>
-            <div className="grid cols-2">
-              <div>
-                <label>Input Type</label>
-                <select
-                  value={questionTypeInput}
-                  onChange={(event) => setQuestionTypeInput(event.target.value as FieldType)}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  className="sm:flex-1"
+                  disabled={state.loading}
+                  onClick={() =>
+                    runAction(() => {
+                      if (!createTenantName.trim()) {
+                        throw new Error('Workspace name is required.');
+                      }
+
+                      return apiCall('/api/tenants', 'POST', { name: createTenantName.trim() });
+                    })
+                  }
                 >
-                  <option value="short_text">Short text</option>
-                  <option value="long_text">Long text</option>
-                  <option value="email">Email</option>
-                  <option value="number">Number</option>
-                </select>
+                  Create Workspace
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="sm:flex-1"
+                  disabled={state.loading}
+                  onClick={() => runAction(() => apiCall('/api/tenants'))}
+                >
+                  List My Workspaces
+                </Button>
               </div>
-              <div className="grid cols-2">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={questionRequiredInput}
-                    onChange={(event) => setQuestionRequiredInput(event.target.checked)}
-                  />{' '}
-                  Required
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={questionSensitiveInput}
-                    onChange={(event) => setQuestionSensitiveInput(event.target.checked)}
-                  />{' '}
-                  Sensitive
-                </label>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Link2 className="size-4 text-primary" />
+                Link Discord Server
+              </CardTitle>
+              <CardDescription>Bind the selected workspace to your Discord server ID.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="guild-name">Server Name</Label>
+                <Input
+                  id="guild-name"
+                  value={connectGuildName}
+                  onChange={(event) => setConnectGuildName(event.target.value)}
+                />
               </div>
-            </div>
-            <button type="button" className="secondary" onClick={addQuestion}>
-              Add Question
-            </button>
-          </div>
+              <Button
+                type="button"
+                disabled={state.loading}
+                onClick={() =>
+                  runAction(() => {
+                    const context = requireWorkspaceAndServer();
 
-          <button
-            type="button"
-            onClick={() =>
-              runAction(async () => {
-                const context = requireWorkspaceAndServer();
-                const preparedVariants = variants.map((variant) => ({
-                  label: variant.label.trim(),
-                  priceMinor: parsePriceToMinor(variant.priceMajor),
-                  currency: variant.currency.trim().toUpperCase(),
-                }));
+                    if (!connectGuildName.trim()) {
+                      throw new Error('Server name is required.');
+                    }
 
-                const preparedQuestions = questions.map((question, sortOrder) => ({
-                  ...question,
-                  sortOrder,
-                }));
+                    return apiCall(`/api/guilds/${context.discordServerId}/connect`, 'POST', {
+                      tenantId: context.workspaceId,
+                      guildName: connectGuildName.trim(),
+                    });
+                  })
+                }
+              >
+                Link Server
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
 
-                return apiCall(`/api/guilds/${context.discordServerId}/products`, 'POST', {
-                  tenantId: context.workspaceId,
-                  product: {
-                    category: productCategory,
-                    name: productName,
-                    description: productDescription,
-                    active: productActive,
-                    variants: preparedVariants,
-                  },
-                  formFields: preparedQuestions,
-                });
-              })
-            }
+        <section className="grid gap-6 lg:grid-cols-2">
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Settings2 className="size-4 text-primary" />
+                Server Sales Settings
+              </CardTitle>
+              <CardDescription>
+                Configure paid logs, staff roles, default currency, and ticket metadata key.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="paid-log-channel">Paid Order Log Channel ID</Label>
+                <Input
+                  id="paid-log-channel"
+                  value={paidLogChannelId}
+                  onChange={(event) => setPaidLogChannelId(event.target.value)}
+                  placeholder="1234567890"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="staff-role-ids">Staff Role IDs (comma-separated)</Label>
+                <Input
+                  id="staff-role-ids"
+                  value={staffRoleIds}
+                  onChange={(event) => setStaffRoleIds(event.target.value)}
+                  placeholder="1111,2222"
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="currency">Currency</Label>
+                  <Input
+                    id="currency"
+                    value={defaultCurrency}
+                    maxLength={3}
+                    onChange={(event) => setDefaultCurrency(event.target.value.toUpperCase().slice(0, 3))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ticket-key">Ticket Flag Key (advanced)</Label>
+                  <Input
+                    id="ticket-key"
+                    value={ticketMetadataKey}
+                    onChange={(event) => setTicketMetadataKey(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                disabled={state.loading}
+                onClick={() =>
+                  runAction(() => {
+                    const context = requireWorkspaceAndServer();
+
+                    if (defaultCurrency.trim().length !== 3) {
+                      throw new Error('Currency must be a 3-letter code, for example GBP.');
+                    }
+
+                    return apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
+                      tenantId: context.workspaceId,
+                      paidLogChannelId: paidLogChannelId || null,
+                      staffRoleIds: staffRoleIds
+                        .split(',')
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                      defaultCurrency: defaultCurrency.trim().toUpperCase(),
+                      ticketMetadataKey,
+                    });
+                  })
+                }
+              >
+                Save Server Settings
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Wallet className="size-4 text-primary" />
+                Voodoo Pay Integration
+              </CardTitle>
+              <CardDescription>
+                Multi-provider checkout mode where users select provider on Voodoo Pay.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="wallet-address">Merchant Wallet Address (Polygon)</Label>
+                <Input
+                  id="wallet-address"
+                  value={voodooMerchantWalletAddress}
+                  onChange={(event) => setVoodooMerchantWalletAddress(event.target.value)}
+                  placeholder="0x..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="checkout-domain">Checkout Domain</Label>
+                <Input
+                  id="checkout-domain"
+                  value={voodooCheckoutDomain}
+                  onChange={(event) => setVoodooCheckoutDomain(event.target.value)}
+                  placeholder="checkout.voodoo-pay.uk"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="callback-secret">Callback Secret</Label>
+                <Input
+                  id="callback-secret"
+                  type="password"
+                  value={voodooCallbackSecret}
+                  onChange={(event) => setVoodooCallbackSecret(event.target.value)}
+                  placeholder="at least 16 characters"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Use a random secret (32+ characters recommended). This app stores it and uses it to verify callback
+                  authenticity.
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                disabled={state.loading}
+                onClick={() =>
+                  runAction(() => {
+                    const context = requireWorkspaceAndServer();
+
+                    return apiCall(`/api/guilds/${context.discordServerId}/integrations/voodoopay`, 'PUT', {
+                      tenantId: context.workspaceId,
+                      merchantWalletAddress: voodooMerchantWalletAddress,
+                      checkoutDomain: voodooCheckoutDomain,
+                      callbackSecret: voodooCallbackSecret,
+                    });
+                  })
+                }
+              >
+                Save Voodoo Pay Integration
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+        <section className={cn('grid gap-6', isSuperAdmin ? 'xl:grid-cols-3' : 'xl:grid-cols-1')}>
+          <Card
+            className={cn(
+              'border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur',
+              isSuperAdmin ? 'xl:col-span-2' : '',
+            )}
           >
-            Create Product
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() =>
-              runAction(() => {
-                const context = requireWorkspaceAndServer();
-                return apiCall(
-                  `/api/guilds/${context.discordServerId}/products?tenantId=${encodeURIComponent(context.workspaceId)}`,
-                );
-              })
-            }
-          >
-            List Products
-          </button>
-        </div>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Globe className="size-4 text-primary" />
+                Products, Prices, and Customer Questions
+              </CardTitle>
+              <CardDescription>
+                Create structured products without JSON editing. This data powers the ticket sale flow.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="product-category">Product Category</Label>
+                  <Input
+                    id="product-category"
+                    value={productCategory}
+                    onChange={(event) => setProductCategory(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="product-name">Product Name</Label>
+                  <Input id="product-name" value={productName} onChange={(event) => setProductName(event.target.value)} />
+                </div>
+              </div>
 
-        {isSuperAdmin ? (
-          <div className="card grid" style={{ gap: '10px' }}>
-            <h3>Super Admin</h3>
-            <div>
-              <label>Global Bot Token</label>
-              <input value={botToken} onChange={(event) => setBotToken(event.target.value)} />
-            </div>
-            <button
-              type="button"
-              onClick={() => runAction(() => apiCall('/api/admin/bot-token', 'POST', { token: botToken }))}
-            >
-              Rotate Bot Token
-            </button>
-            <div className="grid cols-2">
-              <button type="button" className="secondary" onClick={() => runAction(() => apiCall('/api/admin/tenants'))}>
-                List All Tenants
-              </button>
-              <button type="button" className="secondary" onClick={() => runAction(() => apiCall('/api/admin/users'))}>
-                List All Users
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
+              <div className="space-y-2">
+                <Label htmlFor="product-description">Description</Label>
+                <Textarea
+                  id="product-description"
+                  value={productDescription}
+                  onChange={(event) => setProductDescription(event.target.value)}
+                  className="min-h-24"
+                />
+              </div>
 
-      <section className="card grid" style={{ gap: '8px' }}>
-        <h3>Latest Action</h3>
-        {state.loading ? <p>Processing request...</p> : null}
-        {state.error ? <p style={{ color: '#fca5a5' }}>{state.error}</p> : null}
-        {state.response ? <pre className="code">{state.response}</pre> : null}
-      </section>
+              <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={productActive}
+                  onChange={(event) => setProductActive(event.target.checked)}
+                  className="size-4 rounded border border-border bg-background"
+                />
+                Product active
+              </label>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Price Options</h3>
+                  <Badge variant="outline">{variants.length} option(s)</Badge>
+                </div>
+
+                <div className="space-y-2">
+                  {variants.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No price options yet.</p>
+                  ) : (
+                    variants.map((variant, index) => (
+                      <div
+                        key={`${variant.label}-${index}`}
+                        className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                      >
+                        <p className="text-sm">
+                          {variant.label}: {variant.priceMajor} {variant.currency}
+                        </p>
+                        <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="variant-label">Price Label</Label>
+                    <Input
+                      id="variant-label"
+                      value={variantLabelInput}
+                      onChange={(event) => setVariantLabelInput(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="variant-price">Price (major unit)</Label>
+                    <Input
+                      id="variant-price"
+                      value={variantPriceInput}
+                      onChange={(event) => setVariantPriceInput(event.target.value)}
+                      placeholder="9.99"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="variant-currency">Currency</Label>
+                    <Input
+                      id="variant-currency"
+                      value={variantCurrencyInput}
+                      maxLength={3}
+                      onChange={(event) => setVariantCurrencyInput(event.target.value.toUpperCase().slice(0, 3))}
+                    />
+                  </div>
+                </div>
+
+                <Button type="button" variant="outline" onClick={addPriceOption}>
+                  <Plus className="size-4" />
+                  Add Price Option
+                </Button>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Customer Questions
+                  </h3>
+                  <Badge variant="outline">{questions.length} question(s)</Badge>
+                </div>
+
+                <div className="space-y-2">
+                  {questions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No questions yet.</p>
+                  ) : (
+                    questions.map((question, index) => (
+                      <div
+                        key={`${question.key}-${index}`}
+                        className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{question.label}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {question.fieldType} • {question.required ? 'Required' : 'Optional'} •{' '}
+                            {question.sensitive ? 'Sensitive' : 'Not sensitive'}
+                          </p>
+                        </div>
+                        <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeQuestion(index)}>
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="question-key">Question Key</Label>
+                    <Input
+                      id="question-key"
+                      value={questionKeyInput}
+                      onChange={(event) => setQuestionKeyInput(event.target.value)}
+                      placeholder="email"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="question-label">Question Label</Label>
+                    <Input
+                      id="question-label"
+                      value={questionLabelInput}
+                      onChange={(event) => setQuestionLabelInput(event.target.value)}
+                      placeholder="What is your email?"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="question-type">Input Type</Label>
+                    <select
+                      id="question-type"
+                      className={nativeSelectClass}
+                      value={questionTypeInput}
+                      onChange={(event) => setQuestionTypeInput(event.target.value as FieldType)}
+                    >
+                      <option value="short_text">Short text</option>
+                      <option value="long_text">Long text</option>
+                      <option value="email">Email</option>
+                      <option value="number">Number</option>
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 self-end text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={questionRequiredInput}
+                      onChange={(event) => setQuestionRequiredInput(event.target.checked)}
+                      className="size-4 rounded border border-border bg-background"
+                    />
+                    Required
+                  </label>
+                  <label className="flex items-center gap-2 self-end text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={questionSensitiveInput}
+                      onChange={(event) => setQuestionSensitiveInput(event.target.checked)}
+                      className="size-4 rounded border border-border bg-background"
+                    />
+                    Sensitive
+                  </label>
+                </div>
+
+                <Button type="button" variant="outline" onClick={addQuestion}>
+                  <Plus className="size-4" />
+                  Add Question
+                </Button>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row">
+                <Button
+                  type="button"
+                  disabled={state.loading}
+                  className="sm:flex-1"
+                  onClick={() =>
+                    runAction(async () => {
+                      const context = requireWorkspaceAndServer();
+
+                      if (variants.length === 0) {
+                        throw new Error('Add at least one price option.');
+                      }
+
+                      const preparedVariants = variants.map((variant) => {
+                        const currency = variant.currency.trim().toUpperCase();
+
+                        if (currency.length !== 3) {
+                          throw new Error(`Currency for variant "${variant.label}" must be 3 letters.`);
+                        }
+
+                        return {
+                          label: variant.label.trim(),
+                          priceMinor: parsePriceToMinor(variant.priceMajor),
+                          currency,
+                        };
+                      });
+
+                      const preparedQuestions = questions.map((question, sortOrder) => ({
+                        ...question,
+                        sortOrder,
+                      }));
+
+                      return apiCall(`/api/guilds/${context.discordServerId}/products`, 'POST', {
+                        tenantId: context.workspaceId,
+                        product: {
+                          category: productCategory,
+                          name: productName,
+                          description: productDescription,
+                          active: productActive,
+                          variants: preparedVariants,
+                        },
+                        formFields: preparedQuestions,
+                      });
+                    })
+                  }
+                >
+                  Create Product
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={state.loading}
+                  className="sm:flex-1"
+                  onClick={() =>
+                    runAction(() => {
+                      const context = requireWorkspaceAndServer();
+
+                      return apiCall(
+                        `/api/guilds/${context.discordServerId}/products?tenantId=${encodeURIComponent(context.workspaceId)}`,
+                      );
+                    })
+                  }
+                >
+                  List Products
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          {isSuperAdmin ? (
+            <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Shield className="size-4 text-primary" />
+                  Super Admin
+                </CardTitle>
+                <CardDescription>Global operations only visible to super-admin sessions.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="global-bot-token">Global Bot Token</Label>
+                  <Input
+                    id="global-bot-token"
+                    value={botToken}
+                    onChange={(event) => setBotToken(event.target.value)}
+                    type="password"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  disabled={state.loading}
+                  onClick={() =>
+                    runAction(() => {
+                      if (!botToken.trim()) {
+                        throw new Error('Bot token is required.');
+                      }
+
+                      return apiCall('/api/admin/bot-token', 'POST', { token: botToken.trim() });
+                    })
+                  }
+                >
+                  Rotate Bot Token
+                </Button>
+
+                <Separator />
+
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={state.loading}
+                    onClick={() => runAction(() => apiCall('/api/admin/tenants'))}
+                  >
+                    List All Tenants
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={state.loading}
+                    onClick={() => runAction(() => apiCall('/api/admin/users'))}
+                  >
+                    List All Users
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+        </section>
+
+        <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Activity className="size-4 text-primary" />
+              Latest Action
+            </CardTitle>
+            <CardDescription>Real-time result from your last dashboard API call.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {state.loading ? (
+              <div className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Processing request...
+              </div>
+            ) : null}
+
+            {state.error ? (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 size-4" />
+                <span>{state.error}</span>
+              </div>
+            ) : null}
+
+            {state.response ? (
+              <div className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                <p className="mb-2 inline-flex items-center gap-2 text-emerald-200">
+                  <CheckCircle2 className="size-4" />
+                  Request succeeded
+                </p>
+                <pre className="whitespace-pre-wrap text-xs leading-relaxed text-emerald-100/90">{state.response}</pre>
+              </div>
+            ) : null}
+
+            {!state.loading && !state.error && !state.response ? (
+              <p className="text-sm text-muted-foreground">No actions yet in this session.</p>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
     </main>
   );
 }
+
