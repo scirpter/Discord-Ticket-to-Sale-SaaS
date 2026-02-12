@@ -53,6 +53,9 @@ export default function DashboardPage() {
   const [wooWebhookSecret, setWooWebhookSecret] = useState('');
   const [wooConsumerKey, setWooConsumerKey] = useState('');
   const [wooConsumerSecret, setWooConsumerSecret] = useState('');
+  const [voodooMerchantWalletAddress, setVoodooMerchantWalletAddress] = useState('');
+  const [voodooCheckoutDomain, setVoodooCheckoutDomain] = useState('checkout.voodoo-pay.uk');
+  const [voodooCallbackSecret, setVoodooCallbackSecret] = useState('');
 
   const [productPayload, setProductPayload] = useState(`{
   "category": "Accounts",
@@ -117,8 +120,8 @@ export default function DashboardPage() {
       <section className="card grid" style={{ gap: '12px' }}>
         <h1>Control Center</h1>
         <p>
-          Use this panel to configure tenant scope, guild sales settings, products/forms, Woo webhooks, and
-          super-admin controls.
+          Use this panel to configure tenant scope, guild sales settings, products/forms, Woo and Voodoo Pay
+          integrations, and super-admin controls.
         </p>
       </section>
 
@@ -175,7 +178,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="grid cols-2">
+      <section className="grid cols-3">
         <div className="card grid" style={{ gap: '10px' }}>
           <h3>Guild Config</h3>
           <div>
@@ -254,6 +257,51 @@ export default function DashboardPage() {
             }
           >
             Save Woo Integration
+          </button>
+        </div>
+
+        <div className="card grid" style={{ gap: '10px' }}>
+          <h3>Voodoo Pay Integration</h3>
+          <p>Multi-provider checkout mode. Customer selects provider on hosted Voodoo Pay page.</p>
+          <div>
+            <label>Merchant Wallet Address (Polygon)</label>
+            <input
+              value={voodooMerchantWalletAddress}
+              onChange={(event) => setVoodooMerchantWalletAddress(event.target.value)}
+              placeholder="0x..."
+            />
+          </div>
+          <div>
+            <label>Checkout Domain</label>
+            <input
+              value={voodooCheckoutDomain}
+              onChange={(event) => setVoodooCheckoutDomain(event.target.value)}
+              placeholder="checkout.voodoo-pay.uk"
+            />
+          </div>
+          <div>
+            <label>Callback Secret</label>
+            <input
+              type="password"
+              value={voodooCallbackSecret}
+              onChange={(event) => setVoodooCallbackSecret(event.target.value)}
+              placeholder="at least 16 characters"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              runAction(() =>
+                apiCall(`/api/guilds/${guildId}/integrations/voodoopay`, 'PUT', {
+                  tenantId,
+                  merchantWalletAddress: voodooMerchantWalletAddress,
+                  checkoutDomain: voodooCheckoutDomain,
+                  callbackSecret: voodooCallbackSecret,
+                }),
+              )
+            }
+          >
+            Save Voodoo Pay Integration
           </button>
         </div>
       </section>
