@@ -499,7 +499,7 @@ export default function DashboardPage() {
               placeholder="at least 16 characters"
             />
             <p style={{ marginTop: '6px', fontSize: '0.85rem', opacity: 0.85 }}>
-              Use a random secret (32+ characters recommended). Save the same value in Voodoo Pay callback config.
+              Use a random secret (32+ characters recommended). This app stores it and uses it to verify callback authenticity.
             </p>
           </div>
           <button
