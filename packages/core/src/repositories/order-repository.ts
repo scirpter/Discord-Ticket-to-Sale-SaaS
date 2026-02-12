@@ -167,7 +167,7 @@ export class OrderRepository {
     tenantId: string;
     guildId: string;
     orderSessionId: string;
-    wooOrderId: string;
+    providerOrderId: string;
     status: string;
     priceMinor: number;
     currency: string;
@@ -179,7 +179,7 @@ export class OrderRepository {
         tenantId: input.tenantId,
         guildId: input.guildId,
         orderSessionId: input.orderSessionId,
-        wooOrderId: input.wooOrderId,
+        wooOrderId: input.providerOrderId,
         status: input.status,
         priceMinor: input.priceMinor,
         currency: input.currency,
@@ -238,6 +238,7 @@ export class OrderRepository {
   public async createWebhookEvent(input: {
     tenantId: string;
     guildId: string | null;
+    provider: 'woocommerce' | 'voodoopay';
     deliveryId: string;
     topic: string;
     signatureValid: boolean;
@@ -259,7 +260,7 @@ export class OrderRepository {
       id: webhookEventId,
       tenantId: input.tenantId,
       guildId: input.guildId,
-      provider: 'woocommerce',
+      provider: input.provider,
       providerDeliveryId: input.deliveryId,
       topic: input.topic,
       signatureValid: input.signatureValid,

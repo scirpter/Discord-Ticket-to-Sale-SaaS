@@ -1,18 +1,20 @@
-﻿import { err, ok, type Result } from 'neverthrow';
+import { err, ok, type Result } from 'neverthrow';
 import { z } from 'zod';
 
 import { getEnv } from '../config/env.js';
 import { AppError, fromUnknownError, validationError } from '../domain/errors.js';
 import type { SessionPayload } from '../security/session-token.js';
 import { signCheckoutToken } from '../security/checkout-token.js';
+import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
 import { OrderRepository } from '../repositories/order-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
 import { TicketMetadataRepository } from '../repositories/ticket-metadata-repository.js';
-import { IntegrationService } from './integration-service.js';
 import { AuthorizationService } from './authorization-service.js';
+import { IntegrationService } from './integration-service.js';
 
 const answerSchema = z.record(z.string(), z.string().max(2000));
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type SaleSessionInput = {
   tenantId: string;
@@ -180,12 +182,23 @@ export class SaleService {
       return err(new AppError('VARIANT_NOT_FOUND', 'Variant not found', 404));
     }
 
-    const integration = await this.integrationService.getResolvedWooIntegrationByGuild({
+    const voodooIntegration = await this.integrationService.getResolvedVoodooPayIntegrationByGuild({
       tenantId: input.tenantId,
       guildId: input.guildId,
     });
-    if (integration.isErr()) {
-      return err(integration.error);
+    const wooIntegration = await this.integrationService.getResolvedWooIntegrationByGuild({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+    });
+
+    if (voodooIntegration.isErr() && wooIntegration.isErr()) {
+      return err(
+        new AppError(
+          'PAYMENT_INTEGRATION_NOT_CONFIGURED',
+          'No payment integration configured for this guild',
+          404,
+        ),
+      );
     }
 
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -215,10 +228,41 @@ export class SaleService {
       this.env.CHECKOUT_SIGNING_SECRET,
     );
 
+    if (voodooIntegration.isOk()) {
+      const voodooCheckout = await this.buildVoodooPayCheckoutUrl({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        orderSessionId: orderSession.id,
+        variantPriceMinor: variant.priceMinor,
+        currency: variant.currency,
+        answers: parsedAnswers.data,
+        integration: voodooIntegration.value,
+        token,
+      });
+
+      if (voodooCheckout.isErr()) {
+        await this.tryCancelPendingOrderSession({
+          tenantId: input.tenantId,
+          orderSessionId: orderSession.id,
+        });
+        return err(voodooCheckout.error);
+      }
+
+      return ok({
+        orderSessionId: orderSession.id,
+        checkoutUrl: voodooCheckout.value,
+        expiresAt: expiresAt.toISOString(),
+      });
+    }
+
+    if (wooIntegration.isErr()) {
+      return err(wooIntegration.error);
+    }
+
     const checkoutBase =
       variant.wooCheckoutPath && variant.wooCheckoutPath.length > 0
-        ? new URL(variant.wooCheckoutPath, integration.value.wpBaseUrl)
-        : new URL(integration.value.wpBaseUrl);
+        ? new URL(variant.wooCheckoutPath, wooIntegration.value.wpBaseUrl)
+        : new URL(wooIntegration.value.wpBaseUrl);
 
     checkoutBase.searchParams.set('vd_token', token);
     checkoutBase.searchParams.set('vd_order_session_id', orderSession.id);
@@ -228,6 +272,108 @@ export class SaleService {
       checkoutUrl: checkoutBase.toString(),
       expiresAt: expiresAt.toISOString(),
     });
+  }
+
+  private async buildVoodooPayCheckoutUrl(input: {
+    tenantId: string;
+    guildId: string;
+    orderSessionId: string;
+    variantPriceMinor: number;
+    currency: string;
+    answers: Record<string, string>;
+    integration: {
+      tenantWebhookKey: string;
+      merchantWalletAddress: string;
+      callbackSecret: string;
+      checkoutDomain: string;
+    };
+    token: string;
+  }): Promise<Result<string, AppError>> {
+    try {
+      const callbackToken = signVoodooCallbackToken(
+        {
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          orderSessionId: input.orderSessionId,
+        },
+        input.integration.callbackSecret,
+      );
+
+      const callbackUrl = new URL(
+        `/api/webhooks/voodoopay/${input.integration.tenantWebhookKey}`,
+        this.env.BOT_PUBLIC_URL,
+      );
+      callbackUrl.searchParams.set('order_session_id', input.orderSessionId);
+      callbackUrl.searchParams.set('cb_token', callbackToken);
+
+      const createWalletUrl = new URL('/control/wallet.php', this.env.VOODOO_PAY_API_BASE_URL);
+      createWalletUrl.searchParams.set('address', input.integration.merchantWalletAddress);
+      createWalletUrl.searchParams.set('callback', callbackUrl.toString());
+
+      const walletResponse = await fetch(createWalletUrl.toString());
+      if (!walletResponse.ok) {
+        return err(
+          new AppError(
+            'VOODOO_PAY_CREATE_WALLET_FAILED',
+            `Voodoo Pay wallet creation failed with status ${walletResponse.status}`,
+            502,
+          ),
+        );
+      }
+
+      const walletPayload = (await walletResponse.json()) as {
+        address_in?: unknown;
+        ipn_token?: unknown;
+      };
+
+      if (typeof walletPayload.address_in !== 'string' || walletPayload.address_in.length === 0) {
+        return err(
+          new AppError('VOODOO_PAY_INVALID_WALLET_RESPONSE', 'Missing address_in in wallet response', 502),
+        );
+      }
+
+      const checkoutUrl = new URL('/pay.php', this.env.VOODOO_PAY_CHECKOUT_BASE_URL);
+      checkoutUrl.searchParams.set('address', walletPayload.address_in);
+      checkoutUrl.searchParams.set('amount', (input.variantPriceMinor / 100).toFixed(2));
+      checkoutUrl.searchParams.set('currency', input.currency);
+      checkoutUrl.searchParams.set('domain', input.integration.checkoutDomain);
+      checkoutUrl.searchParams.set('vd_token', input.token);
+      checkoutUrl.searchParams.set('vd_order_session_id', input.orderSessionId);
+
+      const customerEmail = this.findCustomerEmail(input.answers);
+      if (customerEmail) {
+        checkoutUrl.searchParams.set('email', customerEmail);
+      }
+
+      if (typeof walletPayload.ipn_token === 'string' && walletPayload.ipn_token.length > 0) {
+        checkoutUrl.searchParams.set('ipn_token', walletPayload.ipn_token);
+      }
+
+      return ok(checkoutUrl.toString());
+    } catch (error) {
+      return err(fromUnknownError(error, 'VOODOO_PAY_CHECKOUT_FAILED'));
+    }
+  }
+
+  private findCustomerEmail(answers: Record<string, string>): string | null {
+    for (const value of Object.values(answers)) {
+      if (emailRegex.test(value.trim())) {
+        return value.trim();
+      }
+    }
+
+    return null;
+  }
+
+  private async tryCancelPendingOrderSession(input: {
+    tenantId: string;
+    orderSessionId: string;
+  }): Promise<void> {
+    try {
+      await this.orderRepository.cancelOrderSession(input);
+    } catch {
+      // ignore cancellation errors and preserve original failure response.
+    }
   }
 
   public async cancelLatestPendingSession(input: {

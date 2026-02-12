@@ -15,6 +15,7 @@ export * from './repositories/user-repository.js';
 export * from './security/checkout-token.js';
 export * from './security/encryption.js';
 export * from './security/session-token.js';
+export * from './security/voodoo-callback-token.js';
 export * from './security/webhook-signature.js';
 export * from './services/admin-service.js';
 export * from './services/auth-service.js';

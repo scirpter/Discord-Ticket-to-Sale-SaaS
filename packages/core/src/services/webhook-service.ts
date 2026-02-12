@@ -1,4 +1,4 @@
-﻿import pRetry, { AbortError } from 'p-retry';
+import pRetry, { AbortError } from 'p-retry';
 import { err, ok, type Result } from 'neverthrow';
 
 import { AppError, fromUnknownError } from '../domain/errors.js';
@@ -7,7 +7,8 @@ import { postMessageToDiscordChannel } from '../integrations/discord-rest.js';
 import { OrderRepository } from '../repositories/order-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
-import { verifyWooWebhookSignature, isPaidWooStatus } from '../security/webhook-signature.js';
+import { verifyVoodooCallbackToken } from '../security/voodoo-callback-token.js';
+import { isPaidWooStatus, verifyWooWebhookSignature } from '../security/webhook-signature.js';
 import { maskAnswers } from '../utils/mask.js';
 import { enqueueWebhookTask } from '../workers/webhook-queue.js';
 import { AdminService } from './admin-service.js';
@@ -118,6 +119,7 @@ export class WebhookService {
       const created = await this.orderRepository.createWebhookEvent({
         tenantId: integration.tenantId,
         guildId: integration.guildId,
+        provider: 'woocommerce',
         deliveryId,
         topic,
         signatureValid,
@@ -142,7 +144,7 @@ export class WebhookService {
       void enqueueWebhookTask(async () => {
         await pRetry(
           async () => {
-            await this.processPaidEvent({
+            await this.processWooPaidEvent({
               integration,
               payload,
               webhookEventId: created.webhookEventId,
@@ -178,7 +180,107 @@ export class WebhookService {
     }
   }
 
-  private async processPaidEvent(input: {
+  public async handleVoodooPayCallback(input: {
+    tenantWebhookKey: string;
+    query: Record<string, string>;
+  }): Promise<Result<{ status: 'accepted' | 'duplicate' }, AppError>> {
+    try {
+      const integrationResult = await this.integrationService.getResolvedVoodooPayIntegrationByWebhookKey(
+        input.tenantWebhookKey,
+      );
+      if (integrationResult.isErr()) {
+        return err(integrationResult.error);
+      }
+
+      const integration = integrationResult.value;
+      const orderSessionId = input.query.order_session_id;
+      if (!orderSessionId) {
+        return err(new AppError('MISSING_ORDER_SESSION_ID', 'Missing order_session_id in callback', 400));
+      }
+
+      const signatureValid = verifyVoodooCallbackToken({
+        payload: {
+          tenantId: integration.tenantId,
+          guildId: integration.guildId,
+          orderSessionId,
+        },
+        secret: integration.callbackSecret,
+        providedToken: input.query.cb_token,
+      });
+
+      const deliveryId =
+        input.query.txid_in ??
+        input.query.txid_out ??
+        input.query.ipn_token ??
+        `session-${orderSessionId}-${Date.now()}`;
+
+      const created = await this.orderRepository.createWebhookEvent({
+        tenantId: integration.tenantId,
+        guildId: integration.guildId,
+        provider: 'voodoopay',
+        deliveryId,
+        topic: 'callback',
+        signatureValid,
+        payload: input.query,
+      });
+
+      if (!created.created) {
+        return ok({ status: 'duplicate' });
+      }
+
+      if (!signatureValid) {
+        await this.orderRepository.markWebhookFailed({
+          webhookEventId: created.webhookEventId,
+          failureReason: 'Invalid callback token',
+          attemptCount: 1,
+          nextRetryAt: null,
+        });
+
+        return err(new AppError('INVALID_CALLBACK_SIGNATURE', 'Invalid callback token', 401));
+      }
+
+      void enqueueWebhookTask(async () => {
+        await pRetry(
+          async () => {
+            await this.processVoodooPayPaidEvent({
+              tenantId: integration.tenantId,
+              guildId: integration.guildId,
+              orderSessionId,
+              query: input.query,
+              webhookEventId: created.webhookEventId,
+            });
+          },
+          {
+            retries: 3,
+            minTimeout: 1_000,
+            factor: 2,
+            onFailedAttempt: async (error) => {
+              const nextRetryAt = new Date(Date.now() + error.attemptNumber * 1000);
+              await this.orderRepository.markWebhookFailed({
+                webhookEventId: created.webhookEventId,
+                failureReason: error.error instanceof Error ? error.error.message : 'Webhook retry failure',
+                attemptCount: error.attemptNumber,
+                nextRetryAt,
+              });
+            },
+          },
+        ).catch(async (error) => {
+          await this.orderRepository.markWebhookFailed({
+            webhookEventId: created.webhookEventId,
+            failureReason: error instanceof Error ? error.message : 'Unknown webhook processing failure',
+            attemptCount: 4,
+            nextRetryAt: null,
+          });
+        });
+      });
+
+      return ok({ status: 'accepted' });
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  private async processWooPaidEvent(input: {
     integration: {
       tenantId: string;
       guildId: string;
@@ -232,7 +334,7 @@ export class WebhookService {
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
       orderSessionId: orderSession.id,
-      wooOrderId: String(order.id),
+      providerOrderId: String(order.id),
       status: order.status,
       priceMinor: variant.priceMinor || toMinor(order.total),
       currency: variant.currency || order.currency || 'USD',
@@ -287,6 +389,7 @@ export class WebhookService {
 
     const message = [
       '**Order Paid**',
+      `Provider: WooCommerce`,
       `Order Session: ${orderSession.id}`,
       `Woo Order: ${order.id}`,
       `Product: ${product.name}`,
@@ -299,6 +402,111 @@ export class WebhookService {
       '**Order Notes**',
       `Internal: ${truncate(notes.latestInternal, 240) ?? '(none)'}`,
       `Customer: ${truncate(notes.latestCustomer, 240) ?? '(none)'}`,
+    ].join('\n');
+
+    await postMessageToDiscordChannel({
+      botToken: botTokenResult.value,
+      channelId: config.paidLogChannelId,
+      content: message,
+    });
+
+    await this.orderRepository.markWebhookProcessed(input.webhookEventId);
+  }
+
+  private async processVoodooPayPaidEvent(input: {
+    tenantId: string;
+    guildId: string;
+    orderSessionId: string;
+    query: Record<string, string>;
+    webhookEventId: string;
+  }): Promise<void> {
+    if (!input.query.txid_in && !input.query.txid_out) {
+      await this.orderRepository.markWebhookProcessed(input.webhookEventId);
+      return;
+    }
+
+    const orderSession = await this.orderRepository.getOrderSession({
+      tenantId: input.tenantId,
+      orderSessionId: input.orderSessionId,
+    });
+
+    if (!orderSession) {
+      throw new AbortError('Order session not found for callback');
+    }
+
+    const product = await this.productRepository.getById({
+      tenantId: orderSession.tenantId,
+      guildId: orderSession.guildId,
+      productId: orderSession.productId,
+    });
+
+    if (!product) {
+      throw new AbortError('Product not found for paid order');
+    }
+
+    const variant = product.variants.find((item) => item.id === orderSession.variantId);
+    if (!variant) {
+      throw new AbortError('Variant not found for paid order');
+    }
+
+    const providerOrderId = input.query.txid_in ?? input.query.txid_out ?? input.orderSessionId;
+    const paymentReference = input.query.txid_out ?? input.query.txid_in ?? null;
+
+    const created = await this.orderRepository.createPaidOrder({
+      tenantId: orderSession.tenantId,
+      guildId: orderSession.guildId,
+      orderSessionId: orderSession.id,
+      providerOrderId,
+      status: 'paid',
+      priceMinor: variant.priceMinor,
+      currency: variant.currency,
+      paymentReference,
+    });
+
+    if (!created) {
+      await this.orderRepository.markWebhookDuplicate(input.webhookEventId);
+      return;
+    }
+
+    await this.orderRepository.markOrderSessionPaid({
+      tenantId: orderSession.tenantId,
+      orderSessionId: orderSession.id,
+    });
+
+    const config = await this.tenantRepository.getGuildConfig({
+      tenantId: orderSession.tenantId,
+      guildId: orderSession.guildId,
+    });
+
+    if (!config?.paidLogChannelId) {
+      throw new AbortError('Paid log channel is not configured');
+    }
+
+    const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
+    const maskedAnswers = maskAnswers(orderSession.answers, sensitiveKeys);
+    const answersContent = Object.entries(maskedAnswers)
+      .map(([key, value]) => `- ${key}: ${value}`)
+      .join('\n');
+
+    const botTokenResult = await this.adminService.getResolvedBotToken();
+    if (botTokenResult.isErr()) {
+      throw new AbortError(botTokenResult.error.message);
+    }
+
+    const message = [
+      '**Order Paid**',
+      `Provider: Voodoo Pay`,
+      `Order Session: ${orderSession.id}`,
+      `Transaction In: ${input.query.txid_in ?? '(none)'}`,
+      `Transaction Out: ${input.query.txid_out ?? '(none)'}`,
+      `Coin: ${input.query.coin ?? '(unknown)'}`,
+      `Forwarded Value: ${input.query.value_forwarded_coin ?? '(unknown)'}`,
+      `Product: ${product.name}`,
+      `Variant: ${variant.label}`,
+      `Price: ${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`,
+      '',
+      '**Answers**',
+      answersContent || '- (none)',
     ].join('\n');
 
     await postMessageToDiscordChannel({
@@ -342,5 +550,3 @@ export class WebhookService {
     };
   }
 }
-
-

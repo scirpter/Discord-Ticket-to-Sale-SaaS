@@ -29,6 +29,8 @@ const envSchema = z.object({
   SUPER_ADMIN_DISCORD_IDS: z.string().default(''),
   BOT_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
   DISCORD_API_BASE_URL: z.string().url().default('https://discord.com/api/v10'),
+  VOODOO_PAY_API_BASE_URL: z.string().url().default('https://api.voodoo-pay.uk'),
+  VOODOO_PAY_CHECKOUT_BASE_URL: z.string().url().default('https://checkout.voodoo-pay.uk'),
 });
 
 export type AppEnv = z.infer<typeof envSchema> & {

@@ -1,6 +1,6 @@
 ﻿# Ticket-to-Sale SaaS
 
-Multi-tenant Discord bot + web dashboard for ticket-based sales with WooCommerce payment confirmation.
+Multi-tenant Discord bot + web dashboard for ticket-based sales with WooCommerce and Voodoo Pay payment confirmation.
 
 ## Stack
 
@@ -59,7 +59,9 @@ Copy `.env.example` to `.env` and fill values.
 - Bot shows product+variant select.
 - Bot gathers custom form answers through modals.
 - Bot creates `order_session` and sends signed checkout URL to ticket.
+- If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
 - Woo webhook confirms payment (`processing`/`completed`).
+- Voodoo Pay callback endpoint can also finalize paid orders.
 - API verifies signature, dedupes, retries on failure, fetches Woo order notes.
 - Bot posts paid-order details to configured paid-log channel (sensitive fields masked).
 

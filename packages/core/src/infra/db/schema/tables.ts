@@ -204,6 +204,38 @@ export const tenantIntegrationsWoo = mysqlTable(
   }),
 );
 
+export const tenantIntegrationsVoodooPay = mysqlTable(
+  'tenant_integrations_voodoo_pay',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    merchantWalletAddress: varchar('merchant_wallet_address', { length: 128 }).notNull(),
+    checkoutDomain: varchar('checkout_domain', { length: 120 }).notNull().default('checkout.voodoo-pay.uk'),
+    tenantWebhookKey: varchar('tenant_webhook_key', { length: 64 }).notNull(),
+    callbackSecretEncrypted: text('callback_secret_encrypted').notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildUnique: uniqueIndex('tenant_integrations_voodoo_pay_tenant_guild_uq').on(
+      table.tenantId,
+      table.guildId,
+    ),
+    webhookKeyUnique: uniqueIndex('tenant_integrations_voodoo_pay_webhook_key_uq').on(
+      table.tenantWebhookKey,
+    ),
+    tenantGuildIdx: index('tenant_integrations_voodoo_pay_tenant_guild_idx').on(
+      table.tenantId,
+      table.guildId,
+    ),
+    tenantCreatedIdx: index('tenant_integrations_voodoo_pay_tenant_created_idx').on(
+      table.tenantId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const orderSessions = mysqlTable(
   'order_sessions',
   {
@@ -277,7 +309,7 @@ export const webhookEvents = mysqlTable(
     id: varchar('id', { length: 26 }).primaryKey(),
     tenantId: varchar('tenant_id', { length: 26 }).notNull(),
     guildId: varchar('guild_id', { length: 32 }),
-    provider: mysqlEnum('provider', ['woocommerce']).notNull().default('woocommerce'),
+    provider: mysqlEnum('provider', ['woocommerce', 'voodoopay']).notNull().default('woocommerce'),
     providerDeliveryId: varchar('provider_delivery_id', { length: 80 }).notNull(),
     topic: varchar('topic', { length: 120 }).notNull(),
     signatureValid: boolean('signature_valid').notNull(),

@@ -1,8 +1,8 @@
-﻿import { and, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
-import { tenantIntegrationsWoo } from '../infra/db/schema/index.js';
+import { tenantIntegrationsVoodooPay, tenantIntegrationsWoo } from '../infra/db/schema/index.js';
 
 export type WooIntegrationRecord = {
   id: string;
@@ -13,6 +13,16 @@ export type WooIntegrationRecord = {
   webhookSecretEncrypted: string;
   consumerKeyEncrypted: string;
   consumerSecretEncrypted: string;
+};
+
+export type VoodooPayIntegrationRecord = {
+  id: string;
+  tenantId: string;
+  guildId: string;
+  merchantWalletAddress: string;
+  checkoutDomain: string;
+  tenantWebhookKey: string;
+  callbackSecretEncrypted: string;
 };
 
 export class IntegrationRepository {
@@ -130,6 +140,114 @@ export class IntegrationRepository {
       webhookSecretEncrypted: row.webhookSecretEncrypted,
       consumerKeyEncrypted: row.consumerKeyEncrypted,
       consumerSecretEncrypted: row.consumerSecretEncrypted,
+    };
+  }
+
+  public async upsertVoodooPayIntegration(input: {
+    tenantId: string;
+    guildId: string;
+    merchantWalletAddress: string;
+    checkoutDomain: string;
+    tenantWebhookKey: string;
+    callbackSecretEncrypted: string;
+  }): Promise<VoodooPayIntegrationRecord> {
+    const existing = await this.db.query.tenantIntegrationsVoodooPay.findFirst({
+      where: and(
+        eq(tenantIntegrationsVoodooPay.tenantId, input.tenantId),
+        eq(tenantIntegrationsVoodooPay.guildId, input.guildId),
+      ),
+    });
+
+    if (existing) {
+      await this.db
+        .update(tenantIntegrationsVoodooPay)
+        .set({
+          merchantWalletAddress: input.merchantWalletAddress,
+          checkoutDomain: input.checkoutDomain,
+          tenantWebhookKey: input.tenantWebhookKey,
+          callbackSecretEncrypted: input.callbackSecretEncrypted,
+          updatedAt: new Date(),
+        })
+        .where(eq(tenantIntegrationsVoodooPay.id, existing.id));
+
+      return {
+        id: existing.id,
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        merchantWalletAddress: input.merchantWalletAddress,
+        checkoutDomain: input.checkoutDomain,
+        tenantWebhookKey: input.tenantWebhookKey,
+        callbackSecretEncrypted: input.callbackSecretEncrypted,
+      };
+    }
+
+    const id = ulid();
+    await this.db.insert(tenantIntegrationsVoodooPay).values({
+      id,
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      merchantWalletAddress: input.merchantWalletAddress,
+      checkoutDomain: input.checkoutDomain,
+      tenantWebhookKey: input.tenantWebhookKey,
+      callbackSecretEncrypted: input.callbackSecretEncrypted,
+    });
+
+    return {
+      id,
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      merchantWalletAddress: input.merchantWalletAddress,
+      checkoutDomain: input.checkoutDomain,
+      tenantWebhookKey: input.tenantWebhookKey,
+      callbackSecretEncrypted: input.callbackSecretEncrypted,
+    };
+  }
+
+  public async getVoodooPayIntegrationByGuild(input: {
+    tenantId: string;
+    guildId: string;
+  }): Promise<VoodooPayIntegrationRecord | null> {
+    const row = await this.db.query.tenantIntegrationsVoodooPay.findFirst({
+      where: and(
+        eq(tenantIntegrationsVoodooPay.tenantId, input.tenantId),
+        eq(tenantIntegrationsVoodooPay.guildId, input.guildId),
+      ),
+    });
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      guildId: row.guildId,
+      merchantWalletAddress: row.merchantWalletAddress,
+      checkoutDomain: row.checkoutDomain,
+      tenantWebhookKey: row.tenantWebhookKey,
+      callbackSecretEncrypted: row.callbackSecretEncrypted,
+    };
+  }
+
+  public async getVoodooPayIntegrationByWebhookKey(
+    tenantWebhookKey: string,
+  ): Promise<VoodooPayIntegrationRecord | null> {
+    const row = await this.db.query.tenantIntegrationsVoodooPay.findFirst({
+      where: eq(tenantIntegrationsVoodooPay.tenantWebhookKey, tenantWebhookKey),
+    });
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      guildId: row.guildId,
+      merchantWalletAddress: row.merchantWalletAddress,
+      checkoutDomain: row.checkoutDomain,
+      tenantWebhookKey: row.tenantWebhookKey,
+      callbackSecretEncrypted: row.callbackSecretEncrypted,
     };
   }
 }
