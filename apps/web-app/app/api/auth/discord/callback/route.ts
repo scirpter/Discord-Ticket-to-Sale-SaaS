@@ -1,10 +1,11 @@
-﻿import { AuthService } from '@voodoo/core';
-import type { NextRequest} from 'next/server';
+import { AuthService, getEnv } from '@voodoo/core';
+import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 import { jsonError } from '@/lib/http';
 
 const authService = new AuthService();
+const env = getEnv();
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
     }
 
-    const response = NextResponse.redirect(new URL('/dashboard', request.url));
+    const response = NextResponse.redirect(new URL('/dashboard', env.BOT_PUBLIC_URL));
     response.cookies.set('vd_session', result.value.sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
