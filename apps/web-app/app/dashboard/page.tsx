@@ -20,6 +20,7 @@ import { ModeToggle } from '@/components/mode-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
@@ -734,15 +735,16 @@ export default function DashboardPage() {
                 />
               </div>
 
-              <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
+              <div className="inline-flex items-center gap-2">
+                <Checkbox
+                  id="product-active"
                   checked={productActive}
-                  onChange={(event) => setProductActive(event.target.checked)}
-                  className="size-4 rounded border border-border bg-background"
+                  onCheckedChange={(checked) => setProductActive(checked === true)}
                 />
-                Product active
-              </label>
+                <Label htmlFor="product-active" className="text-sm font-normal text-muted-foreground">
+                  Product active
+                </Label>
+              </div>
 
               <Separator />
 
@@ -877,24 +879,26 @@ export default function DashboardPage() {
                       <option value="number">Number</option>
                     </select>
                   </div>
-                  <label className="flex items-center gap-2 self-end text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2 self-end">
+                    <Checkbox
+                      id="question-required"
                       checked={questionRequiredInput}
-                      onChange={(event) => setQuestionRequiredInput(event.target.checked)}
-                      className="size-4 rounded border border-border bg-background"
+                      onCheckedChange={(checked) => setQuestionRequiredInput(checked === true)}
                     />
-                    Required
-                  </label>
-                  <label className="flex items-center gap-2 self-end text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
+                    <Label htmlFor="question-required" className="text-sm font-normal text-muted-foreground">
+                      Required
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2 self-end">
+                    <Checkbox
+                      id="question-sensitive"
                       checked={questionSensitiveInput}
-                      onChange={(event) => setQuestionSensitiveInput(event.target.checked)}
-                      className="size-4 rounded border border-border bg-background"
+                      onCheckedChange={(checked) => setQuestionSensitiveInput(checked === true)}
                     />
-                    Sensitive
-                  </label>
+                    <Label htmlFor="question-sensitive" className="text-sm font-normal text-muted-foreground">
+                      Sensitive
+                    </Label>
+                  </div>
                 </div>
 
                 <Button type="button" variant="outline" onClick={addQuestion}>
