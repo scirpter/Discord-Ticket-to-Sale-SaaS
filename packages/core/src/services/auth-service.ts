@@ -30,9 +30,73 @@ function avatarUrl(discordUser: OAuthDiscordUser): string | null {
 }
 
 export class AuthService {
+  private static readonly DISCORD_GUILDS_CACHE_FRESH_MS = 60 * 1000;
+  private static readonly DISCORD_GUILDS_CACHE_STALE_MS = 5 * 60 * 1000;
+  private static readonly DISCORD_GUILDS_CACHE_MAX_ITEMS = 500;
+  private static readonly DISCORD_GUILDS_RATE_LIMIT_FALLBACK_MS = 30 * 1000;
+  private static readonly discordGuildsCache = new Map<
+    string,
+    {
+      guilds: OAuthDiscordGuild[];
+      freshUntil: number;
+      staleUntil: number;
+      rateLimitedUntil: number;
+    }
+  >();
+  private static readonly discordGuildsInFlight = new Map<string, Promise<Result<OAuthDiscordGuild[], AppError>>>();
+
   private readonly env = getEnv();
   private readonly userRepository = new UserRepository();
   private readonly tenantRepository = new TenantRepository();
+
+  private static readGuildCache(accessToken: string):
+    | {
+        guilds: OAuthDiscordGuild[];
+        freshUntil: number;
+        staleUntil: number;
+        rateLimitedUntil: number;
+      }
+    | null {
+    const entry = AuthService.discordGuildsCache.get(accessToken);
+    if (!entry) {
+      return null;
+    }
+
+    if (Date.now() > entry.staleUntil) {
+      AuthService.discordGuildsCache.delete(accessToken);
+      return null;
+    }
+
+    return entry;
+  }
+
+  private static writeGuildCache(accessToken: string, guilds: OAuthDiscordGuild[]): void {
+    const now = Date.now();
+    AuthService.discordGuildsCache.set(accessToken, {
+      guilds,
+      freshUntil: now + AuthService.DISCORD_GUILDS_CACHE_FRESH_MS,
+      staleUntil: now + AuthService.DISCORD_GUILDS_CACHE_STALE_MS,
+      rateLimitedUntil: 0,
+    });
+
+    while (AuthService.discordGuildsCache.size > AuthService.DISCORD_GUILDS_CACHE_MAX_ITEMS) {
+      const oldestKey = AuthService.discordGuildsCache.keys().next().value as string | undefined;
+      if (!oldestKey) {
+        break;
+      }
+
+      AuthService.discordGuildsCache.delete(oldestKey);
+    }
+  }
+
+  private static parseRetryAfterMs(retryAfterHeader: string | null): number {
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN;
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      return Math.ceil(retryAfterSeconds * 1000);
+    }
+
+    return AuthService.DISCORD_GUILDS_RATE_LIMIT_FALLBACK_MS;
+  }
 
   public buildLoginUrl(state: string): string {
     const scopes = ['identify', 'guilds'];
@@ -110,6 +174,7 @@ export class AuthService {
 
       const discordUser = (await userRes.json()) as OAuthDiscordUser;
       const discordGuilds = (await guildsRes.json()) as OAuthDiscordGuild[];
+      AuthService.writeGuildCache(accessToken, Array.isArray(discordGuilds) ? discordGuilds : []);
 
       const user = await this.userRepository.upsertDiscordUser({
         discordUserId: discordUser.id,
@@ -188,23 +253,74 @@ export class AuthService {
   public async listDiscordGuildsByAccessToken(
     accessToken: string,
   ): Promise<Result<OAuthDiscordGuild[], AppError>> {
-    if (!accessToken.trim()) {
+    const normalizedAccessToken = accessToken.trim();
+    if (!normalizedAccessToken) {
       return err(new AppError('DISCORD_ACCESS_TOKEN_MISSING', 'Discord access token is missing', 401));
     }
+
+    const cached = AuthService.readGuildCache(normalizedAccessToken);
+    const now = Date.now();
+    if (cached && now <= cached.freshUntil) {
+      return ok(cached.guilds);
+    }
+
+    if (cached && now <= cached.rateLimitedUntil) {
+      return ok(cached.guilds);
+    }
+
+    const inFlight = AuthService.discordGuildsInFlight.get(normalizedAccessToken);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = this.fetchDiscordGuildsByAccessToken(normalizedAccessToken, cached);
+    AuthService.discordGuildsInFlight.set(normalizedAccessToken, request);
+    try {
+      return await request;
+    } finally {
+      const activeRequest = AuthService.discordGuildsInFlight.get(normalizedAccessToken);
+      if (activeRequest === request) {
+        AuthService.discordGuildsInFlight.delete(normalizedAccessToken);
+      }
+    }
+  }
+
+  private async fetchDiscordGuildsByAccessToken(
+    normalizedAccessToken: string,
+    cached: {
+      guilds: OAuthDiscordGuild[];
+      freshUntil: number;
+      staleUntil: number;
+      rateLimitedUntil: number;
+    } | null,
+  ): Promise<Result<OAuthDiscordGuild[], AppError>> {
+    const currentCache = cached ?? AuthService.readGuildCache(normalizedAccessToken);
 
     try {
       const guildsRes = await fetch(`${this.env.DISCORD_API_BASE_URL}/users/@me/guilds`, {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${normalizedAccessToken}`,
         },
       });
 
       if (!guildsRes.ok) {
         if (guildsRes.status === 401) {
+          AuthService.discordGuildsCache.delete(normalizedAccessToken);
           return err(new AppError('DISCORD_ACCESS_TOKEN_INVALID', 'Discord login has expired. Please log in again.', 401));
         }
 
         if (guildsRes.status === 429) {
+          if (currentCache) {
+            const retryAfterMs = AuthService.parseRetryAfterMs(guildsRes.headers.get('retry-after'));
+
+            AuthService.discordGuildsCache.set(normalizedAccessToken, {
+              ...currentCache,
+              rateLimitedUntil: Date.now() + retryAfterMs,
+            });
+
+            return ok(currentCache.guilds);
+          }
+
           return err(
             new AppError(
               'DISCORD_GUILDS_RATE_LIMITED',
@@ -224,8 +340,15 @@ export class AuthService {
       }
 
       const guilds = (await guildsRes.json()) as OAuthDiscordGuild[];
-      return ok(Array.isArray(guilds) ? guilds : []);
+      const normalizedGuilds = Array.isArray(guilds) ? guilds : [];
+      AuthService.writeGuildCache(normalizedAccessToken, normalizedGuilds);
+
+      return ok(normalizedGuilds);
     } catch (error) {
+      if (currentCache) {
+        return ok(currentCache.guilds);
+      }
+
       return err(fromUnknownError(error, 'DISCORD_GUILDS_FETCH_EXCEPTION'));
     }
   }
