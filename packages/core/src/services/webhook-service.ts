@@ -152,6 +152,15 @@ const VOODOO_FAILED_STATUSES = new Set([
   'refunded',
 ]);
 
+const VOODOO_UNPAID_STATUSES = new Set([
+  'unpaid',
+  'pending',
+  'waiting',
+  'awaiting',
+  'processing',
+  ...VOODOO_FAILED_STATUSES,
+]);
+
 type VoodooPaymentState = {
   paid: boolean;
   status: string | null;
@@ -249,6 +258,69 @@ export class WebhookService {
   private readonly productRepository = new ProductRepository();
   private readonly tenantRepository = new TenantRepository();
   private readonly adminService = new AdminService();
+
+  private async checkVoodooPaymentStatus(
+    ipnToken: string | null,
+  ): Promise<{ paid: boolean; status: string | null }> {
+    if (!ipnToken) {
+      return { paid: false, status: null };
+    }
+
+    try {
+      const statusUrl = new URL('/control/payment-status.php', this.env.VOODOO_PAY_API_BASE_URL);
+      statusUrl.searchParams.set('ipn_token', ipnToken);
+
+      const response = await fetch(statusUrl.toString());
+      if (!response.ok) {
+        return { paid: false, status: null };
+      }
+
+      const raw = (await response.text()).trim();
+      if (!raw) {
+        return { paid: false, status: null };
+      }
+
+      let statusCandidate: string | null = null;
+      const maybeJson = raw.startsWith('{') || raw.startsWith('[');
+
+      if (maybeJson) {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown> | string | null;
+          if (typeof parsed === 'string') {
+            statusCandidate = parsed;
+          } else if (parsed && typeof parsed === 'object') {
+            statusCandidate = firstNonEmpty(
+              Object.fromEntries(
+                Object.entries(parsed).map(([key, value]) => [key, String(value ?? '')]),
+              ),
+              ['status', 'payment_status', 'result', 'state'],
+            );
+          }
+        } catch {
+          statusCandidate = raw;
+        }
+      } else {
+        statusCandidate = raw;
+      }
+
+      const normalized = normalizeStatus(statusCandidate);
+      if (!normalized) {
+        return { paid: false, status: null };
+      }
+
+      if (VOODOO_PAID_STATUSES.has(normalized)) {
+        return { paid: true, status: normalized };
+      }
+
+      if (VOODOO_UNPAID_STATUSES.has(normalized)) {
+        return { paid: false, status: normalized };
+      }
+
+      return { paid: false, status: normalized };
+    } catch {
+      return { paid: false, status: null };
+    }
+  }
 
   public async handleWooWebhook(input: {
     tenantWebhookKey: string;
@@ -618,10 +690,33 @@ export class WebhookService {
     query: Record<string, string>;
     webhookEventId: string;
   }): Promise<void> {
-    const paymentState = resolveVoodooPaymentState(input.query);
+    let paymentState = resolveVoodooPaymentState(input.query);
     if (!paymentState.paid) {
-      await this.orderRepository.markWebhookProcessed(input.webhookEventId);
-      return;
+      const ipnToken = firstNonEmpty(input.query, ['ipn_token', 'callback_id']);
+      const polledStatus = await this.checkVoodooPaymentStatus(ipnToken);
+      if (polledStatus.paid) {
+        paymentState = {
+          ...paymentState,
+          paid: true,
+          status: polledStatus.status ?? paymentState.status ?? 'paid',
+        };
+      } else {
+        logger.info(
+          {
+            provider: 'voodoopay',
+            tenantId: input.tenantId,
+            guildId: input.guildId,
+            orderSessionId: input.orderSessionId,
+            webhookEventId: input.webhookEventId,
+            callbackStatus: paymentState.status,
+            polledStatus: polledStatus.status,
+            queryKeys: Object.keys(input.query),
+          },
+          'voodoo callback received but payment is not settled',
+        );
+        await this.orderRepository.markWebhookProcessed(input.webhookEventId);
+        return;
+      }
     }
 
     const orderSession = await this.orderRepository.getOrderSession({
@@ -652,6 +747,7 @@ export class WebhookService {
       paymentState.txidIn ??
       paymentState.txidOut ??
       paymentState.transactionId ??
+      firstNonEmpty(input.query, ['ipn_token', 'callback_id']) ??
       input.orderSessionId;
     const paymentReference =
       paymentState.txidOut ?? paymentState.txidIn ?? paymentState.transactionId ?? null;
@@ -712,7 +808,7 @@ export class WebhookService {
       `Transaction Out: ${paymentState.txidOut ?? '(none)'}`,
       `Transaction: ${paymentState.transactionId ?? '(none)'}`,
       `Coin: ${input.query.coin ?? '(unknown)'}`,
-      `Forwarded Value: ${input.query.value_forwarded_coin ?? '(unknown)'}`,
+      `Forwarded Value: ${input.query.value_forwarded_coin ?? input.query.value_coin ?? '(unknown)'}`,
       `Product: ${product.name}`,
       `Variant: ${variant.label}`,
       `Price: ${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`,
