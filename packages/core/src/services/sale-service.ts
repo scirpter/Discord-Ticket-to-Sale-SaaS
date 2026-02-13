@@ -221,9 +221,6 @@ export class SaleService {
       },
       this.env.CHECKOUT_SIGNING_SECRET,
     );
-    const publicCheckoutUrl = this.buildPublicCheckoutUrl({
-      orderSessionId: orderSession.id,
-    });
 
     if (voodooIntegration.isOk()) {
       const voodooCheckout = await this.buildVoodooPayCheckoutUrl({
@@ -253,7 +250,7 @@ export class SaleService {
 
       return ok({
         orderSessionId: orderSession.id,
-        checkoutUrl: publicCheckoutUrl,
+        checkoutUrl: voodooCheckout.value,
         expiresAt: expiresAt.toISOString(),
       });
     }
@@ -279,7 +276,7 @@ export class SaleService {
 
     return ok({
       orderSessionId: orderSession.id,
-      checkoutUrl: publicCheckoutUrl,
+      checkoutUrl: providerCheckoutUrl,
       expiresAt: expiresAt.toISOString(),
     });
   }
@@ -373,11 +370,6 @@ export class SaleService {
     }
 
     return null;
-  }
-
-  private buildPublicCheckoutUrl(input: { orderSessionId: string }): string {
-    const checkoutUrl = new URL(`/checkout/${input.orderSessionId}`, this.env.BOT_PUBLIC_URL);
-    return checkoutUrl.toString();
   }
 
   private async tryCancelPendingOrderSession(input: {

@@ -1,7 +1,5 @@
-﻿import {
+import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
@@ -224,24 +222,12 @@ export async function sendCheckoutMessage(
     customerDiscordUserId: string;
   },
 ): Promise<void> {
-  const payButton = new ButtonBuilder()
-    .setStyle(ButtonStyle.Link)
-    .setURL(input.checkoutUrl)
-    .setLabel('Pay Now');
-
-  const cancelButton = new ButtonBuilder()
-    .setStyle(ButtonStyle.Danger)
-    .setCustomId('sale:cancel')
-    .setLabel('Cancel Sale');
-
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(payButton, cancelButton);
-
   await channel.send({
     content: [
       `Sale created for <@${input.customerDiscordUserId}>.`,
       `Order Session: \`${input.orderSessionId}\``,
-      'Click **Pay Now** to continue checkout.',
+      `Checkout: [Click here to pay](${input.checkoutUrl})`,
     ].join('\n'),
-    components: [row],
   });
 }
+
