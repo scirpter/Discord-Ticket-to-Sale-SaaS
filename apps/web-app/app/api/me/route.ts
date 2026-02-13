@@ -73,7 +73,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           .sort((a, b) => a.name.localeCompare(b.name));
       }
     } else {
-      discordGuildsError = 'Discord server list unavailable. Please log in again.';
+      discordGuildsError =
+        'Discord server list unavailable. Please log in again. If this repeats, ensure you are logging in and using the dashboard on the exact same domain (no mixing www/non-www).';
     }
 
     return NextResponse.json({

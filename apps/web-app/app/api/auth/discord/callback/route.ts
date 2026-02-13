@@ -1,11 +1,10 @@
-import { AuthService, getEnv } from '@voodoo/core';
+import { AuthService } from '@voodoo/core';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 import { jsonError } from '@/lib/http';
 
 const authService = new AuthService();
-const env = getEnv();
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -27,7 +26,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
     }
 
-    const response = NextResponse.redirect(new URL('/dashboard', env.BOT_PUBLIC_URL));
+    // Keep redirect on the same origin that handled OAuth callback to avoid cross-domain cookie loss.
+    const response = NextResponse.redirect(new URL('/dashboard', request.nextUrl.origin));
     response.cookies.set('vd_session', result.value.sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
