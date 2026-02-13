@@ -46,12 +46,6 @@ export type ProductInput = {
 
 export type CheckoutTokenPayload = {
   orderSessionId: string;
-  tenantId: string;
-  guildId: string;
-  productId: string;
-  variantId: string;
-  ticketChannelId: string;
-  customerDiscordId: string;
   exp: number;
 };
 

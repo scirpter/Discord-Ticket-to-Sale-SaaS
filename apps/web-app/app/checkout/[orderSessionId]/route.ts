@@ -11,7 +11,7 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { orderSessionId } = await context.params;
-    const token = request.nextUrl.searchParams.get('token');
+    const token = request.nextUrl.searchParams.get('t') ?? request.nextUrl.searchParams.get('token');
     if (!token) {
       return NextResponse.json({ error: 'Missing token' }, { status: 400 });
     }
@@ -24,10 +24,6 @@ export async function GET(
     const session = await orderRepository.getOrderSessionById(orderSessionId);
     if (!session) {
       return NextResponse.json({ error: 'Order session not found' }, { status: 404 });
-    }
-
-    if (session.tenantId !== payload.tenantId || session.guildId !== payload.guildId) {
-      return NextResponse.json({ error: 'Session mismatch' }, { status: 401 });
     }
 
     if (session.status !== 'pending_payment') {

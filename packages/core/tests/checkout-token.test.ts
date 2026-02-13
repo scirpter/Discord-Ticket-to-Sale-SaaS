@@ -7,12 +7,6 @@ describe('checkout token', () => {
     const token = signCheckoutToken(
       {
         orderSessionId: '01K123',
-        tenantId: 'tenant_1',
-        guildId: 'guild_1',
-        productId: 'product_1',
-        variantId: 'variant_1',
-        ticketChannelId: 'channel_1',
-        customerDiscordId: 'user_1',
         exp: Math.floor(Date.now() / 1000) + 60,
       },
       'secret-key',
@@ -20,19 +14,13 @@ describe('checkout token', () => {
 
     const payload = verifyCheckoutToken(token, 'secret-key');
     expect(payload.orderSessionId).toBe('01K123');
-    expect(payload.variantId).toBe('variant_1');
+    expect(payload.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 
   it('rejects expired token', () => {
     const token = signCheckoutToken(
       {
         orderSessionId: '01K123',
-        tenantId: 'tenant_1',
-        guildId: 'guild_1',
-        productId: 'product_1',
-        variantId: 'variant_1',
-        ticketChannelId: 'channel_1',
-        customerDiscordId: 'user_1',
         exp: Math.floor(Date.now() / 1000) - 1,
       },
       'secret-key',

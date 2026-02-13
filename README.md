@@ -64,6 +64,7 @@ Copy `.env.example` to `.env` and fill values.
 - Bot creates `order_session` and sends a short signed `/checkout/:orderSessionId` button URL to ticket.
 - `/checkout/:orderSessionId` securely redirects to the provider checkout URL server-side (avoids Discord URL-length limits).
 - If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
+- Voodoo Pay callbacks accept query/form/json payloads, and paid logs fall back to the ticket channel if paid-log channel delivery fails.
 - Woo webhook confirms payment (`processing`/`completed`).
 - Voodoo Pay callback endpoint can also finalize paid orders.
 - API verifies signature, dedupes, retries on failure, fetches Woo order notes.

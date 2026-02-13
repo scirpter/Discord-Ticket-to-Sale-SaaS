@@ -217,12 +217,6 @@ export class SaleService {
     const token = signCheckoutToken(
       {
         orderSessionId: orderSession.id,
-        tenantId: input.tenantId,
-        guildId: input.guildId,
-        productId: input.productId,
-        variantId: input.variantId,
-        ticketChannelId: input.ticketChannelId,
-        customerDiscordId: input.customerDiscordUserId,
         exp: Math.floor(expiresAt.getTime() / 1000),
       },
       this.env.CHECKOUT_SIGNING_SECRET,
@@ -380,7 +374,7 @@ export class SaleService {
 
   private buildPublicCheckoutUrl(input: { orderSessionId: string; token: string }): string {
     const checkoutUrl = new URL(`/checkout/${input.orderSessionId}`, this.env.BOT_PUBLIC_URL);
-    checkoutUrl.searchParams.set('token', input.token);
+    checkoutUrl.searchParams.set('t', input.token);
     return checkoutUrl.toString();
   }
 

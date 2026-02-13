@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import pRetry, { AbortError } from 'p-retry';
 import { err, ok, type Result } from 'neverthrow';
 
@@ -80,6 +82,143 @@ function truncate(text: string | null, maxLength = 500): string | null {
   }
 
   return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function firstNonEmpty(query: Record<string, string>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = query[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function hasTruthySignal(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y';
+}
+
+function normalizeStatus(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+const VOODOO_PAID_STATUSES = new Set([
+  'paid',
+  'complete',
+  'completed',
+  'confirmed',
+  'success',
+  'successful',
+  'done',
+  'finished',
+  'ok',
+]);
+
+const VOODOO_FAILED_STATUSES = new Set([
+  'failed',
+  'error',
+  'cancelled',
+  'canceled',
+  'expired',
+  'rejected',
+  'invalid',
+  'refunded',
+]);
+
+type VoodooPaymentState = {
+  paid: boolean;
+  status: string | null;
+  txidIn: string | null;
+  txidOut: string | null;
+  transactionId: string | null;
+};
+
+function resolveVoodooPaymentState(query: Record<string, string>): VoodooPaymentState {
+  const txidIn = firstNonEmpty(query, ['txid_in', 'tx_in', 'incoming_txid', 'txidin']);
+  const txidOut = firstNonEmpty(query, ['txid_out', 'tx_out', 'outgoing_txid', 'txidout']);
+  const transactionId = firstNonEmpty(query, [
+    'txid',
+    'transaction_id',
+    'transaction_hash',
+    'hash',
+    'payment_id',
+    'payment_hash',
+  ]);
+
+  const status = normalizeStatus(firstNonEmpty(query, ['status', 'payment_status', 'state', 'result']));
+  const confirmed = hasTruthySignal(firstNonEmpty(query, ['confirmed', 'is_confirmed', 'paid', 'success']));
+
+  if (status && VOODOO_FAILED_STATUSES.has(status)) {
+    return {
+      paid: false,
+      status,
+      txidIn,
+      txidOut,
+      transactionId,
+    };
+  }
+
+  if (txidIn || txidOut || transactionId || confirmed) {
+    return {
+      paid: true,
+      status,
+      txidIn,
+      txidOut,
+      transactionId,
+    };
+  }
+
+  if (status && VOODOO_PAID_STATUSES.has(status)) {
+    return {
+      paid: true,
+      status,
+      txidIn,
+      txidOut,
+      transactionId,
+    };
+  }
+
+  return {
+    paid: false,
+    status,
+    txidIn,
+    txidOut,
+    transactionId,
+  };
+}
+
+function buildVoodooDeliveryId(orderSessionId: string, query: Record<string, string>): string {
+  const fingerprint = {
+    orderSessionId,
+    ipnToken: firstNonEmpty(query, ['ipn_token', 'callback_id']),
+    txidIn: firstNonEmpty(query, ['txid_in', 'tx_in', 'incoming_txid', 'txidin']),
+    txidOut: firstNonEmpty(query, ['txid_out', 'tx_out', 'outgoing_txid', 'txidout']),
+    txid: firstNonEmpty(query, ['txid', 'transaction_id', 'transaction_hash', 'hash']),
+    status: normalizeStatus(firstNonEmpty(query, ['status', 'payment_status', 'state', 'result'])),
+    value: firstNonEmpty(query, ['value_forwarded_coin', 'amount', 'value']),
+  };
+
+  const hash = crypto.createHash('sha256').update(JSON.stringify(fingerprint)).digest('hex').slice(0, 60);
+  return `vp-${hash}`;
+}
+
+function fitDiscordMessage(content: string, maxLength = 1900): string {
+  if (content.length <= maxLength) {
+    return content;
+  }
+
+  return `${content.slice(0, maxLength - 20)}\n\n[message truncated]`;
 }
 
 export class WebhookService {
@@ -208,11 +347,7 @@ export class WebhookService {
         providedToken: input.query.cb_token,
       });
 
-      const deliveryId =
-        input.query.txid_in ??
-        input.query.txid_out ??
-        input.query.ipn_token ??
-        `session-${orderSessionId}-${Date.now()}`;
+      const deliveryId = buildVoodooDeliveryId(orderSessionId, input.query);
 
       const created = await this.orderRepository.createWebhookEvent({
         tenantId: integration.tenantId,
@@ -372,10 +507,6 @@ export class WebhookService {
       guildId: orderSession.guildId,
     });
 
-    if (!config?.paidLogChannelId) {
-      throw new AbortError('Paid log channel is not configured');
-    }
-
     const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
     const maskedAnswers = maskAnswers(orderSession.answers, sensitiveKeys);
     const answersContent = Object.entries(maskedAnswers)
@@ -404,9 +535,10 @@ export class WebhookService {
       `Customer: ${truncate(notes.latestCustomer, 240) ?? '(none)'}`,
     ].join('\n');
 
-    await postMessageToDiscordChannel({
+    await this.postPaidLogMessage({
       botToken: botTokenResult.value,
-      channelId: config.paidLogChannelId,
+      preferredChannelId: config?.paidLogChannelId ?? null,
+      fallbackChannelId: orderSession.ticketChannelId,
       content: message,
     });
 
@@ -420,7 +552,8 @@ export class WebhookService {
     query: Record<string, string>;
     webhookEventId: string;
   }): Promise<void> {
-    if (!input.query.txid_in && !input.query.txid_out) {
+    const paymentState = resolveVoodooPaymentState(input.query);
+    if (!paymentState.paid) {
       await this.orderRepository.markWebhookProcessed(input.webhookEventId);
       return;
     }
@@ -449,15 +582,20 @@ export class WebhookService {
       throw new AbortError('Variant not found for paid order');
     }
 
-    const providerOrderId = input.query.txid_in ?? input.query.txid_out ?? input.orderSessionId;
-    const paymentReference = input.query.txid_out ?? input.query.txid_in ?? null;
+    const providerOrderId =
+      paymentState.txidIn ??
+      paymentState.txidOut ??
+      paymentState.transactionId ??
+      input.orderSessionId;
+    const paymentReference =
+      paymentState.txidOut ?? paymentState.txidIn ?? paymentState.transactionId ?? null;
 
     const created = await this.orderRepository.createPaidOrder({
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
       orderSessionId: orderSession.id,
       providerOrderId,
-      status: 'paid',
+      status: paymentState.status ?? 'paid',
       priceMinor: variant.priceMinor,
       currency: variant.currency,
       paymentReference,
@@ -478,10 +616,6 @@ export class WebhookService {
       guildId: orderSession.guildId,
     });
 
-    if (!config?.paidLogChannelId) {
-      throw new AbortError('Paid log channel is not configured');
-    }
-
     const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
     const maskedAnswers = maskAnswers(orderSession.answers, sensitiveKeys);
     const answersContent = Object.entries(maskedAnswers)
@@ -497,8 +631,10 @@ export class WebhookService {
       '**Order Paid**',
       `Provider: Voodoo Pay`,
       `Order Session: ${orderSession.id}`,
-      `Transaction In: ${input.query.txid_in ?? '(none)'}`,
-      `Transaction Out: ${input.query.txid_out ?? '(none)'}`,
+      `Status: ${paymentState.status ?? 'paid'}`,
+      `Transaction In: ${paymentState.txidIn ?? '(none)'}`,
+      `Transaction Out: ${paymentState.txidOut ?? '(none)'}`,
+      `Transaction: ${paymentState.transactionId ?? '(none)'}`,
       `Coin: ${input.query.coin ?? '(unknown)'}`,
       `Forwarded Value: ${input.query.value_forwarded_coin ?? '(unknown)'}`,
       `Product: ${product.name}`,
@@ -509,13 +645,50 @@ export class WebhookService {
       answersContent || '- (none)',
     ].join('\n');
 
-    await postMessageToDiscordChannel({
+    await this.postPaidLogMessage({
       botToken: botTokenResult.value,
-      channelId: config.paidLogChannelId,
+      preferredChannelId: config?.paidLogChannelId ?? null,
+      fallbackChannelId: orderSession.ticketChannelId,
       content: message,
     });
 
     await this.orderRepository.markWebhookProcessed(input.webhookEventId);
+  }
+
+  private async postPaidLogMessage(input: {
+    botToken: string;
+    preferredChannelId: string | null;
+    fallbackChannelId: string;
+    content: string;
+  }): Promise<void> {
+    const targetChannels = [input.preferredChannelId, input.fallbackChannelId].filter(
+      (channelId): channelId is string => Boolean(channelId),
+    );
+    const uniqueChannels = [...new Set(targetChannels)];
+
+    if (uniqueChannels.length === 0) {
+      throw new AbortError('No channel available for paid-order log message');
+    }
+
+    let lastError: unknown = null;
+    for (const channelId of uniqueChannels) {
+      try {
+        await postMessageToDiscordChannel({
+          botToken: input.botToken,
+          channelId,
+          content: fitDiscordMessage(input.content),
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+
+    throw new AbortError('Failed to post paid-order log message');
   }
 
   private async fetchWooNotes(input: {
