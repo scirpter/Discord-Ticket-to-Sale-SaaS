@@ -98,12 +98,13 @@ export class AuthService {
     return AuthService.DISCORD_GUILDS_RATE_LIMIT_FALLBACK_MS;
   }
 
-  public buildLoginUrl(state: string): string {
+  public buildLoginUrl(state: string, redirectUri?: string): string {
+    const resolvedRedirectUri = redirectUri ?? this.env.DISCORD_REDIRECT_URI;
     const scopes = ['identify', 'guilds'];
     const query = new URLSearchParams({
       client_id: this.env.DISCORD_CLIENT_ID,
       response_type: 'code',
-      redirect_uri: this.env.DISCORD_REDIRECT_URI,
+      redirect_uri: resolvedRedirectUri,
       scope: scopes.join(' '),
       state,
       prompt: 'consent',
@@ -116,6 +117,7 @@ export class AuthService {
     code: string;
     state: string;
     expectedState: string;
+    redirectUri?: string;
   }): Promise<Result<AuthCallbackResult, AppError>> {
     if (input.state !== input.expectedState) {
       return err(new AppError('OAUTH_STATE_MISMATCH', 'Invalid OAuth state', 400));
@@ -128,6 +130,7 @@ export class AuthService {
     }
 
     try {
+      const resolvedRedirectUri = input.redirectUri ?? this.env.DISCORD_REDIRECT_URI;
       const tokenRes = await fetch(`${this.env.DISCORD_API_BASE_URL}/oauth2/token`, {
         method: 'POST',
         headers: {
@@ -138,7 +141,7 @@ export class AuthService {
           client_secret: this.env.DISCORD_CLIENT_SECRET,
           grant_type: 'authorization_code',
           code: input.code,
-          redirect_uri: this.env.DISCORD_REDIRECT_URI,
+          redirect_uri: resolvedRedirectUri,
         }),
       });
 
