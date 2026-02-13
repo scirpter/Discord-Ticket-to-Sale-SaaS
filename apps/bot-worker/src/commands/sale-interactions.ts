@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   MessageFlags,
   ModalBuilder,
   StringSelectMenuBuilder,
@@ -12,6 +13,7 @@ import {
 import { ProductRepository, SaleService, TenantRepository } from '@voodoo/core';
 
 import { getSaleDraft, removeSaleDraft, updateSaleDraft, type SaleDraft } from '../flows/sale-draft-store.js';
+import { getCheckoutLink } from '../flows/checkout-link-store.js';
 import { sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 
 const productRepository = new ProductRepository();
@@ -487,6 +489,48 @@ export async function handleSaleCancel(interaction: Interaction): Promise<void> 
 
   await interaction.editReply({
     content: `Cancelled pending sale session: \`${cancelled.value.orderSessionId}\``,
+  });
+}
+
+export async function handleSalePayLink(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.customId.startsWith('sale:pay:')) {
+    return;
+  }
+
+  const [, , orderSessionId] = interaction.customId.split(':');
+  if (!orderSessionId) {
+    await interaction.reply({
+      content: 'Invalid checkout button. Start `/sale` again.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const checkoutUrl = getCheckoutLink(orderSessionId);
+  if (!checkoutUrl) {
+    await interaction.reply({
+      content: 'Checkout link expired in memory. Please start `/sale` again.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const maxDirectLength = 1800;
+  if (checkoutUrl.length <= maxDirectLength) {
+    await interaction.reply({
+      content: `Open this checkout link:\n${checkoutUrl}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const attachment = new AttachmentBuilder(Buffer.from(`${checkoutUrl}\n`, 'utf8'), {
+    name: `checkout-${orderSessionId}.txt`,
+  });
+  await interaction.reply({
+    content: 'Checkout link is very long, so I attached it as a file.',
+    files: [attachment],
+    flags: MessageFlags.Ephemeral,
   });
 }
 
