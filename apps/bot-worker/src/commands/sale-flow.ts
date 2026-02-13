@@ -227,6 +227,8 @@ export async function sendCheckoutMessage(
       `Sale created for <@${input.customerDiscordUserId}>.`,
       `Order Session: \`${input.orderSessionId}\``,
       `Checkout: [Click here to pay](${input.checkoutUrl})`,
+      '',
+      'Payment update will be posted here once paid. This may take up to 30 minutes. Do NOT pay again.',
     ].join('\n'),
   });
 }

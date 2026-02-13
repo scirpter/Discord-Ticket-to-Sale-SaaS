@@ -191,6 +191,42 @@ function parsePriceToMinor(value: string): number {
   return Math.round(parsed * 100);
 }
 
+function normalizeCategoryKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getDefaultQuestions(): QuestionDraft[] {
+  return [
+    {
+      key: 'username',
+      label: 'What is your username?',
+      fieldType: 'short_text',
+      required: true,
+      sensitive: false,
+      sortOrder: 0,
+    },
+  ];
+}
+
+function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
+  const mapped = fields
+    .map((field, index) => ({
+      key: field.fieldKey,
+      label: field.label,
+      fieldType: field.fieldType,
+      required: field.required,
+      sensitive: field.sensitive,
+      sortOrder: field.sortOrder ?? index,
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  if (mapped.length === 0) {
+    return getDefaultQuestions();
+  }
+
+  return mapped.map((question, sortOrder) => ({ ...question, sortOrder }));
+}
+
 export default function DashboardPage() {
   const [tenantId, setTenantId] = useState('');
   const [guildId, setGuildId] = useState('');
@@ -226,6 +262,8 @@ export default function DashboardPage() {
   const [productsLoading, setProductsLoading] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
 
+  const [categoryBuilderName, setCategoryBuilderName] = useState('Accounts');
+  const [categoryRenameTo, setCategoryRenameTo] = useState('');
   const [productCategory, setProductCategory] = useState('Accounts');
   const [productName, setProductName] = useState('Starter Account');
   const [productDescription, setProductDescription] = useState('');
@@ -246,16 +284,7 @@ export default function DashboardPage() {
   const [questionTypeInput, setQuestionTypeInput] = useState<FieldType>('short_text');
   const [questionRequiredInput, setQuestionRequiredInput] = useState(true);
   const [questionSensitiveInput, setQuestionSensitiveInput] = useState(false);
-  const [questions, setQuestions] = useState<QuestionDraft[]>([
-    {
-      key: 'username',
-      label: 'What is your username?',
-      fieldType: 'short_text',
-      required: true,
-      sensitive: false,
-      sortOrder: 0,
-    },
-  ]);
+  const [questions, setQuestions] = useState<QuestionDraft[]>(getDefaultQuestions());
 
   const [state, setState] = useState<RequestState>(initialState);
 
@@ -282,6 +311,38 @@ export default function DashboardPage() {
         (a, b) => a.localeCompare(b),
       ),
     [products],
+  );
+  const categoryTemplateByKey = useMemo(() => {
+    const templates = new Map<
+      string,
+      {
+        category: string;
+        productId: string;
+        questions: QuestionDraft[];
+      }
+    >();
+
+    for (const product of products) {
+      const key = normalizeCategoryKey(product.category);
+      if (!key || templates.has(key)) {
+        continue;
+      }
+
+      templates.set(key, {
+        category: product.category.trim(),
+        productId: product.id,
+        questions: toQuestionDrafts(product.formFields),
+      });
+    }
+
+    return templates;
+  }, [products]);
+  const categorySelectOptions = useMemo(
+    () =>
+      Array.from(new Set([...existingCategories, categoryBuilderName.trim()].filter((category) => Boolean(category)))).sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [categoryBuilderName, existingCategories],
   );
 
   const runAction = useCallback(async (action: () => Promise<unknown>) => {
@@ -535,6 +596,10 @@ export default function DashboardPage() {
     setDefaultCurrency(DEFAULT_CURRENCY);
     setProducts([]);
     setEditingProductId(null);
+    setCategoryBuilderName('Accounts');
+    setCategoryRenameTo('');
+    setProductCategory('Accounts');
+    setQuestions(getDefaultQuestions());
     setVoodooMerchantWalletAddress('');
     setVoodooCheckoutDomain(DEFAULT_VOODOO_CHECKOUT_DOMAIN);
     setVoodooWebhookKey('');
@@ -611,7 +676,7 @@ export default function DashboardPage() {
 
     const normalizedKey = questionKeyInput.trim().toLowerCase();
     if (questions.some((question) => question.key.trim().toLowerCase() === normalizedKey)) {
-      setState({ loading: false, response: '', error: 'Question key must be unique per product.' });
+      setState({ loading: false, response: '', error: 'Question key must be unique per category.' });
       return;
     }
 
@@ -636,18 +701,66 @@ export default function DashboardPage() {
     );
   }
 
-  async function refreshProducts(): Promise<void> {
+  function prepareQuestionsForApi(): QuestionDraft[] {
+    const seenQuestionKeys = new Set<string>();
+
+    return questions.map((question, sortOrder) => {
+      const key = question.key.trim();
+      const label = question.label.trim();
+      const normalizedKey = key.toLowerCase();
+
+      if (!key) {
+        throw new Error('Question key is required.');
+      }
+
+      if (!label) {
+        throw new Error(`Question label is required for key "${key}".`);
+      }
+
+      if (seenQuestionKeys.has(normalizedKey)) {
+        throw new Error(`Question key "${key}" is duplicated. Use unique keys.`);
+      }
+      seenQuestionKeys.add(normalizedKey);
+
+      return {
+        ...question,
+        key,
+        label,
+        sortOrder,
+      };
+    });
+  }
+
+  function loadQuestionsForCategory(category: string): void {
+    const normalizedCategory = category.trim();
+    setCategoryBuilderName(normalizedCategory);
+    if (normalizedCategory) {
+      setProductCategory(normalizedCategory);
+    }
+
+    const template = categoryTemplateByKey.get(normalizeCategoryKey(normalizedCategory));
+    if (!template) {
+      setQuestions(getDefaultQuestions());
+      return;
+    }
+
+    setQuestions(template.questions.map((question, sortOrder) => ({ ...question, sortOrder })));
+  }
+
+  async function refreshProducts(): Promise<ProductRecord[]> {
     const context = requireWorkspaceAndServer({ requireBot: true });
     await ensureGuildLinked(context.workspaceId, context.discordServerId);
     const payload = (await apiCall(
       `/api/guilds/${encodeURIComponent(context.discordServerId)}/products?tenantId=${encodeURIComponent(context.workspaceId)}`,
     )) as { products?: ProductRecord[] };
-    setProducts(Array.isArray(payload.products) ? payload.products : []);
+    const nextProducts = Array.isArray(payload.products) ? payload.products : [];
+    setProducts(nextProducts);
+    return nextProducts;
   }
 
   function resetProductBuilder(options?: { keepCategory?: string }): void {
     setEditingProductId(null);
-    setProductCategory(options?.keepCategory?.trim() || 'Accounts');
+    setProductCategory(options?.keepCategory?.trim() || categoryBuilderName.trim() || 'Accounts');
     setProductName('Starter Account');
     setProductDescription('');
     setProductActive(true);
@@ -658,20 +771,11 @@ export default function DashboardPage() {
         currency: DEFAULT_CURRENCY,
       },
     ]);
-    setQuestions([
-      {
-        key: 'username',
-        label: 'What is your username?',
-        fieldType: 'short_text',
-        required: true,
-        sensitive: false,
-        sortOrder: 0,
-      },
-    ]);
   }
 
   function loadProductIntoBuilder(product: ProductRecord): void {
     setEditingProductId(product.id);
+    setCategoryBuilderName(product.category);
     setProductCategory(product.category);
     setProductName(product.name);
     setProductDescription(product.description);
@@ -683,18 +787,7 @@ export default function DashboardPage() {
         currency: variant.currency,
       })),
     );
-    setQuestions(
-      product.formFields
-        .map((field, index) => ({
-          key: field.fieldKey,
-          label: field.label,
-          fieldType: field.fieldType,
-          required: field.required,
-          sensitive: field.sensitive,
-          sortOrder: field.sortOrder ?? index,
-        }))
-        .sort((a, b) => a.sortOrder - b.sortOrder),
-    );
+    setQuestions(toQuestionDrafts(product.formFields));
   }
 
   if (sessionLoading) {
@@ -1165,8 +1258,8 @@ export default function DashboardPage() {
                     disabled={productsLoading || !serverReady}
                     onClick={() =>
                       runAction(async () => {
-                        await refreshProducts();
-                        return { productCount: products.length };
+                        const refreshed = await refreshProducts();
+                        return { productCount: refreshed.length };
                       })
                     }
                   >
@@ -1233,114 +1326,181 @@ export default function DashboardPage() {
 
               <Separator />
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="product-category">Product Category</Label>
-                  <Input
-                    id="product-category"
-                    list="product-category-options"
-                    value={productCategory}
-                    onChange={(event) => setProductCategory(event.target.value)}
-                  />
-                  <datalist id="product-category-options">
-                    {existingCategories.map((category) => (
-                      <option key={category} value={category} />
-                    ))}
-                  </datalist>
-                  <p className="text-xs text-muted-foreground">
-                    Reuse the same category name to add more products into that category.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="product-name">Product Name</Label>
-                  <Input id="product-name" value={productName} onChange={(event) => setProductName(event.target.value)} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="product-description">Description (optional)</Label>
-                <Textarea
-                  id="product-description"
-                  value={productDescription}
-                  onChange={(event) => setProductDescription(event.target.value)}
-                  placeholder="Optional product details"
-                  className="min-h-24"
-                />
-              </div>
-
-              <div className="inline-flex items-center gap-2">
-                <Checkbox
-                  id="product-active"
-                  checked={productActive}
-                  onCheckedChange={(checked) => setProductActive(checked === true)}
-                />
-                <Label htmlFor="product-active" className="text-sm font-normal text-muted-foreground">
-                  Product active
-                </Label>
-              </div>
-
-              <Separator />
-
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Price Options (GBP)</h3>
-                  <Badge variant="outline">{variants.length} option(s)</Badge>
-                </div>
-
-                <div className="space-y-2">
-                  {variants.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No price options yet.</p>
-                  ) : (
-                    variants.map((variant, index) => (
-                      <div
-                        key={`${variant.label}-${index}`}
-                        className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
-                      >
-                        <p className="text-sm">
-                          {variant.label}: {variant.priceMajor} {variant.currency}
-                        </p>
-                        <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                    ))
-                  )}
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Create Category + Questions
+                  </h3>
+                  <Badge variant="outline">{questions.length} question(s)</Badge>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="variant-label">Price Label</Label>
+                    <Label htmlFor="category-builder-name">Category Name</Label>
                     <Input
-                      id="variant-label"
-                      value={variantLabelInput}
-                      onChange={(event) => setVariantLabelInput(event.target.value)}
+                      id="category-builder-name"
+                      list="category-builder-options"
+                      value={categoryBuilderName}
+                      onChange={(event) => setCategoryBuilderName(event.target.value)}
+                      placeholder="Renew Subscription"
                     />
+                    <datalist id="category-builder-options">
+                      {existingCategories.map((category) => (
+                        <option key={category} value={category} />
+                      ))}
+                    </datalist>
+                    <p className="text-xs text-muted-foreground">
+                      Questions are shared by category. Add them once here, then reuse for all products in that category.
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="variant-price">Price (major unit)</Label>
-                    <Input
-                      id="variant-price"
-                      value={variantPriceInput}
-                      onChange={(event) => setVariantPriceInput(event.target.value)}
-                      placeholder="9.99"
-                    />
+
+                  <div className="flex flex-col justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => loadQuestionsForCategory(categoryBuilderName)}
+                    >
+                      Load Existing Category Questions
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setQuestions(getDefaultQuestions())}>
+                      Reset Question Draft
+                    </Button>
                   </div>
                 </div>
 
-                <Button type="button" variant="outline" onClick={addPriceOption}>
-                  <Plus className="size-4" />
-                  Add Price Option
-                </Button>
-              </div>
+                <div className="rounded-lg border border-border/60 bg-secondary/20 p-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="category-rename-to">Rename Category To</Label>
+                      <Input
+                        id="category-rename-to"
+                        value={categoryRenameTo}
+                        onChange={(event) => setCategoryRenameTo(event.target.value)}
+                        placeholder="New category name"
+                      />
+                    </div>
+                    <div className="flex flex-col justify-end gap-2 sm:flex-row">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={state.loading || !serverReady || !categoryBuilderName.trim() || !categoryRenameTo.trim()}
+                        onClick={() =>
+                          runAction(async () => {
+                            const context = requireWorkspaceAndServer({ requireBot: true });
+                            await ensureGuildLinked(context.workspaceId, context.discordServerId);
 
-              <Separator />
+                            const sourceCategory = categoryBuilderName.trim();
+                            const targetCategory = categoryRenameTo.trim();
+                            if (!sourceCategory) {
+                              throw new Error('Select a category to rename first.');
+                            }
+                            if (!targetCategory) {
+                              throw new Error('Enter a new category name.');
+                            }
 
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Customer Questions
-                  </h3>
-                  <Badge variant="outline">{questions.length} question(s)</Badge>
+                            const payload = (await apiCall(
+                              `/api/guilds/${encodeURIComponent(context.discordServerId)}/categories`,
+                              'PATCH',
+                              {
+                                tenantId: context.workspaceId,
+                                category: sourceCategory,
+                                newCategory: targetCategory,
+                              },
+                            )) as { updatedProducts?: number };
+
+                            const nextProducts = await refreshProducts();
+                            setCategoryBuilderName(targetCategory);
+                            setCategoryRenameTo('');
+
+                            if (normalizeCategoryKey(productCategory) === normalizeCategoryKey(sourceCategory)) {
+                              setProductCategory(targetCategory);
+                            }
+
+                            if (
+                              editingProductId &&
+                              !nextProducts.some((product) => product.id === editingProductId)
+                            ) {
+                              resetProductBuilder({ keepCategory: targetCategory });
+                            }
+
+                            return {
+                              renamedCategory: sourceCategory,
+                              newCategory: targetCategory,
+                              updatedProducts: payload.updatedProducts ?? 0,
+                            };
+                          })
+                        }
+                      >
+                        Rename Category
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        disabled={state.loading || !serverReady || !categoryBuilderName.trim()}
+                        onClick={() =>
+                          runAction(async () => {
+                            const context = requireWorkspaceAndServer({ requireBot: true });
+                            await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                            const categoryToDelete = categoryBuilderName.trim();
+                            if (!categoryToDelete) {
+                              throw new Error('Select a category to delete first.');
+                            }
+
+                            const confirmed = window.confirm(
+                              `Delete category \"${categoryToDelete}\" and ALL products in it? This cannot be undone.`,
+                            );
+                            if (!confirmed) {
+                              return { cancelled: true };
+                            }
+
+                            const payload = (await apiCall(
+                              `/api/guilds/${encodeURIComponent(context.discordServerId)}/categories`,
+                              'DELETE',
+                              {
+                                tenantId: context.workspaceId,
+                                category: categoryToDelete,
+                              },
+                            )) as { deletedProducts?: number };
+
+                            const nextProducts = await refreshProducts();
+                            const nextCategories = Array.from(
+                              new Set(
+                                nextProducts
+                                  .map((product) => product.category.trim())
+                                  .filter((category) => Boolean(category)),
+                              ),
+                            ).sort((a, b) => a.localeCompare(b));
+
+                            const nextCategory = nextCategories[0] ?? '';
+                            setCategoryBuilderName(nextCategory || 'Accounts');
+                            setCategoryRenameTo('');
+                            if (normalizeCategoryKey(productCategory) === normalizeCategoryKey(categoryToDelete)) {
+                              setProductCategory(nextCategory || 'Accounts');
+                            }
+
+                            if (
+                              editingProductId &&
+                              !nextProducts.some((product) => product.id === editingProductId)
+                            ) {
+                              setQuestions(getDefaultQuestions());
+                              resetProductBuilder({ keepCategory: nextCategory || 'Accounts' });
+                            }
+
+                            return {
+                              deletedCategory: categoryToDelete,
+                              deletedProducts: payload.deletedProducts ?? 0,
+                            };
+                          })
+                        }
+                      >
+                        Delete Category
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Renaming updates all products in the category. Deleting removes all products in that category.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -1355,7 +1515,7 @@ export default function DashboardPage() {
                         <div>
                           <p className="text-sm font-medium">{question.label}</p>
                           <p className="text-xs text-muted-foreground">
-                            {question.fieldType} • {question.required ? 'Required' : 'Optional'} •{' '}
+                            {question.fieldType} - {question.required ? 'Required' : 'Optional'} -{' '}
                             {question.sensitive ? 'Sensitive' : 'Not sensitive'}
                           </p>
                         </div>
@@ -1429,6 +1589,168 @@ export default function DashboardPage() {
                   <Plus className="size-4" />
                   Add Question
                 </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={state.loading || !serverReady}
+                  onClick={() =>
+                    runAction(async () => {
+                      const context = requireWorkspaceAndServer({ requireBot: true });
+                      await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                      const normalizedCategory = categoryBuilderName.trim();
+                      if (!normalizedCategory) {
+                        throw new Error('Category name is required before saving questions.');
+                      }
+
+                      const template = categoryTemplateByKey.get(normalizeCategoryKey(normalizedCategory));
+                      if (!template) {
+                        throw new Error(
+                          'Create at least one product in this category first. New products in that category will then reuse these questions automatically.',
+                        );
+                      }
+
+                      const preparedQuestions = prepareQuestionsForApi();
+                      await apiCall(
+                        `/api/guilds/${encodeURIComponent(context.discordServerId)}/forms/${encodeURIComponent(template.productId)}`,
+                        'PUT',
+                        {
+                          tenantId: context.workspaceId,
+                          formFields: preparedQuestions,
+                        },
+                      );
+
+                      await refreshProducts();
+                      setCategoryBuilderName(normalizedCategory);
+                      setProductCategory(normalizedCategory);
+                      return { savedCategoryQuestionsFor: normalizedCategory };
+                    })
+                  }
+                >
+                  Save Category Questions
+                </Button>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Create / Edit Product
+                </h3>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="product-category">Product Category</Label>
+                    <select
+                      id="product-category"
+                      className={nativeSelectClass}
+                      value={productCategory}
+                      onChange={(event) => setProductCategory(event.target.value)}
+                    >
+                      <option value="">Select category</option>
+                      {categorySelectOptions.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setProductCategory(categoryBuilderName.trim())}
+                        disabled={!categoryBuilderName.trim()}
+                      >
+                        Use Category Builder Name
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Pick an existing category from the list, or create a new one from the section above.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="product-name">Product Name</Label>
+                    <Input id="product-name" value={productName} onChange={(event) => setProductName(event.target.value)} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="product-description">Description (optional)</Label>
+                  <Textarea
+                    id="product-description"
+                    value={productDescription}
+                    onChange={(event) => setProductDescription(event.target.value)}
+                    placeholder="Optional product details"
+                    className="min-h-24"
+                  />
+                </div>
+
+                <div className="inline-flex items-center gap-2">
+                  <Checkbox
+                    id="product-active"
+                    checked={productActive}
+                    onCheckedChange={(checked) => setProductActive(checked === true)}
+                  />
+                  <Label htmlFor="product-active" className="text-sm font-normal text-muted-foreground">
+                    Product active
+                  </Label>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Price Options (GBP)</h3>
+                    <Badge variant="outline">{variants.length} option(s)</Badge>
+                  </div>
+
+                  <div className="space-y-2">
+                    {variants.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No price options yet.</p>
+                    ) : (
+                      variants.map((variant, index) => (
+                        <div
+                          key={`${variant.label}-${index}`}
+                          className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                        >
+                          <p className="text-sm">
+                            {variant.label}: {variant.priceMajor} {variant.currency}
+                          </p>
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
+                            <X className="size-4" />
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="variant-label">Price Label</Label>
+                      <Input
+                        id="variant-label"
+                        value={variantLabelInput}
+                        onChange={(event) => setVariantLabelInput(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="variant-price">Price (major unit)</Label>
+                      <Input
+                        id="variant-price"
+                        value={variantPriceInput}
+                        onChange={(event) => setVariantPriceInput(event.target.value)}
+                        placeholder="9.99"
+                      />
+                    </div>
+                  </div>
+
+                  <Button type="button" variant="outline" onClick={addPriceOption}>
+                    <Plus className="size-4" />
+                    Add Price Option
+                  </Button>
+                </div>
               </div>
 
               <div className="flex flex-col gap-2 pt-2 sm:flex-row">
@@ -1457,17 +1779,21 @@ export default function DashboardPage() {
                         throw new Error('Product name is required.');
                       }
 
-                      const seenQuestionKeys = new Set<string>();
-                      for (const question of questions) {
-                        const normalizedKey = question.key.trim().toLowerCase();
-                        if (!normalizedKey) {
-                          throw new Error('Question key is required.');
-                        }
+                      const normalizedCategoryKey = normalizeCategoryKey(normalizedCategory);
+                      const categoryAlreadyExists = existingCategories.some(
+                        (category) => normalizeCategoryKey(category) === normalizedCategoryKey,
+                      );
 
-                        if (seenQuestionKeys.has(normalizedKey)) {
-                          throw new Error(`Question key "${question.key}" is duplicated. Use unique keys.`);
-                        }
-                        seenQuestionKeys.add(normalizedKey);
+                      const editingProduct = editingProductId
+                        ? products.find((product) => product.id === editingProductId) ?? null
+                        : null;
+                      if (
+                        editingProduct &&
+                        normalizeCategoryKey(editingProduct.category) !== normalizedCategoryKey
+                      ) {
+                        throw new Error(
+                          'Changing category on an existing product is blocked to keep category questions consistent. Create a new product in the target category instead.',
+                        );
                       }
 
                       const preparedVariants = variants.map((variant) => ({
@@ -1476,10 +1802,16 @@ export default function DashboardPage() {
                         currency: DEFAULT_CURRENCY,
                       }));
 
-                      const preparedQuestions = questions.map((question, sortOrder) => ({
-                        ...question,
-                        sortOrder,
-                      }));
+                      let preparedQuestions: QuestionDraft[] = [];
+                      if (!categoryAlreadyExists) {
+                        if (normalizeCategoryKey(categoryBuilderName) !== normalizedCategoryKey) {
+                          throw new Error(
+                            'For a new category, set the same category name in "Create Category + Questions" first.',
+                          );
+                        }
+
+                        preparedQuestions = prepareQuestionsForApi();
+                      }
 
                       const productPayload = {
                         category: normalizedCategory,
@@ -1498,14 +1830,6 @@ export default function DashboardPage() {
                             product: productPayload,
                           },
                         );
-                        await apiCall(
-                          `/api/guilds/${encodeURIComponent(context.discordServerId)}/forms/${encodeURIComponent(editingProductId)}`,
-                          'PUT',
-                          {
-                            tenantId: context.workspaceId,
-                            formFields: preparedQuestions,
-                          },
-                        );
                       } else {
                         await apiCall(`/api/guilds/${context.discordServerId}/products`, 'POST', {
                           tenantId: context.workspaceId,
@@ -1515,6 +1839,7 @@ export default function DashboardPage() {
                       }
 
                       await refreshProducts();
+                      setCategoryBuilderName(normalizedCategory);
                       resetProductBuilder({ keepCategory: normalizedCategory });
                       return { mode: editingProductId ? 'updated' : 'created' };
                     })

@@ -1,4 +1,4 @@
-﻿import { err, ok, type Result } from 'neverthrow';
+import { err, ok, type Result } from 'neverthrow';
 import { z } from 'zod';
 
 import { AppError, fromUnknownError, validationError } from '../domain/errors.js';
@@ -15,12 +15,13 @@ const variantSchema = z.object({
 });
 
 const productSchema = z.object({
-  category: z.string().min(1).max(80),
-  name: z.string().min(1).max(120),
+  category: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(120),
   description: z.string().max(2000).transform((value) => value.trim()),
   active: z.boolean().default(true),
   variants: z.array(variantSchema).min(1),
 });
+const categorySchema = z.string().trim().min(1).max(80);
 
 const fieldValidationSchema = z
   .object({
@@ -106,11 +107,20 @@ export class ProductService {
         return err(validationError(parsedFields.error.issues));
       }
 
+      let formFields = parsedFields.data;
+      if (formFields.length === 0) {
+        formFields = await this.productRepository.getCategoryFormFieldsTemplate({
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          category: parsedProduct.data.category,
+        });
+      }
+
       const created = await this.productRepository.create({
         tenantId: input.tenantId,
         guildId: input.guildId,
         product: parsedProduct.data,
-        formFields: parsedFields.data,
+        formFields,
       });
 
       return ok(created);
@@ -232,14 +242,178 @@ export class ProductService {
         return err(validationError(parsedFields.error.issues));
       }
 
-      await this.productRepository.replaceFormFields({
+      const product = await this.productRepository.getById({
         tenantId: input.tenantId,
         guildId: input.guildId,
         productId: input.productId,
+      });
+      if (!product) {
+        return err(new AppError('PRODUCT_NOT_FOUND', 'Product not found', 404));
+      }
+
+      const productIdsInCategory = await this.productRepository.listProductIdsByCategory({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        category: product.category,
+      });
+
+      await this.productRepository.replaceFormFieldsForProducts({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        productIds:
+          productIdsInCategory.length > 0 ? productIdsInCategory : [input.productId],
         formFields: parsedFields.data,
       });
 
       return ok(undefined);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async renameCategory(
+    actor: SessionPayload,
+    input: {
+      tenantId: string;
+      guildId: string;
+      category: string;
+      newCategory: string;
+    },
+  ): Promise<Result<{ updatedProducts: number; category: string; newCategory: string }, AppError>> {
+    try {
+      const roleCheck = await this.authorizationService.ensureTenantRole(actor, {
+        tenantId: input.tenantId,
+        minimumRole: 'admin',
+      });
+      if (roleCheck.isErr()) {
+        return err(roleCheck.error);
+      }
+
+      const guildCheck = await this.authorizationService.ensureGuildBoundToTenant({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+      if (guildCheck.isErr()) {
+        return err(guildCheck.error);
+      }
+
+      const parsedCategory = categorySchema.safeParse(input.category);
+      if (!parsedCategory.success) {
+        return err(validationError(parsedCategory.error.issues));
+      }
+
+      const parsedNewCategory = categorySchema.safeParse(input.newCategory);
+      if (!parsedNewCategory.success) {
+        return err(validationError(parsedNewCategory.error.issues));
+      }
+
+      const sourceCategory = parsedCategory.data;
+      const targetCategory = parsedNewCategory.data;
+      if (sourceCategory.toLowerCase() === targetCategory.toLowerCase()) {
+        return err(new AppError('CATEGORY_UNCHANGED', 'New category name must be different', 400));
+      }
+
+      const products = await this.productRepository.listByGuild({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+
+      const categoriesByKey = new Map<string, string>();
+      for (const product of products) {
+        const key = product.category.trim().toLowerCase();
+        if (!key || categoriesByKey.has(key)) {
+          continue;
+        }
+        categoriesByKey.set(key, product.category);
+      }
+
+      const sourceResolved = categoriesByKey.get(sourceCategory.toLowerCase());
+      if (!sourceResolved) {
+        return err(new AppError('CATEGORY_NOT_FOUND', 'Category not found', 404));
+      }
+
+      const targetResolved = categoriesByKey.get(targetCategory.toLowerCase());
+      if (targetResolved) {
+        return err(
+          new AppError('CATEGORY_ALREADY_EXISTS', 'Target category already exists. Use a different name.', 409),
+        );
+      }
+
+      const updatedProducts = await this.productRepository.renameCategory({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        category: sourceResolved,
+        newCategory: targetCategory,
+      });
+
+      return ok({
+        updatedProducts,
+        category: sourceResolved,
+        newCategory: targetCategory,
+      });
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async deleteCategory(
+    actor: SessionPayload,
+    input: {
+      tenantId: string;
+      guildId: string;
+      category: string;
+    },
+  ): Promise<Result<{ deletedProducts: number; category: string }, AppError>> {
+    try {
+      const roleCheck = await this.authorizationService.ensureTenantRole(actor, {
+        tenantId: input.tenantId,
+        minimumRole: 'admin',
+      });
+      if (roleCheck.isErr()) {
+        return err(roleCheck.error);
+      }
+
+      const guildCheck = await this.authorizationService.ensureGuildBoundToTenant({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+      if (guildCheck.isErr()) {
+        return err(guildCheck.error);
+      }
+
+      const parsedCategory = categorySchema.safeParse(input.category);
+      if (!parsedCategory.success) {
+        return err(validationError(parsedCategory.error.issues));
+      }
+
+      const products = await this.productRepository.listByGuild({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+      const categoryMap = new Map<string, string>();
+      for (const product of products) {
+        const key = product.category.trim().toLowerCase();
+        if (!key || categoryMap.has(key)) {
+          continue;
+        }
+        categoryMap.set(key, product.category);
+      }
+
+      const sourceResolved = categoryMap.get(parsedCategory.data.toLowerCase());
+      if (!sourceResolved) {
+        return err(new AppError('CATEGORY_NOT_FOUND', 'Category not found', 404));
+      }
+
+      const deletedProducts = await this.productRepository.deleteCategory({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        category: sourceResolved,
+      });
+
+      return ok({
+        deletedProducts,
+        category: sourceResolved,
+      });
     } catch (error) {
       return err(fromUnknownError(error));
     }

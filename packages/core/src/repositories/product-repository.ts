@@ -1,4 +1,4 @@
-﻿import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import type {
@@ -264,16 +264,103 @@ export class ProductRepository {
     productId: string;
     formFields: ProductFormFieldInput[];
   }): Promise<void> {
+    await this.replaceFormFieldsForProducts({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      productIds: [input.productId],
+      formFields: input.formFields,
+    });
+  }
+
+  public async listProductIdsByCategory(input: {
+    tenantId: string;
+    guildId: string;
+    category: string;
+  }): Promise<string[]> {
+    const rows = await this.db.query.products.findMany({
+      where: and(
+        eq(products.tenantId, input.tenantId),
+        eq(products.guildId, input.guildId),
+        eq(products.category, input.category),
+      ),
+      orderBy: [asc(products.createdAt)],
+    });
+
+    return rows.map((row) => row.id);
+  }
+
+  public async getCategoryFormFieldsTemplate(input: {
+    tenantId: string;
+    guildId: string;
+    category: string;
+  }): Promise<ProductFormFieldInput[]> {
+    const categoryProducts = await this.db.query.products.findMany({
+      where: and(
+        eq(products.tenantId, input.tenantId),
+        eq(products.guildId, input.guildId),
+        eq(products.category, input.category),
+      ),
+      orderBy: [asc(products.createdAt)],
+    });
+
+    for (const categoryProduct of categoryProducts) {
+      const fields = await this.db.query.productFormFields.findMany({
+        where: eq(productFormFields.productId, categoryProduct.id),
+        orderBy: [asc(productFormFields.sortOrder)],
+      });
+
+      if (fields.length > 0) {
+        return fields.map((field) => ({
+          key: field.fieldKey,
+          label: field.label,
+          fieldType: field.fieldType,
+          required: field.required,
+          sensitive: field.sensitive,
+          sortOrder: field.sortOrder,
+          validation: (field.validation ?? undefined) as
+            | {
+                minLength?: number;
+                maxLength?: number;
+                regex?: string;
+                minValue?: number;
+                maxValue?: number;
+              }
+            | undefined,
+        }));
+      }
+    }
+
+    return [];
+  }
+
+  public async replaceFormFieldsForProducts(input: {
+    tenantId: string;
+    guildId: string;
+    productIds: string[];
+    formFields: ProductFormFieldInput[];
+  }): Promise<void> {
+    if (input.productIds.length === 0) {
+      return;
+    }
+
     await this.db.transaction(async (tx) => {
-      await tx.delete(productFormFields).where(eq(productFormFields.productId, input.productId));
+      await tx
+        .delete(productFormFields)
+        .where(
+          and(
+            eq(productFormFields.tenantId, input.tenantId),
+            eq(productFormFields.guildId, input.guildId),
+            inArray(productFormFields.productId, input.productIds),
+          ),
+        );
 
       if (input.formFields.length > 0) {
-        await tx.insert(productFormFields).values(
+        const rows = input.productIds.flatMap((productId) =>
           input.formFields.map((field) => ({
             id: ulid(),
             tenantId: input.tenantId,
             guildId: input.guildId,
-            productId: input.productId,
+            productId,
             fieldKey: field.key,
             label: field.label,
             fieldType: field.fieldType,
@@ -283,8 +370,93 @@ export class ProductRepository {
             validation: field.validation ?? null,
           })),
         );
+
+        await tx.insert(productFormFields).values(rows);
       }
     });
+  }
+
+  public async renameCategory(input: {
+    tenantId: string;
+    guildId: string;
+    category: string;
+    newCategory: string;
+  }): Promise<number> {
+    const productIds = await this.listProductIdsByCategory({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      category: input.category,
+    });
+
+    if (productIds.length === 0) {
+      return 0;
+    }
+
+    await this.db
+      .update(products)
+      .set({
+        category: input.newCategory,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(products.tenantId, input.tenantId),
+          eq(products.guildId, input.guildId),
+          inArray(products.id, productIds),
+        ),
+      );
+
+    return productIds.length;
+  }
+
+  public async deleteCategory(input: {
+    tenantId: string;
+    guildId: string;
+    category: string;
+  }): Promise<number> {
+    const productIds = await this.listProductIdsByCategory({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      category: input.category,
+    });
+
+    if (productIds.length === 0) {
+      return 0;
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(productFormFields)
+        .where(
+          and(
+            eq(productFormFields.tenantId, input.tenantId),
+            eq(productFormFields.guildId, input.guildId),
+            inArray(productFormFields.productId, productIds),
+          ),
+        );
+
+      await tx
+        .delete(productVariants)
+        .where(
+          and(
+            eq(productVariants.tenantId, input.tenantId),
+            eq(productVariants.guildId, input.guildId),
+            inArray(productVariants.productId, productIds),
+          ),
+        );
+
+      await tx
+        .delete(products)
+        .where(
+          and(
+            eq(products.tenantId, input.tenantId),
+            eq(products.guildId, input.guildId),
+            inArray(products.id, productIds),
+          ),
+        );
+    });
+
+    return productIds.length;
   }
 
   public async delete(input: {
