@@ -204,7 +204,23 @@ export class AuthService {
           return err(new AppError('DISCORD_ACCESS_TOKEN_INVALID', 'Discord login has expired. Please log in again.', 401));
         }
 
-        return err(new AppError('DISCORD_GUILDS_FETCH_FAILED', 'Failed to load Discord servers', 502));
+        if (guildsRes.status === 429) {
+          return err(
+            new AppError(
+              'DISCORD_GUILDS_RATE_LIMITED',
+              'Discord rate-limited server list loading. Wait a moment and reconnect Discord.',
+              429,
+            ),
+          );
+        }
+
+        return err(
+          new AppError(
+            'DISCORD_GUILDS_FETCH_FAILED',
+            `Failed to load Discord servers (${guildsRes.status}). Reconnect Discord and try again.`,
+            502,
+          ),
+        );
       }
 
       const guilds = (await guildsRes.json()) as OAuthDiscordGuild[];
