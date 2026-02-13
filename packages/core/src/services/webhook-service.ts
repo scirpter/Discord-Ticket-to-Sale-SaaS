@@ -360,6 +360,26 @@ export class WebhookService {
       });
 
       if (!created.created) {
+        const existingStatus = await this.orderRepository.getWebhookEventStatus(created.webhookEventId);
+        if (existingStatus === 'failed') {
+          logger.warn(
+            {
+              provider: 'woocommerce',
+              tenantId: integration.tenantId,
+              guildId: integration.guildId,
+              webhookEventId: created.webhookEventId,
+            },
+            'duplicate webhook received for failed event; scheduling retry',
+          );
+          await this.orderRepository.resetWebhookForRetry(created.webhookEventId);
+          this.enqueueWooProcessing({
+            integration,
+            payload,
+            webhookEventId: created.webhookEventId,
+          });
+          return ok({ status: 'accepted' });
+        }
+
         return ok({ status: 'duplicate' });
       }
 
@@ -384,37 +404,10 @@ export class WebhookService {
         return err(new AppError('INVALID_WEBHOOK_SIGNATURE', 'Invalid webhook signature', 401));
       }
 
-      void enqueueWebhookTask(async () => {
-        await pRetry(
-          async () => {
-            await this.processWooPaidEvent({
-              integration,
-              payload,
-              webhookEventId: created.webhookEventId,
-            });
-          },
-          {
-            retries: 3,
-            minTimeout: 1_000,
-            factor: 2,
-            onFailedAttempt: async (error) => {
-              const nextRetryAt = new Date(Date.now() + error.attemptNumber * 1000);
-              await this.orderRepository.markWebhookFailed({
-                webhookEventId: created.webhookEventId,
-                failureReason: error.error instanceof Error ? error.error.message : 'Webhook retry failure',
-                attemptCount: error.attemptNumber,
-                nextRetryAt,
-              });
-            },
-          },
-        ).catch(async (error) => {
-          await this.orderRepository.markWebhookFailed({
-            webhookEventId: created.webhookEventId,
-            failureReason: error instanceof Error ? error.message : 'Unknown webhook processing failure',
-            attemptCount: 4,
-            nextRetryAt: null,
-          });
-        });
+      this.enqueueWooProcessing({
+        integration,
+        payload,
+        webhookEventId: created.webhookEventId,
       });
 
       return ok({ status: 'accepted' });
@@ -464,6 +457,29 @@ export class WebhookService {
       });
 
       if (!created.created) {
+        const existingStatus = await this.orderRepository.getWebhookEventStatus(created.webhookEventId);
+        if (existingStatus === 'failed') {
+          logger.warn(
+            {
+              provider: 'voodoopay',
+              tenantId: integration.tenantId,
+              guildId: integration.guildId,
+              webhookEventId: created.webhookEventId,
+              orderSessionId,
+            },
+            'duplicate callback received for failed event; scheduling retry',
+          );
+          await this.orderRepository.resetWebhookForRetry(created.webhookEventId);
+          this.enqueueVoodooProcessing({
+            tenantId: integration.tenantId,
+            guildId: integration.guildId,
+            orderSessionId,
+            query: input.query,
+            webhookEventId: created.webhookEventId,
+          });
+          return ok({ status: 'accepted' });
+        }
+
         return ok({ status: 'duplicate' });
       }
 
@@ -489,45 +505,152 @@ export class WebhookService {
         return err(new AppError('INVALID_CALLBACK_SIGNATURE', 'Invalid callback token', 401));
       }
 
-      void enqueueWebhookTask(async () => {
-        await pRetry(
-          async () => {
-            await this.processVoodooPayPaidEvent({
-              tenantId: integration.tenantId,
-              guildId: integration.guildId,
-              orderSessionId,
-              query: input.query,
-              webhookEventId: created.webhookEventId,
-            });
-          },
-          {
-            retries: 3,
-            minTimeout: 1_000,
-            factor: 2,
-            onFailedAttempt: async (error) => {
-              const nextRetryAt = new Date(Date.now() + error.attemptNumber * 1000);
-              await this.orderRepository.markWebhookFailed({
-                webhookEventId: created.webhookEventId,
-                failureReason: error.error instanceof Error ? error.error.message : 'Webhook retry failure',
-                attemptCount: error.attemptNumber,
-                nextRetryAt,
-              });
-            },
-          },
-        ).catch(async (error) => {
-          await this.orderRepository.markWebhookFailed({
-            webhookEventId: created.webhookEventId,
-            failureReason: error instanceof Error ? error.message : 'Unknown webhook processing failure',
-            attemptCount: 4,
-            nextRetryAt: null,
-          });
-        });
+      this.enqueueVoodooProcessing({
+        tenantId: integration.tenantId,
+        guildId: integration.guildId,
+        orderSessionId,
+        query: input.query,
+        webhookEventId: created.webhookEventId,
       });
 
       return ok({ status: 'accepted' });
     } catch (error) {
       return err(fromUnknownError(error));
     }
+  }
+
+  private enqueueWooProcessing(input: {
+    integration: {
+      tenantId: string;
+      guildId: string;
+      wpBaseUrl: string;
+      consumerKey: string;
+      consumerSecret: string;
+    };
+    payload: Record<string, unknown>;
+    webhookEventId: string;
+  }): void {
+    void enqueueWebhookTask(async () => {
+      await pRetry(
+        async () => {
+          await this.processWooPaidEvent({
+            integration: input.integration,
+            payload: input.payload,
+            webhookEventId: input.webhookEventId,
+          });
+        },
+        {
+          retries: 3,
+          minTimeout: 1_000,
+          factor: 2,
+          onFailedAttempt: async (error) => {
+            const failureReason =
+              error.error instanceof Error ? error.error.message : 'Webhook retry failure';
+            const nextRetryAt = new Date(Date.now() + error.attemptNumber * 1000);
+            logger.warn(
+              {
+                provider: 'woocommerce',
+                webhookEventId: input.webhookEventId,
+                attemptNumber: error.attemptNumber,
+                retriesLeft: error.retriesLeft,
+                failureReason,
+              },
+              'webhook processing retry scheduled',
+            );
+            await this.orderRepository.markWebhookFailed({
+              webhookEventId: input.webhookEventId,
+              failureReason,
+              attemptCount: error.attemptNumber,
+              nextRetryAt,
+            });
+          },
+        },
+      ).catch(async (error) => {
+        const failureReason =
+          error instanceof Error ? error.message : 'Unknown webhook processing failure';
+        logger.error(
+          {
+            provider: 'woocommerce',
+            webhookEventId: input.webhookEventId,
+            failureReason,
+          },
+          'webhook processing failed permanently',
+        );
+        await this.orderRepository.markWebhookFailed({
+          webhookEventId: input.webhookEventId,
+          failureReason,
+          attemptCount: 4,
+          nextRetryAt: null,
+        });
+      });
+    });
+  }
+
+  private enqueueVoodooProcessing(input: {
+    tenantId: string;
+    guildId: string;
+    orderSessionId: string;
+    query: Record<string, string>;
+    webhookEventId: string;
+  }): void {
+    void enqueueWebhookTask(async () => {
+      await pRetry(
+        async () => {
+          await this.processVoodooPayPaidEvent({
+            tenantId: input.tenantId,
+            guildId: input.guildId,
+            orderSessionId: input.orderSessionId,
+            query: input.query,
+            webhookEventId: input.webhookEventId,
+          });
+        },
+        {
+          retries: 3,
+          minTimeout: 1_000,
+          factor: 2,
+          onFailedAttempt: async (error) => {
+            const failureReason =
+              error.error instanceof Error ? error.error.message : 'Webhook retry failure';
+            const nextRetryAt = new Date(Date.now() + error.attemptNumber * 1000);
+            logger.warn(
+              {
+                provider: 'voodoopay',
+                webhookEventId: input.webhookEventId,
+                orderSessionId: input.orderSessionId,
+                attemptNumber: error.attemptNumber,
+                retriesLeft: error.retriesLeft,
+                failureReason,
+              },
+              'webhook processing retry scheduled',
+            );
+            await this.orderRepository.markWebhookFailed({
+              webhookEventId: input.webhookEventId,
+              failureReason,
+              attemptCount: error.attemptNumber,
+              nextRetryAt,
+            });
+          },
+        },
+      ).catch(async (error) => {
+        const failureReason =
+          error instanceof Error ? error.message : 'Unknown webhook processing failure';
+        logger.error(
+          {
+            provider: 'voodoopay',
+            webhookEventId: input.webhookEventId,
+            orderSessionId: input.orderSessionId,
+            failureReason,
+          },
+          'webhook processing failed permanently',
+        );
+        await this.orderRepository.markWebhookFailed({
+          webhookEventId: input.webhookEventId,
+          failureReason,
+          attemptCount: 4,
+          nextRetryAt: null,
+        });
+      });
+    });
   }
 
   private async processWooPaidEvent(input: {
@@ -910,6 +1033,15 @@ export class WebhookService {
           return;
         } catch (error) {
           lastError = error;
+          logger.warn(
+            {
+              provider: 'webhook-paid-log',
+              channelId,
+              unauthorized: this.isDiscordUnauthorized(error),
+              errorMessage: error instanceof Error ? error.message : 'unknown',
+            },
+            'failed to post paid log to channel',
+          );
           if (this.isDiscordUnauthorized(error)) {
             tokenUnauthorized = true;
             break;

@@ -348,4 +348,29 @@ export class OrderRepository {
       })
       .where(eq(webhookEvents.id, webhookEventId));
   }
+
+  public async getWebhookEventStatus(
+    webhookEventId: string,
+  ): Promise<'received' | 'processed' | 'failed' | 'duplicate' | null> {
+    const row = await this.db.query.webhookEvents.findFirst({
+      where: eq(webhookEvents.id, webhookEventId),
+      columns: {
+        status: true,
+      },
+    });
+
+    return row?.status ?? null;
+  }
+
+  public async resetWebhookForRetry(webhookEventId: string): Promise<void> {
+    await this.db
+      .update(webhookEvents)
+      .set({
+        status: 'received',
+        failureReason: null,
+        nextRetryAt: null,
+        processedAt: null,
+      })
+      .where(eq(webhookEvents.id, webhookEventId));
+  }
 }
