@@ -35,6 +35,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       maxAge: 60 * 60 * 12,
       path: '/',
     });
+    response.cookies.set('vd_discord_access_token', result.value.discordAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 12,
+      path: '/',
+    });
     response.cookies.delete('vd_oauth_state');
 
     return response;

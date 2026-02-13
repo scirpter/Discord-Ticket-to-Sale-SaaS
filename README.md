@@ -52,10 +52,13 @@ Copy `.env.example` to `.env` and fill values.
 - Login endpoint: `GET /api/auth/discord/login`
 - Callback endpoint: `GET /api/auth/discord/callback`
 - Dashboard page: `/dashboard`
+- Dashboard now loads Discord servers from OAuth (manage-server capable guilds), auto-checks bot installation, and auto-links selected server to workspace.
+- Server settings now use Discord channel/role selectors instead of manual ID fields.
+- Workspace deletion is available from dashboard for owner/super-admin cleanup.
 
 ## Ticket Sale Flow
 
-- Staff runs `/sale` in a valid ticket channel (ticket metadata required).
+- Staff runs `/sale` in any server channel where they have required permissions.
 - Bot shows product+variant select.
 - Bot gathers custom form answers through modals.
 - Bot creates `order_session` and sends signed checkout URL to ticket.

@@ -1,4 +1,5 @@
 import { err, ok, type Result } from 'neverthrow';
+import crypto from 'node:crypto';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 
@@ -21,7 +22,7 @@ const voodooIntegrationInputSchema = z.object({
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'merchantWalletAddress must be a valid Polygon wallet address'),
   checkoutDomain: z.string().min(1).max(120).default('checkout.voodoo-pay.uk'),
-  callbackSecret: z.string().min(16).max(255),
+  callbackSecret: z.string().min(16).max(255).optional(),
 });
 
 export type WooIntegrationResolved = {
@@ -99,7 +100,12 @@ export class IntegrationService {
       guildId: string;
       payload: unknown;
     },
-  ): Promise<Result<{ webhookUrl: string; tenantWebhookKey: string }, AppError>> {
+  ): Promise<
+    Result<
+      { webhookUrl: string; tenantWebhookKey: string; callbackSecretGenerated: string | null },
+      AppError
+    >
+  > {
     try {
       const roleCheck = await this.authorizationService.ensureTenantRole(actor, {
         tenantId: input.tenantId,
@@ -114,8 +120,24 @@ export class IntegrationService {
         return err(validationError(parsed.error.issues));
       }
 
-      const webhookKey = ulid().toLowerCase();
       const config = parsed.data;
+      const existing = await this.integrationRepository.getVoodooPayIntegrationByGuild({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+
+      const webhookKey = existing?.tenantWebhookKey ?? ulid().toLowerCase();
+      const providedCallbackSecret = config.callbackSecret?.trim();
+
+      let callbackSecretEncrypted = existing?.callbackSecretEncrypted ?? '';
+      let callbackSecretGenerated: string | null = null;
+
+      if (providedCallbackSecret) {
+        callbackSecretEncrypted = encryptSecret(providedCallbackSecret, this.env.ENCRYPTION_KEY);
+      } else if (!existing) {
+        callbackSecretGenerated = crypto.randomBytes(32).toString('hex');
+        callbackSecretEncrypted = encryptSecret(callbackSecretGenerated, this.env.ENCRYPTION_KEY);
+      }
 
       await this.integrationRepository.upsertVoodooPayIntegration({
         tenantId: input.tenantId,
@@ -123,12 +145,13 @@ export class IntegrationService {
         merchantWalletAddress: config.merchantWalletAddress,
         checkoutDomain: config.checkoutDomain,
         tenantWebhookKey: webhookKey,
-        callbackSecretEncrypted: encryptSecret(config.callbackSecret, this.env.ENCRYPTION_KEY),
+        callbackSecretEncrypted,
       });
 
       return ok({
         webhookUrl: `${this.env.BOT_PUBLIC_URL}/api/webhooks/voodoopay/${webhookKey}`,
         tenantWebhookKey: webhookKey,
+        callbackSecretGenerated,
       });
     } catch (error) {
       return err(fromUnknownError(error));

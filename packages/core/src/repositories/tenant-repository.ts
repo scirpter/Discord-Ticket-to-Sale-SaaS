@@ -2,7 +2,23 @@
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
-import { guildConfigs, tenantGuilds, tenantMembers, tenants } from '../infra/db/schema/index.js';
+import {
+  auditLogs,
+  guildConfigs,
+  orderNotesCache,
+  orderSessions,
+  ordersPaid,
+  productFormFields,
+  products,
+  productVariants,
+  tenantGuilds,
+  tenantIntegrationsVoodooPay,
+  tenantIntegrationsWoo,
+  tenantMembers,
+  tenants,
+  ticketChannelMetadata,
+  webhookEvents,
+} from '../infra/db/schema/index.js';
 
 export type TenantRecord = {
   id: string;
@@ -180,7 +196,7 @@ export class TenantRepository {
         guildId: input.guildId,
         paidLogChannelId: null,
         staffRoleIds: [],
-        defaultCurrency: 'USD',
+        defaultCurrency: 'GBP',
         ticketMetadataKey: 'isTicket',
       });
     });
@@ -307,5 +323,30 @@ export class TenantRepository {
       defaultCurrency: input.defaultCurrency,
       ticketMetadataKey: input.ticketMetadataKey,
     };
+  }
+
+  public async deleteTenantCascade(input: { tenantId: string }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(orderNotesCache).where(eq(orderNotesCache.tenantId, input.tenantId));
+      await tx.delete(ordersPaid).where(eq(ordersPaid.tenantId, input.tenantId));
+      await tx.delete(webhookEvents).where(eq(webhookEvents.tenantId, input.tenantId));
+      await tx.delete(orderSessions).where(eq(orderSessions.tenantId, input.tenantId));
+      await tx.delete(ticketChannelMetadata).where(eq(ticketChannelMetadata.tenantId, input.tenantId));
+
+      await tx.delete(productFormFields).where(eq(productFormFields.tenantId, input.tenantId));
+      await tx.delete(productVariants).where(eq(productVariants.tenantId, input.tenantId));
+      await tx.delete(products).where(eq(products.tenantId, input.tenantId));
+
+      await tx
+        .delete(tenantIntegrationsVoodooPay)
+        .where(eq(tenantIntegrationsVoodooPay.tenantId, input.tenantId));
+      await tx.delete(tenantIntegrationsWoo).where(eq(tenantIntegrationsWoo.tenantId, input.tenantId));
+
+      await tx.delete(guildConfigs).where(eq(guildConfigs.tenantId, input.tenantId));
+      await tx.delete(tenantGuilds).where(eq(tenantGuilds.tenantId, input.tenantId));
+      await tx.delete(tenantMembers).where(eq(tenantMembers.tenantId, input.tenantId));
+      await tx.delete(auditLogs).where(eq(auditLogs.tenantId, input.tenantId));
+      await tx.delete(tenants).where(eq(tenants.id, input.tenantId));
+    });
   }
 }

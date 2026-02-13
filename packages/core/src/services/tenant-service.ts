@@ -114,6 +114,25 @@ export class TenantService {
     }
   }
 
+  public async deleteTenant(
+    actor: ActorContext,
+    input: { tenantId: string },
+  ): Promise<Result<void, AppError>> {
+    try {
+      if (!actor.isSuperAdmin) {
+        const access = await this.assertTenantAccess(actor, input.tenantId, 'owner');
+        if (access.isErr()) {
+          return err(access.error);
+        }
+      }
+
+      await this.tenantRepository.deleteTenantCascade({ tenantId: input.tenantId });
+      return ok(undefined);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
   public async setTenantStatus(
     actor: ActorContext,
     input: { tenantId: string; status: 'active' | 'disabled' },

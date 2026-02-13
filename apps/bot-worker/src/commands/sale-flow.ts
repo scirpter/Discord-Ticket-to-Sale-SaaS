@@ -49,20 +49,6 @@ async function enforceSalePreconditions(input: {
     };
   }
 
-  const isTicket = await saleService.isTicketChannel({
-    tenantId: tenant.tenantId,
-    guildId: input.guildId,
-    channelId: input.channelId,
-  });
-
-  if (!isTicket) {
-    return {
-      ok: false,
-      message:
-        'This channel is not marked as a ticket channel in ticket metadata. /sale is restricted to ticket channels.',
-    };
-  }
-
   return {
     ok: true,
     tenantId: tenant.tenantId,
@@ -152,7 +138,7 @@ export async function startSaleFlowFromCommand(
 ): Promise<void> {
   if (!interaction.inGuild() || !interaction.guildId || !interaction.channel || !interaction.guild) {
     await interaction.reply({
-      content: 'This command can only be used inside a guild ticket channel.',
+      content: 'This command can only be used inside a Discord server channel.',
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -176,7 +162,7 @@ export async function startSaleFlowFromCommand(
 export async function startSaleFlowFromButton(interaction: ButtonInteraction): Promise<void> {
   if (!interaction.inGuild() || !interaction.guildId || !interaction.channel || !interaction.guild) {
     await interaction.reply({
-      content: 'This button can only be used inside a guild ticket channel.',
+      content: 'This button can only be used inside a Discord server channel.',
       flags: MessageFlags.Ephemeral,
     });
     return;

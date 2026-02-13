@@ -33,3 +33,25 @@ export async function PATCH(
     return jsonError(error);
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ tenantId: string }> },
+): Promise<NextResponse> {
+  try {
+    const auth = await requireSession(request);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    const { tenantId } = await context.params;
+    const result = await tenantService.deleteTenant(auth.session, { tenantId });
+    if (result.isErr()) {
+      return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return jsonError(error);
+  }
+}

@@ -9,6 +9,7 @@ import { UserRepository } from '../repositories/user-repository.js';
 
 export type AuthCallbackResult = {
   sessionToken: string;
+  discordAccessToken: string;
   user: {
     id: string;
     discordUserId: string;
@@ -135,6 +136,7 @@ export class AuthService {
 
       return ok({
         sessionToken,
+        discordAccessToken: accessToken,
         user,
         isSuperAdmin,
         tenantIds,
@@ -180,6 +182,35 @@ export class AuthService {
       return ok(guilds);
     } catch (error) {
       return err(fromUnknownError(error));
+    }
+  }
+
+  public async listDiscordGuildsByAccessToken(
+    accessToken: string,
+  ): Promise<Result<OAuthDiscordGuild[], AppError>> {
+    if (!accessToken.trim()) {
+      return err(new AppError('DISCORD_ACCESS_TOKEN_MISSING', 'Discord access token is missing', 401));
+    }
+
+    try {
+      const guildsRes = await fetch(`${this.env.DISCORD_API_BASE_URL}/users/@me/guilds`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!guildsRes.ok) {
+        if (guildsRes.status === 401) {
+          return err(new AppError('DISCORD_ACCESS_TOKEN_INVALID', 'Discord login has expired. Please log in again.', 401));
+        }
+
+        return err(new AppError('DISCORD_GUILDS_FETCH_FAILED', 'Failed to load Discord servers', 502));
+      }
+
+      const guilds = (await guildsRes.json()) as OAuthDiscordGuild[];
+      return ok(Array.isArray(guilds) ? guilds : []);
+    } catch (error) {
+      return err(fromUnknownError(error, 'DISCORD_GUILDS_FETCH_EXCEPTION'));
     }
   }
 }

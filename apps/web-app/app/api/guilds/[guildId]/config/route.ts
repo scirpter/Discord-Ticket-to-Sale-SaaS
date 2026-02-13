@@ -6,6 +6,37 @@ import { jsonError, readJson, requireSession } from '@/lib/http';
 
 const tenantService = new TenantService();
 
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ guildId: string }> },
+): Promise<NextResponse> {
+  try {
+    const auth = await requireSession(request);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    const tenantId = request.nextUrl.searchParams.get('tenantId');
+    if (!tenantId) {
+      return NextResponse.json({ error: 'Missing tenantId query parameter' }, { status: 400 });
+    }
+
+    const { guildId } = await context.params;
+    const result = await tenantService.getGuildConfig(auth.session, {
+      tenantId,
+      guildId,
+    });
+
+    if (result.isErr()) {
+      return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
+    }
+
+    return NextResponse.json({ config: result.value });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ guildId: string }> },
@@ -22,7 +53,7 @@ export async function PATCH(
       paidLogChannelId: string | null;
       staffRoleIds: string[];
       defaultCurrency: string;
-      ticketMetadataKey: string;
+      ticketMetadataKey?: string;
     }>(request);
 
     const result = await tenantService.updateGuildConfig(auth.session, {
@@ -31,7 +62,7 @@ export async function PATCH(
       paidLogChannelId: body.paidLogChannelId,
       staffRoleIds: body.staffRoleIds,
       defaultCurrency: body.defaultCurrency,
-      ticketMetadataKey: body.ticketMetadataKey,
+      ticketMetadataKey: body.ticketMetadataKey ?? 'isTicket',
     });
 
     if (result.isErr()) {
