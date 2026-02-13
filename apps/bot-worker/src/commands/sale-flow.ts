@@ -176,7 +176,7 @@ export async function startSaleFlowFromCommand(
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.deferReply();
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const customer = interaction.options.getUser('customer') ?? interaction.user;
@@ -200,7 +200,7 @@ export async function startSaleFlowFromButton(interaction: ButtonInteraction): P
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.deferReply();
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
 

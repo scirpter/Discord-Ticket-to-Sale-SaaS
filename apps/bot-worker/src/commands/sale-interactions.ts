@@ -17,6 +17,10 @@ import { sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 const productRepository = new ProductRepository();
 const saleService = new SaleService();
 
+function canInteractWithDraft(draft: SaleDraft, userId: string): boolean {
+  return draft.customerDiscordUserId === userId || draft.staffDiscordUserId === userId;
+}
+
 function normalizeCategoryLabel(category: string): string {
   const trimmed = category.trim();
   if (!trimmed) {
@@ -372,6 +376,14 @@ export async function handleSaleSelect(interaction: StringSelectMenuInteraction)
     return;
   }
 
+  if (!canInteractWithDraft(draft, interaction.user.id)) {
+    await interaction.reply({
+      content: 'Only the selected customer (or the staff member who started this sale) can use this menu.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   const selectedValue = interaction.values[0]?.trim();
   if (!selectedValue) {
     await interaction.update({
@@ -412,6 +424,13 @@ export async function handleSaleModal(interaction: ModalSubmitInteraction): Prom
   if (!draft || !draft.productId || !draft.variantId) {
     await interaction.editReply({
       content: 'Sale draft expired. Start `/sale` again.',
+    });
+    return;
+  }
+
+  if (!canInteractWithDraft(draft, interaction.user.id)) {
+    await interaction.editReply({
+      content: 'Only the selected customer (or the staff member who started this sale) can submit this form.',
     });
     return;
   }
