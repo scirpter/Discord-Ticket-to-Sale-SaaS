@@ -223,7 +223,6 @@ export class SaleService {
     );
     const publicCheckoutUrl = this.buildPublicCheckoutUrl({
       orderSessionId: orderSession.id,
-      token,
     });
 
     if (voodooIntegration.isOk()) {
@@ -372,9 +371,8 @@ export class SaleService {
     return null;
   }
 
-  private buildPublicCheckoutUrl(input: { orderSessionId: string; token: string }): string {
+  private buildPublicCheckoutUrl(input: { orderSessionId: string }): string {
     const checkoutUrl = new URL(`/checkout/${input.orderSessionId}`, this.env.BOT_PUBLIC_URL);
-    checkoutUrl.searchParams.set('t', input.token);
     return checkoutUrl.toString();
   }
 

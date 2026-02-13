@@ -1,29 +1,22 @@
-import { AppError, OrderRepository, getEnv, verifyCheckoutToken } from '@voodoo/core';
+import { AppError, OrderRepository } from '@voodoo/core';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-const env = getEnv();
 const orderRepository = new OrderRepository();
 
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   context: { params: Promise<{ orderSessionId: string }> },
 ): Promise<NextResponse> {
   try {
     const { orderSessionId } = await context.params;
-    const token = request.nextUrl.searchParams.get('t') ?? request.nextUrl.searchParams.get('token');
-    if (!token) {
-      return NextResponse.json({ error: 'Missing token' }, { status: 400 });
-    }
-
-    const payload = verifyCheckoutToken(token, env.CHECKOUT_SIGNING_SECRET);
-    if (payload.orderSessionId !== orderSessionId) {
-      return NextResponse.json({ error: 'Token/session mismatch' }, { status: 401 });
-    }
-
     const session = await orderRepository.getOrderSessionById(orderSessionId);
     if (!session) {
       return NextResponse.json({ error: 'Order session not found' }, { status: 404 });
+    }
+
+    if (session.checkoutTokenExpiresAt.getTime() < Date.now()) {
+      return NextResponse.json({ error: 'Checkout session expired' }, { status: 410 });
     }
 
     if (session.status !== 'pending_payment') {
