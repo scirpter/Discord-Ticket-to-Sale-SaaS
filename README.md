@@ -61,7 +61,8 @@ Copy `.env.example` to `.env` and fill values.
 - Staff runs `/sale` in any server channel where they have required permissions.
 - Bot shows product+variant select.
 - Bot gathers custom form answers through modals.
-- Bot creates `order_session` and sends signed checkout URL to ticket.
+- Bot creates `order_session` and sends a short signed `/checkout/:orderSessionId` button URL to ticket.
+- `/checkout/:orderSessionId` securely redirects to the provider checkout URL server-side (avoids Discord URL-length limits).
 - If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
 - Woo webhook confirms payment (`processing`/`completed`).
 - Voodoo Pay callback endpoint can also finalize paid orders.

@@ -20,6 +20,7 @@ export type OrderSessionRecord = {
   variantId: string;
   status: 'pending_payment' | 'cancelled' | 'paid';
   answers: Record<string, string>;
+  checkoutUrl: string | null;
   checkoutTokenExpiresAt: Date;
 };
 
@@ -64,6 +65,7 @@ export class OrderRepository {
       variantId: input.variantId,
       status: 'pending_payment',
       answers: input.answers,
+      checkoutUrl: null,
       checkoutTokenExpiresAt: input.checkoutTokenExpiresAt,
     };
   }
@@ -91,6 +93,32 @@ export class OrderRepository {
       variantId: row.variantId,
       status: row.status,
       answers: row.answers,
+      checkoutUrl: row.checkoutUrl,
+      checkoutTokenExpiresAt: row.checkoutTokenExpiresAt,
+    };
+  }
+
+  public async getOrderSessionById(orderSessionId: string): Promise<OrderSessionRecord | null> {
+    const row = await this.db.query.orderSessions.findFirst({
+      where: eq(orderSessions.id, orderSessionId),
+    });
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      guildId: row.guildId,
+      ticketChannelId: row.ticketChannelId,
+      staffUserId: row.staffUserId,
+      customerDiscordId: row.customerDiscordId,
+      productId: row.productId,
+      variantId: row.variantId,
+      status: row.status,
+      answers: row.answers,
+      checkoutUrl: row.checkoutUrl,
       checkoutTokenExpiresAt: row.checkoutTokenExpiresAt,
     };
   }
@@ -128,8 +156,20 @@ export class OrderRepository {
       variantId: pending.variantId,
       status: pending.status,
       answers: pending.answers,
+      checkoutUrl: pending.checkoutUrl,
       checkoutTokenExpiresAt: pending.checkoutTokenExpiresAt,
     };
+  }
+
+  public async setCheckoutUrl(input: {
+    tenantId: string;
+    orderSessionId: string;
+    checkoutUrl: string;
+  }): Promise<void> {
+    await this.db
+      .update(orderSessions)
+      .set({ checkoutUrl: input.checkoutUrl, updatedAt: new Date() })
+      .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
   }
 
   public async cancelOrderSession(input: {

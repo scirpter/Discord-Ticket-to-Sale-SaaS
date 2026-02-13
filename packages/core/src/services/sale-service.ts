@@ -227,6 +227,10 @@ export class SaleService {
       },
       this.env.CHECKOUT_SIGNING_SECRET,
     );
+    const publicCheckoutUrl = this.buildPublicCheckoutUrl({
+      orderSessionId: orderSession.id,
+      token,
+    });
 
     if (voodooIntegration.isOk()) {
       const voodooCheckout = await this.buildVoodooPayCheckoutUrl({
@@ -247,9 +251,15 @@ export class SaleService {
         return err(voodooCheckout.error);
       }
 
-      return ok({
+      await this.orderRepository.setCheckoutUrl({
+        tenantId: input.tenantId,
         orderSessionId: orderSession.id,
         checkoutUrl: voodooCheckout.value,
+      });
+
+      return ok({
+        orderSessionId: orderSession.id,
+        checkoutUrl: publicCheckoutUrl,
         expiresAt: expiresAt.toISOString(),
       });
     }
@@ -265,10 +275,17 @@ export class SaleService {
 
     checkoutBase.searchParams.set('vd_token', token);
     checkoutBase.searchParams.set('vd_order_session_id', orderSession.id);
+    const providerCheckoutUrl = checkoutBase.toString();
+
+    await this.orderRepository.setCheckoutUrl({
+      tenantId: input.tenantId,
+      orderSessionId: orderSession.id,
+      checkoutUrl: providerCheckoutUrl,
+    });
 
     return ok({
       orderSessionId: orderSession.id,
-      checkoutUrl: checkoutBase.toString(),
+      checkoutUrl: publicCheckoutUrl,
       expiresAt: expiresAt.toISOString(),
     });
   }
@@ -359,6 +376,12 @@ export class SaleService {
     }
 
     return null;
+  }
+
+  private buildPublicCheckoutUrl(input: { orderSessionId: string; token: string }): string {
+    const checkoutUrl = new URL(`/checkout/${input.orderSessionId}`, this.env.BOT_PUBLIC_URL);
+    checkoutUrl.searchParams.set('token', input.token);
+    return checkoutUrl.toString();
   }
 
   private async tryCancelPendingOrderSession(input: {

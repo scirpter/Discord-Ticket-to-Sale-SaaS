@@ -1,0 +1,1 @@
+ALTER TABLE `order_sessions` ADD `checkout_url` text;

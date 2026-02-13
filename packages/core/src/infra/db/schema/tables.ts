@@ -251,6 +251,7 @@ export const orderSessions = mysqlTable(
       .notNull()
       .default('pending_payment'),
     answers: json('answers').$type<Record<string, string>>().notNull().default({}),
+    checkoutUrl: text('checkout_url'),
     checkoutTokenExpiresAt: timestamp('checkout_token_expires_at', { mode: 'date' }).notNull(),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
