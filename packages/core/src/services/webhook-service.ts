@@ -6,6 +6,7 @@ import { err, ok, type Result } from 'neverthrow';
 import { getEnv } from '../config/env.js';
 import { AppError, fromUnknownError } from '../domain/errors.js';
 import type { WooOrderNote, WooOrderPayload } from '../domain/types.js';
+import { logger } from '../infra/logger.js';
 import { postMessageToDiscordChannel } from '../integrations/discord-rest.js';
 import { OrderRepository } from '../repositories/order-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
@@ -291,6 +292,16 @@ export class WebhookService {
       }
 
       if (!signatureValid) {
+        logger.warn(
+          {
+            provider: 'woocommerce',
+            tenantId: integration.tenantId,
+            guildId: integration.guildId,
+            deliveryId,
+            topic,
+          },
+          'woo webhook rejected: invalid signature',
+        );
         await this.orderRepository.markWebhookFailed({
           webhookEventId: created.webhookEventId,
           failureReason: 'Invalid webhook signature',
@@ -385,6 +396,17 @@ export class WebhookService {
       }
 
       if (!signatureValid) {
+        logger.warn(
+          {
+            provider: 'voodoopay',
+            tenantId: integration.tenantId,
+            guildId: integration.guildId,
+            orderSessionId,
+            deliveryId,
+            queryKeys: Object.keys(input.query),
+          },
+          'voodoo callback rejected: invalid callback token',
+        );
         await this.orderRepository.markWebhookFailed({
           webhookEventId: created.webhookEventId,
           failureReason: 'Invalid callback token',
@@ -498,6 +520,16 @@ export class WebhookService {
     });
 
     if (!created) {
+      logger.info(
+        {
+          provider: 'woocommerce',
+          tenantId: orderSession.tenantId,
+          guildId: orderSession.guildId,
+          orderSessionId: orderSession.id,
+          webhookEventId: input.webhookEventId,
+        },
+        'paid event ignored as duplicate',
+      );
       await this.orderRepository.markWebhookDuplicate(input.webhookEventId);
       return;
     }
@@ -563,6 +595,19 @@ export class WebhookService {
       content: message,
     });
 
+    logger.info(
+      {
+        provider: 'woocommerce',
+        tenantId: orderSession.tenantId,
+        guildId: orderSession.guildId,
+        orderSessionId: orderSession.id,
+        webhookEventId: input.webhookEventId,
+        paidLogChannelId: config?.paidLogChannelId ?? null,
+        fallbackChannelId: orderSession.ticketChannelId,
+      },
+      'paid log posted',
+    );
+
     await this.orderRepository.markWebhookProcessed(input.webhookEventId);
   }
 
@@ -623,6 +668,16 @@ export class WebhookService {
     });
 
     if (!created) {
+      logger.info(
+        {
+          provider: 'voodoopay',
+          tenantId: orderSession.tenantId,
+          guildId: orderSession.guildId,
+          orderSessionId: orderSession.id,
+          webhookEventId: input.webhookEventId,
+        },
+        'paid event ignored as duplicate',
+      );
       await this.orderRepository.markWebhookDuplicate(input.webhookEventId);
       return;
     }
@@ -672,6 +727,19 @@ export class WebhookService {
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
     });
+
+    logger.info(
+      {
+        provider: 'voodoopay',
+        tenantId: orderSession.tenantId,
+        guildId: orderSession.guildId,
+        orderSessionId: orderSession.id,
+        webhookEventId: input.webhookEventId,
+        paidLogChannelId: config?.paidLogChannelId ?? null,
+        fallbackChannelId: orderSession.ticketChannelId,
+      },
+      'paid log posted',
+    );
 
     await this.orderRepository.markWebhookProcessed(input.webhookEventId);
   }

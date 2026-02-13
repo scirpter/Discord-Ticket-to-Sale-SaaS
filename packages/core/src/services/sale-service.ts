@@ -307,9 +307,10 @@ export class SaleService {
       );
 
       const callbackUrl = new URL(
-        `/api/webhooks/voodoopay/${input.integration.tenantWebhookKey}`,
+        `/api/webhooks/voodoopay/${input.integration.tenantWebhookKey}/${input.orderSessionId}/${callbackToken}`,
         this.env.BOT_PUBLIC_URL,
       );
+      // Keep query params for backward compatibility with existing callback handling.
       callbackUrl.searchParams.set('order_session_id', input.orderSessionId);
       callbackUrl.searchParams.set('cb_token', callbackToken);
 

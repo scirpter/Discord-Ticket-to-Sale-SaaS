@@ -62,21 +62,33 @@ async function bodyToObject(request: NextRequest): Promise<Record<string, string
   return {};
 }
 
+function withPathFallback(
+  payload: Record<string, string>,
+  params: { orderSessionId: string; cbToken: string },
+): Record<string, string> {
+  return {
+    ...payload,
+    order_session_id: payload.order_session_id ?? params.orderSessionId,
+    cb_token: payload.cb_token ?? params.cbToken,
+  };
+}
+
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ tenantWebhookKey: string }> },
+  context: { params: Promise<{ tenantWebhookKey: string; orderSessionId: string; cbToken: string }> },
 ): Promise<NextResponse> {
   try {
-    const { tenantWebhookKey } = await context.params;
-    const query = queryToObject(request);
+    const { tenantWebhookKey, orderSessionId, cbToken } = await context.params;
+    const query = withPathFallback(queryToObject(request), { orderSessionId, cbToken });
+
     logger.info(
       {
         provider: 'voodoopay',
         method: 'GET',
-        route: 'webhook',
+        route: 'webhook-path',
         queryKeys: Object.keys(query),
       },
-      'voodoo callback received',
+      'voodoo callback (path) received',
     );
 
     const result = await webhookService.handleVoodooPayCallback({
@@ -89,48 +101,55 @@ export async function GET(
         {
           provider: 'voodoopay',
           method: 'GET',
-          route: 'webhook',
+          route: 'webhook-path',
           errorCode: result.error.code,
           statusCode: result.error.statusCode,
           message: result.error.message,
         },
-        'voodoo callback rejected',
+        'voodoo callback (path) rejected',
       );
       return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
     }
 
     logger.info(
-      { provider: 'voodoopay', method: 'GET', route: 'webhook', status: result.value.status },
-      'voodoo callback accepted',
+      { provider: 'voodoopay', method: 'GET', route: 'webhook-path', status: result.value.status },
+      'voodoo callback (path) accepted',
     );
     return NextResponse.json(result.value, { status: 202 });
   } catch (error) {
-    logger.error({ provider: 'voodoopay', method: 'GET', route: 'webhook', err: error }, 'voodoo callback failed');
+    logger.error(
+      { provider: 'voodoopay', method: 'GET', route: 'webhook-path', err: error },
+      'voodoo callback (path) failed',
+    );
     return jsonError(error);
   }
 }
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ tenantWebhookKey: string }> },
+  context: { params: Promise<{ tenantWebhookKey: string; orderSessionId: string; cbToken: string }> },
 ): Promise<NextResponse> {
   try {
-    const { tenantWebhookKey } = await context.params;
+    const { tenantWebhookKey, orderSessionId, cbToken } = await context.params;
     const query = queryToObject(request);
     const body = await bodyToObject(request);
-    const merged = {
-      ...body,
-      ...query,
-    };
+    const merged = withPathFallback(
+      {
+        ...body,
+        ...query,
+      },
+      { orderSessionId, cbToken },
+    );
+
     logger.info(
       {
         provider: 'voodoopay',
         method: 'POST',
-        route: 'webhook',
+        route: 'webhook-path',
         queryKeys: Object.keys(query),
         bodyKeys: Object.keys(body),
       },
-      'voodoo callback received',
+      'voodoo callback (path) received',
     );
 
     const result = await webhookService.handleVoodooPayCallback({
@@ -143,25 +162,25 @@ export async function POST(
         {
           provider: 'voodoopay',
           method: 'POST',
-          route: 'webhook',
+          route: 'webhook-path',
           errorCode: result.error.code,
           statusCode: result.error.statusCode,
           message: result.error.message,
         },
-        'voodoo callback rejected',
+        'voodoo callback (path) rejected',
       );
       return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
     }
 
     logger.info(
-      { provider: 'voodoopay', method: 'POST', route: 'webhook', status: result.value.status },
-      'voodoo callback accepted',
+      { provider: 'voodoopay', method: 'POST', route: 'webhook-path', status: result.value.status },
+      'voodoo callback (path) accepted',
     );
     return NextResponse.json(result.value, { status: 202 });
   } catch (error) {
     logger.error(
-      { provider: 'voodoopay', method: 'POST', route: 'webhook', err: error },
-      'voodoo callback failed',
+      { provider: 'voodoopay', method: 'POST', route: 'webhook-path', err: error },
+      'voodoo callback (path) failed',
     );
     return jsonError(error);
   }
