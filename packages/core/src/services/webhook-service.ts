@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import pRetry, { AbortError } from 'p-retry';
 import { err, ok, type Result } from 'neverthrow';
 
+import { getEnv } from '../config/env.js';
 import { AppError, fromUnknownError } from '../domain/errors.js';
 import type { WooOrderNote, WooOrderPayload } from '../domain/types.js';
 import { postMessageToDiscordChannel } from '../integrations/discord-rest.js';
@@ -101,7 +102,21 @@ function hasTruthySignal(value: string | null): boolean {
   }
 
   const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y';
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y') {
+    return true;
+  }
+
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) && numeric > 0;
+}
+
+function hasPositiveAmount(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const numeric = Number(value.trim());
+  return Number.isFinite(numeric) && numeric > 0;
 }
 
 function normalizeStatus(value: string | null): string | null {
@@ -144,7 +159,7 @@ type VoodooPaymentState = {
   transactionId: string | null;
 };
 
-function resolveVoodooPaymentState(query: Record<string, string>): VoodooPaymentState {
+export function resolveVoodooPaymentState(query: Record<string, string>): VoodooPaymentState {
   const txidIn = firstNonEmpty(query, ['txid_in', 'tx_in', 'incoming_txid', 'txidin']);
   const txidOut = firstNonEmpty(query, ['txid_out', 'tx_out', 'outgoing_txid', 'txidout']);
   const transactionId = firstNonEmpty(query, [
@@ -157,7 +172,12 @@ function resolveVoodooPaymentState(query: Record<string, string>): VoodooPayment
   ]);
 
   const status = normalizeStatus(firstNonEmpty(query, ['status', 'payment_status', 'state', 'result']));
-  const confirmed = hasTruthySignal(firstNonEmpty(query, ['confirmed', 'is_confirmed', 'paid', 'success']));
+  const confirmed = hasTruthySignal(
+    firstNonEmpty(query, ['confirmed', 'is_confirmed', 'paid', 'success', 'confirmations']),
+  );
+  const positiveAmount = hasPositiveAmount(
+    firstNonEmpty(query, ['value_forwarded_coin', 'value_coin', 'amount', 'value']),
+  );
 
   if (status && VOODOO_FAILED_STATUSES.has(status)) {
     return {
@@ -169,7 +189,7 @@ function resolveVoodooPaymentState(query: Record<string, string>): VoodooPayment
     };
   }
 
-  if (txidIn || txidOut || transactionId || confirmed) {
+  if (txidIn || txidOut || transactionId || confirmed || positiveAmount) {
     return {
       paid: true,
       status,
@@ -198,7 +218,7 @@ function resolveVoodooPaymentState(query: Record<string, string>): VoodooPayment
   };
 }
 
-function buildVoodooDeliveryId(orderSessionId: string, query: Record<string, string>): string {
+export function buildVoodooDeliveryId(orderSessionId: string, query: Record<string, string>): string {
   const fingerprint = {
     orderSessionId,
     ipnToken: firstNonEmpty(query, ['ipn_token', 'callback_id']),
@@ -206,7 +226,7 @@ function buildVoodooDeliveryId(orderSessionId: string, query: Record<string, str
     txidOut: firstNonEmpty(query, ['txid_out', 'tx_out', 'outgoing_txid', 'txidout']),
     txid: firstNonEmpty(query, ['txid', 'transaction_id', 'transaction_hash', 'hash']),
     status: normalizeStatus(firstNonEmpty(query, ['status', 'payment_status', 'state', 'result'])),
-    value: firstNonEmpty(query, ['value_forwarded_coin', 'amount', 'value']),
+    value: firstNonEmpty(query, ['value_forwarded_coin', 'value_coin', 'amount', 'value']),
   };
 
   const hash = crypto.createHash('sha256').update(JSON.stringify(fingerprint)).digest('hex').slice(0, 60);
@@ -222,6 +242,7 @@ function fitDiscordMessage(content: string, maxLength = 1900): string {
 }
 
 export class WebhookService {
+  private readonly env = getEnv();
   private readonly integrationService = new IntegrationService();
   private readonly orderRepository = new OrderRepository();
   private readonly productRepository = new ProductRepository();
@@ -513,9 +534,9 @@ export class WebhookService {
       .map(([key, value]) => `- ${key}: ${value}`)
       .join('\n');
 
-    const botTokenResult = await this.adminService.getResolvedBotToken();
-    if (botTokenResult.isErr()) {
-      throw new AbortError(botTokenResult.error.message);
+    const botTokensResult = await this.getBotTokenCandidates();
+    if (botTokensResult.isErr()) {
+      throw new AbortError(botTokensResult.error.message);
     }
 
     const message = [
@@ -536,7 +557,7 @@ export class WebhookService {
     ].join('\n');
 
     await this.postPaidLogMessage({
-      botToken: botTokenResult.value,
+      botTokens: botTokensResult.value,
       preferredChannelId: config?.paidLogChannelId ?? null,
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
@@ -622,9 +643,9 @@ export class WebhookService {
       .map(([key, value]) => `- ${key}: ${value}`)
       .join('\n');
 
-    const botTokenResult = await this.adminService.getResolvedBotToken();
-    if (botTokenResult.isErr()) {
-      throw new AbortError(botTokenResult.error.message);
+    const botTokensResult = await this.getBotTokenCandidates();
+    if (botTokensResult.isErr()) {
+      throw new AbortError(botTokensResult.error.message);
     }
 
     const message = [
@@ -646,7 +667,7 @@ export class WebhookService {
     ].join('\n');
 
     await this.postPaidLogMessage({
-      botToken: botTokenResult.value,
+      botTokens: botTokensResult.value,
       preferredChannelId: config?.paidLogChannelId ?? null,
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
@@ -655,8 +676,44 @@ export class WebhookService {
     await this.orderRepository.markWebhookProcessed(input.webhookEventId);
   }
 
+  private async getBotTokenCandidates(): Promise<Result<string[], AppError>> {
+    const resolved = await this.adminService.getResolvedBotToken();
+    if (resolved.isErr()) {
+      return err(resolved.error);
+    }
+
+    const candidates = [resolved.value.trim()];
+    const envToken = this.env.DISCORD_TOKEN.trim();
+    if (envToken && !candidates.includes(envToken)) {
+      candidates.push(envToken);
+    }
+
+    return ok(candidates.filter(Boolean));
+  }
+
+  private isDiscordUnauthorized(error: unknown): boolean {
+    if (!(error instanceof AppError)) {
+      return false;
+    }
+
+    if (error.code !== 'DISCORD_LOG_POST_FAILED') {
+      return false;
+    }
+
+    if (
+      typeof error.details === 'object' &&
+      error.details !== null &&
+      'discordStatus' in error.details &&
+      (error.details as { discordStatus?: unknown }).discordStatus === 401
+    ) {
+      return true;
+    }
+
+    return error.message.includes('(401)');
+  }
+
   private async postPaidLogMessage(input: {
-    botToken: string;
+    botTokens: string[];
     preferredChannelId: string | null;
     fallbackChannelId: string;
     content: string;
@@ -670,17 +727,34 @@ export class WebhookService {
       throw new AbortError('No channel available for paid-order log message');
     }
 
+    const uniqueTokens = [...new Set(input.botTokens.map((token) => token.trim()).filter(Boolean))];
+    if (uniqueTokens.length === 0) {
+      throw new AbortError('No bot token available for paid-order log message');
+    }
+
     let lastError: unknown = null;
-    for (const channelId of uniqueChannels) {
-      try {
-        await postMessageToDiscordChannel({
-          botToken: input.botToken,
-          channelId,
-          content: fitDiscordMessage(input.content),
-        });
-        return;
-      } catch (error) {
-        lastError = error;
+    for (const botToken of uniqueTokens) {
+      let tokenUnauthorized = false;
+
+      for (const channelId of uniqueChannels) {
+        try {
+          await postMessageToDiscordChannel({
+            botToken,
+            channelId,
+            content: fitDiscordMessage(input.content),
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (this.isDiscordUnauthorized(error)) {
+            tokenUnauthorized = true;
+            break;
+          }
+        }
+      }
+
+      if (tokenUnauthorized) {
+        continue;
       }
     }
 

@@ -25,7 +25,7 @@ export async function postMessageToDiscordChannel(input: {
       'DISCORD_LOG_POST_FAILED',
       `Failed to post paid-order log message (${response.status})`,
       502,
-      { body },
+      { body, discordStatus: response.status },
     );
   }
 }
