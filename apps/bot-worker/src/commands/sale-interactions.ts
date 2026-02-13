@@ -1,7 +1,8 @@
-﻿import {
+import {
   ActionRowBuilder,
   MessageFlags,
   ModalBuilder,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
   type Interaction,
@@ -10,11 +11,33 @@
 } from 'discord.js';
 import { ProductRepository, SaleService, TenantRepository } from '@voodoo/core';
 
-import { getSaleDraft, removeSaleDraft, updateSaleDraft } from '../flows/sale-draft-store.js';
+import { getSaleDraft, removeSaleDraft, updateSaleDraft, type SaleDraft } from '../flows/sale-draft-store.js';
 import { sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 
 const productRepository = new ProductRepository();
 const saleService = new SaleService();
+
+function normalizeCategoryLabel(category: string): string {
+  const trimmed = category.trim();
+  if (!trimmed) {
+    return 'Uncategorized';
+  }
+
+  return trimmed;
+}
+
+function buildSelectRow(input: {
+  customId: string;
+  placeholder: string;
+  options: Array<{ label: string; description?: string; value: string }>;
+}): ActionRowBuilder<StringSelectMenuBuilder> {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(input.customId)
+    .setPlaceholder(input.placeholder)
+    .addOptions(input.options.slice(0, 25));
+
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+}
 
 function buildFormModal(
   draftId: string,
@@ -55,64 +78,190 @@ function buildFormModal(
   return modal;
 }
 
-async function finalizeDraft(interaction: ModalSubmitInteraction, draftId: string): Promise<void> {
-  const draft = getSaleDraft(draftId);
-  if (!draft || !draft.productId || !draft.variantId || !interaction.channel || !interaction.inGuild()) {
-    await interaction.editReply({
+async function finalizeDraft(input: {
+  draftId: string;
+  draft: SaleDraft;
+  interaction: {
+    channel: ModalSubmitInteraction['channel'] | StringSelectMenuInteraction['channel'];
+    editReply: (payload: { content: string; components?: [] }) => Promise<unknown>;
+    inGuild: () => boolean;
+  };
+}): Promise<void> {
+  if (!input.interaction.inGuild() || !input.interaction.channel || !input.draft.productId || !input.draft.variantId) {
+    await input.interaction.editReply({
       content: 'Sale draft expired. Please start again with `/sale`.',
-    });
-    return;
-  }
-
-  const created = await saleService.createSaleSessionFromBot({
-    tenantId: draft.tenantId,
-    guildId: draft.guildId,
-    ticketChannelId: draft.ticketChannelId,
-    staffDiscordUserId: draft.staffDiscordUserId,
-    customerDiscordUserId: draft.customerDiscordUserId,
-    productId: draft.productId,
-    variantId: draft.variantId,
-    answers: draft.answers,
-  });
-
-  if (created.isErr()) {
-    await interaction.editReply({ content: created.error.message });
-    return;
-  }
-
-  removeSaleDraft(draftId);
-
-  await sendCheckoutMessage(interaction.channel as any, {
-    checkoutUrl: created.value.checkoutUrl,
-    orderSessionId: created.value.orderSessionId,
-    customerDiscordUserId: draft.customerDiscordUserId,
-  });
-
-  await interaction.editReply({
-    content: `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
-  });
-}
-
-export async function handleSaleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-  const [, , draftId] = interaction.customId.split(':');
-  if (!draftId) {
-    await interaction.update({ content: 'Invalid sale draft.', components: [] });
-    return;
-  }
-
-  const draft = getSaleDraft(draftId);
-  if (!draft) {
-    await interaction.update({
-      content: 'Sale draft expired. Start `/sale` again.',
       components: [],
     });
     return;
   }
 
-  const [productId, variantId] = (interaction.values[0] ?? '').split('|');
-  if (!productId || !variantId) {
+  const created = await saleService.createSaleSessionFromBot({
+    tenantId: input.draft.tenantId,
+    guildId: input.draft.guildId,
+    ticketChannelId: input.draft.ticketChannelId,
+    staffDiscordUserId: input.draft.staffDiscordUserId,
+    customerDiscordUserId: input.draft.customerDiscordUserId,
+    productId: input.draft.productId,
+    variantId: input.draft.variantId,
+    answers: input.draft.answers,
+  });
+
+  if (created.isErr()) {
+    await input.interaction.editReply({ content: created.error.message, components: [] });
+    return;
+  }
+
+  removeSaleDraft(input.draftId);
+
+  await sendCheckoutMessage(input.interaction.channel as any, {
+    checkoutUrl: created.value.checkoutUrl,
+    orderSessionId: created.value.orderSessionId,
+    customerDiscordUserId: input.draft.customerDiscordUserId,
+  });
+
+  await input.interaction.editReply({
+    content: `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
+    components: [],
+  });
+}
+
+async function handleCategorySelection(
+  interaction: StringSelectMenuInteraction,
+  draft: SaleDraft,
+  selectedCategory: string,
+): Promise<void> {
+  const optionsResult = await saleService.getSaleOptions({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+  });
+  if (optionsResult.isErr()) {
+    await interaction.update({ content: optionsResult.error.message, components: [] });
+    return;
+  }
+
+  const category = normalizeCategoryLabel(selectedCategory);
+  const products = optionsResult.value.filter((product) => {
+    if (product.variants.length === 0) {
+      return false;
+    }
+
+    return normalizeCategoryLabel(product.category).toLowerCase() === category.toLowerCase();
+  });
+
+  if (products.length === 0) {
     await interaction.update({
-      content: 'Invalid product selection. Start `/sale` again.',
+      content: `No products found for category "${category}". Start \`/sale\` again.`,
+      components: [],
+    });
+    return;
+  }
+
+  draft.category = category;
+  draft.productId = null;
+  draft.variantId = null;
+  draft.formFields = [];
+  draft.answers = {};
+  updateSaleDraft(draft);
+
+  const row = buildSelectRow({
+    customId: `sale:start:${draft.id}:product`,
+    placeholder: 'Select product',
+    options: products
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((product) => ({
+        label: product.name.slice(0, 100),
+        description: `${product.variants.length} price option(s)`.slice(0, 100),
+        value: product.productId,
+      })),
+  });
+
+  await interaction.update({
+    content: `Step 2/4: Category **${category}** selected. Now select product for <@${draft.customerDiscordUserId}>`,
+    components: [row],
+  });
+}
+
+async function handleProductSelection(
+  interaction: StringSelectMenuInteraction,
+  draft: SaleDraft,
+  selectedProductId: string,
+): Promise<void> {
+  if (!draft.category) {
+    await interaction.update({
+      content: 'Category not selected. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  const optionsResult = await saleService.getSaleOptions({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+  });
+  if (optionsResult.isErr()) {
+    await interaction.update({ content: optionsResult.error.message, components: [] });
+    return;
+  }
+
+  const selectedProduct = optionsResult.value.find((product) => product.productId === selectedProductId);
+  if (!selectedProduct) {
+    await interaction.update({
+      content: 'Product not found. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (normalizeCategoryLabel(selectedProduct.category).toLowerCase() !== draft.category.toLowerCase()) {
+    await interaction.update({
+      content: 'Selected product does not belong to the chosen category. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (selectedProduct.variants.length === 0) {
+    await interaction.update({
+      content: 'No variants available for this product. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  draft.productId = selectedProduct.productId;
+  draft.variantId = null;
+  draft.formFields = [];
+  draft.answers = {};
+  updateSaleDraft(draft);
+
+  const row = buildSelectRow({
+    customId: `sale:start:${draft.id}:variant`,
+    placeholder: 'Select price option',
+    options: selectedProduct.variants.map((variant) => ({
+      label: variant.label.slice(0, 100),
+      description: `${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`.slice(0, 100),
+      value: variant.variantId,
+    })),
+  });
+
+  await interaction.update({
+    content: [
+      `Step 3/4: Product **${selectedProduct.name}** selected.`,
+      `Category: **${draft.category}**`,
+      'Now select a price option.',
+    ].join('\n'),
+    components: [row],
+  });
+}
+
+async function handleVariantSelection(
+  interaction: StringSelectMenuInteraction,
+  draft: SaleDraft,
+  selectedVariantId: string,
+): Promise<void> {
+  if (!draft.productId) {
+    await interaction.update({
+      content: 'Product not selected. Start `/sale` again.',
       components: [],
     });
     return;
@@ -121,12 +270,21 @@ export async function handleSaleSelect(interaction: StringSelectMenuInteraction)
   const product = await productRepository.getById({
     tenantId: draft.tenantId,
     guildId: draft.guildId,
-    productId,
+    productId: draft.productId,
   });
 
   if (!product) {
     await interaction.update({
       content: 'Product not found. Please restart `/sale`.',
+      components: [],
+    });
+    return;
+  }
+
+  const variant = product.variants.find((item) => item.id === selectedVariantId);
+  if (!variant) {
+    await interaction.update({
+      content: 'Variant not found. Please restart `/sale`.',
       components: [],
     });
     return;
@@ -141,12 +299,73 @@ export async function handleSaleSelect(interaction: StringSelectMenuInteraction)
     return;
   }
 
-  draft.productId = productId;
-  draft.variantId = variantId;
+  draft.variantId = selectedVariantId;
+  draft.formFields = product.formFields.map((field) => ({
+    fieldKey: field.fieldKey,
+    required: field.required,
+  }));
+  draft.answers = {};
   updateSaleDraft(draft);
+
+  if (product.formFields.length === 0) {
+    await interaction.deferUpdate();
+    await finalizeDraft({
+      draftId: draft.id,
+      draft,
+      interaction: {
+        channel: interaction.channel,
+        editReply: async (payload) => interaction.editReply(payload),
+        inGuild: () => interaction.inGuild(),
+      },
+    });
+    return;
+  }
 
   const modal = buildFormModal(draft.id, product.formFields, draft.answers);
   await interaction.showModal(modal);
+}
+
+export async function handleSaleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  const [, , draftId, step] = interaction.customId.split(':');
+  if (!draftId || !step) {
+    await interaction.update({ content: 'Invalid sale draft.', components: [] });
+    return;
+  }
+
+  const draft = getSaleDraft(draftId);
+  if (!draft) {
+    await interaction.update({
+      content: 'Sale draft expired. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  const selectedValue = interaction.values[0]?.trim();
+  if (!selectedValue) {
+    await interaction.update({
+      content: 'Invalid selection. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (step === 'category') {
+    await handleCategorySelection(interaction, draft, selectedValue);
+    return;
+  }
+
+  if (step === 'product') {
+    await handleProductSelection(interaction, draft, selectedValue);
+    return;
+  }
+
+  if (step === 'variant') {
+    await handleVariantSelection(interaction, draft, selectedValue);
+    return;
+  }
+
+  await interaction.update({ content: 'Unknown sale step. Start `/sale` again.', components: [] });
 }
 
 export async function handleSaleModal(interaction: ModalSubmitInteraction): Promise<void> {
@@ -159,34 +378,51 @@ export async function handleSaleModal(interaction: ModalSubmitInteraction): Prom
   }
 
   const draft = getSaleDraft(draftId);
-  if (!draft || !draft.productId) {
+  if (!draft || !draft.productId || !draft.variantId) {
     await interaction.editReply({
       content: 'Sale draft expired. Start `/sale` again.',
     });
     return;
   }
 
-  const product = await productRepository.getById({
-    tenantId: draft.tenantId,
-    guildId: draft.guildId,
-    productId: draft.productId,
-  });
+  for (const field of draft.formFields) {
+    let value = '';
 
-  if (!product) {
-    await interaction.editReply({
-      content: 'Product not found. Restart `/sale`.',
-    });
-    return;
-  }
+    try {
+      value = interaction.fields.getTextInputValue(field.fieldKey);
+    } catch {
+      if (field.required) {
+        await interaction.editReply({
+          content: 'Form questions changed during checkout. Please restart `/sale`.',
+        });
+        return;
+      }
 
-  for (const field of product.formFields) {
-    const value = interaction.fields.getTextInputValue(field.fieldKey);
-    draft.answers[field.fieldKey] = value;
+      continue;
+    }
+
+    const normalizedValue = value.trim();
+    if (field.required && !normalizedValue) {
+      await interaction.editReply({
+        content: `Required field is missing: \`${field.fieldKey}\`. Please restart \`/sale\`.`,
+      });
+      return;
+    }
+
+    draft.answers[field.fieldKey] = normalizedValue;
   }
 
   updateSaleDraft(draft);
 
-  await finalizeDraft(interaction, draft.id);
+  await finalizeDraft({
+    draftId: draft.id,
+    draft,
+    interaction: {
+      channel: interaction.channel,
+      editReply: async (payload) => interaction.editReply(payload),
+      inGuild: () => interaction.inGuild(),
+    },
+  });
 }
 
 export async function handleSaleCancel(interaction: Interaction): Promise<void> {

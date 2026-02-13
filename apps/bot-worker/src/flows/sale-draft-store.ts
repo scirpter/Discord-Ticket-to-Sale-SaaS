@@ -7,8 +7,13 @@ export type SaleDraft = {
   ticketChannelId: string;
   staffDiscordUserId: string;
   customerDiscordUserId: string;
+  category: string | null;
   productId: string | null;
   variantId: string | null;
+  formFields: Array<{
+    fieldKey: string;
+    required: boolean;
+  }>;
   answers: Record<string, string>;
   expiresAt: number;
 };
@@ -31,8 +36,10 @@ export function createSaleDraft(input: {
     ticketChannelId: input.ticketChannelId,
     staffDiscordUserId: input.staffDiscordUserId,
     customerDiscordUserId: input.customerDiscordUserId,
+    category: null,
     productId: null,
     variantId: null,
+    formFields: [],
     answers: {},
     expiresAt: Date.now() + DRAFT_TTL_MS,
   };

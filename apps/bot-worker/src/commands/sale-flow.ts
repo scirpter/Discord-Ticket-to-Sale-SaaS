@@ -18,6 +18,15 @@ import { createSaleDraft } from '../flows/sale-draft-store.js';
 const tenantRepository = new TenantRepository();
 const saleService = new SaleService();
 
+function normalizeCategoryLabel(category: string): string {
+  const trimmed = category.trim();
+  if (!trimmed) {
+    return 'Uncategorized';
+  }
+
+  return trimmed;
+}
+
 async function resolveTenantFromGuild(guildId: string): Promise<{ tenantId: string; guildId: string } | null> {
   return tenantRepository.getTenantByGuildId(guildId);
 }
@@ -96,15 +105,40 @@ async function runSaleStart(input: {
     return;
   }
 
-  const options = optionsResult.value.flatMap((product) =>
-    product.variants.map((variant) => ({
-      label: `${product.name} • ${variant.label}`.slice(0, 100),
-      description: `${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`.slice(0, 100),
-      value: `${product.productId}|${variant.variantId}`,
-    })),
-  );
+  const products = optionsResult.value.filter((product) => product.variants.length > 0);
+  if (products.length === 0) {
+    await input.editReply({
+      content: 'No active products/variants are configured for this guild yet.',
+      components: [],
+    });
+    return;
+  }
 
-  if (options.length === 0) {
+  const categoryCounts = new Map<string, { label: string; productCount: number }>();
+  for (const product of products) {
+    const normalizedCategory = normalizeCategoryLabel(product.category);
+    const key = normalizedCategory.toLowerCase();
+    const existing = categoryCounts.get(key);
+    if (existing) {
+      existing.productCount += 1;
+      continue;
+    }
+
+    categoryCounts.set(key, {
+      label: normalizedCategory,
+      productCount: 1,
+    });
+  }
+
+  const categoryOptions = Array.from(categoryCounts.values())
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .map((category) => ({
+      label: category.label.slice(0, 100),
+      description: `${category.productCount} product(s)`.slice(0, 100),
+      value: category.label,
+    }));
+
+  if (categoryOptions.length === 0) {
     await input.editReply({
       content: 'No active products/variants are configured for this guild yet.',
       components: [],
@@ -121,14 +155,14 @@ async function runSaleStart(input: {
   });
 
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`sale:start:${draft.id}`)
-    .setPlaceholder('Select product & variant')
-    .addOptions(options.slice(0, 25));
+    .setCustomId(`sale:start:${draft.id}:category`)
+    .setPlaceholder('Select category')
+    .addOptions(categoryOptions.slice(0, 25));
 
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 
   await input.editReply({
-    content: `Select the product/variant for <@${input.customerUserId}>`,
+    content: `Step 1/4: Select category for <@${input.customerUserId}>`,
     components: [row],
   });
 }
