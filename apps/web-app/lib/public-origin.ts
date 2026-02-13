@@ -41,6 +41,30 @@ export function resolvePublicOrigin(request: NextRequest): string {
     return `${requestProto}://${requestHost}`;
   }
 
+  const originHeader = firstHeaderValue(request.headers.get('origin'));
+  if (originHeader) {
+    try {
+      const parsedOrigin = new URL(originHeader).origin;
+      if (!isLocalHost(new URL(parsedOrigin).host)) {
+        return parsedOrigin;
+      }
+    } catch {
+      // ignore invalid origin header
+    }
+  }
+
+  const refererHeader = request.headers.get('referer');
+  if (refererHeader) {
+    try {
+      const refererOrigin = new URL(refererHeader).origin;
+      if (!isLocalHost(new URL(refererOrigin).host)) {
+        return refererOrigin;
+      }
+    } catch {
+      // ignore invalid referer header
+    }
+  }
+
   const configuredOrigin = new URL(getEnv().BOT_PUBLIC_URL).origin;
   if (!isLocalHost(new URL(configuredOrigin).host)) {
     return configuredOrigin;
@@ -48,4 +72,3 @@ export function resolvePublicOrigin(request: NextRequest): string {
 
   return request.nextUrl.origin;
 }
-
