@@ -228,7 +228,7 @@ export default function DashboardPage() {
 
   const [productCategory, setProductCategory] = useState('Accounts');
   const [productName, setProductName] = useState('Starter Account');
-  const [productDescription, setProductDescription] = useState('Initial offer');
+  const [productDescription, setProductDescription] = useState('');
   const [productActive, setProductActive] = useState(true);
 
   const [variantLabelInput, setVariantLabelInput] = useState('Basic');
@@ -275,6 +275,13 @@ export default function DashboardPage() {
       defaultCurrency,
     }),
     [defaultCurrency, guildId, guildResources?.botInGuild, myTenants, selectedDiscordGuild?.name, tenantId],
+  );
+  const existingCategories = useMemo(
+    () =>
+      Array.from(new Set(products.map((product) => product.category.trim()).filter((category) => Boolean(category)))).sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [products],
   );
 
   const runAction = useCallback(async (action: () => Promise<unknown>) => {
@@ -638,11 +645,11 @@ export default function DashboardPage() {
     setProducts(Array.isArray(payload.products) ? payload.products : []);
   }
 
-  function resetProductBuilder(): void {
+  function resetProductBuilder(options?: { keepCategory?: string }): void {
     setEditingProductId(null);
-    setProductCategory('Accounts');
+    setProductCategory(options?.keepCategory?.trim() || 'Accounts');
     setProductName('Starter Account');
-    setProductDescription('Initial offer');
+    setProductDescription('');
     setProductActive(true);
     setVariants([
       {
@@ -1231,9 +1238,18 @@ export default function DashboardPage() {
                   <Label htmlFor="product-category">Product Category</Label>
                   <Input
                     id="product-category"
+                    list="product-category-options"
                     value={productCategory}
                     onChange={(event) => setProductCategory(event.target.value)}
                   />
+                  <datalist id="product-category-options">
+                    {existingCategories.map((category) => (
+                      <option key={category} value={category} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs text-muted-foreground">
+                    Reuse the same category name to add more products into that category.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="product-name">Product Name</Label>
@@ -1242,11 +1258,12 @@ export default function DashboardPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="product-description">Description</Label>
+                <Label htmlFor="product-description">Description (optional)</Label>
                 <Textarea
                   id="product-description"
                   value={productDescription}
                   onChange={(event) => setProductDescription(event.target.value)}
+                  placeholder="Optional product details"
                   className="min-h-24"
                 />
               </div>
@@ -1428,6 +1445,18 @@ export default function DashboardPage() {
                         throw new Error('Add at least one price option.');
                       }
 
+                      const normalizedCategory = productCategory.trim();
+                      const normalizedName = productName.trim();
+                      const normalizedDescription = productDescription.trim();
+
+                      if (!normalizedCategory) {
+                        throw new Error('Product category is required.');
+                      }
+
+                      if (!normalizedName) {
+                        throw new Error('Product name is required.');
+                      }
+
                       const seenQuestionKeys = new Set<string>();
                       for (const question of questions) {
                         const normalizedKey = question.key.trim().toLowerCase();
@@ -1453,9 +1482,9 @@ export default function DashboardPage() {
                       }));
 
                       const productPayload = {
-                        category: productCategory,
-                        name: productName,
-                        description: productDescription,
+                        category: normalizedCategory,
+                        name: normalizedName,
+                        description: normalizedDescription,
                         active: productActive,
                         variants: preparedVariants,
                       };
@@ -1486,7 +1515,7 @@ export default function DashboardPage() {
                       }
 
                       await refreshProducts();
-                      resetProductBuilder();
+                      resetProductBuilder({ keepCategory: normalizedCategory });
                       return { mode: editingProductId ? 'updated' : 'created' };
                     })
                   }
@@ -1495,7 +1524,7 @@ export default function DashboardPage() {
                 </Button>
 
                 {editingProductId ? (
-                  <Button type="button" variant="outline" className="sm:flex-1" onClick={resetProductBuilder}>
+                  <Button type="button" variant="outline" className="sm:flex-1" onClick={() => resetProductBuilder()}>
                     Cancel Edit
                   </Button>
                 ) : null}

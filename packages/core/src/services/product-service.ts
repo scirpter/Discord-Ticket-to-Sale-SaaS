@@ -17,7 +17,7 @@ const variantSchema = z.object({
 const productSchema = z.object({
   category: z.string().min(1).max(80),
   name: z.string().min(1).max(120),
-  description: z.string().min(1).max(2000),
+  description: z.string().max(2000).transform((value) => value.trim()),
   active: z.boolean().default(true),
   variants: z.array(variantSchema).min(1),
 });
