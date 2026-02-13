@@ -772,6 +772,7 @@ export class WebhookService {
       `Order Session: ${orderSession.id}`,
       `Woo Order: ${order.id}`,
       `Product: ${product.name}`,
+      `Category: ${product.category}`,
       `Variant: ${variant.label}`,
       `Price: ${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`,
       '',
@@ -788,6 +789,16 @@ export class WebhookService {
       preferredChannelId: config?.paidLogChannelId ?? null,
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
+    });
+    await this.postTicketPaidConfirmation({
+      botTokens: botTokensResult.value,
+      ticketChannelId: orderSession.ticketChannelId,
+      customerDiscordId: orderSession.customerDiscordId,
+      orderSessionId: orderSession.id,
+      productName: product.name,
+      variantLabel: variant.label,
+      currency: variant.currency,
+      priceMinor: variant.priceMinor,
     });
 
     logger.info(
@@ -933,6 +944,7 @@ export class WebhookService {
       `Coin: ${input.query.coin ?? '(unknown)'}`,
       `Forwarded Value: ${input.query.value_forwarded_coin ?? input.query.value_coin ?? '(unknown)'}`,
       `Product: ${product.name}`,
+      `Category: ${product.category}`,
       `Variant: ${variant.label}`,
       `Price: ${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`,
       '',
@@ -945,6 +957,16 @@ export class WebhookService {
       preferredChannelId: config?.paidLogChannelId ?? null,
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
+    });
+    await this.postTicketPaidConfirmation({
+      botTokens: botTokensResult.value,
+      ticketChannelId: orderSession.ticketChannelId,
+      customerDiscordId: orderSession.customerDiscordId,
+      orderSessionId: orderSession.id,
+      productName: product.name,
+      variantLabel: variant.label,
+      currency: variant.currency,
+      priceMinor: variant.priceMinor,
     });
 
     logger.info(
@@ -1059,6 +1081,53 @@ export class WebhookService {
     }
 
     throw new AbortError('Failed to post paid-order log message');
+  }
+
+  private async postTicketPaidConfirmation(input: {
+    botTokens: string[];
+    ticketChannelId: string;
+    customerDiscordId: string;
+    orderSessionId: string;
+    productName: string;
+    variantLabel: string;
+    currency: string;
+    priceMinor: number;
+  }): Promise<void> {
+    const message = [
+      `Payment received for <@${input.customerDiscordId}>. Thank you.`,
+      `Order Session: ${input.orderSessionId}`,
+      `Product: ${input.productName}`,
+      `Variant: ${input.variantLabel}`,
+      `Amount: ${(input.priceMinor / 100).toFixed(2)} ${input.currency}`,
+    ].join('\n');
+
+    const uniqueTokens = [...new Set(input.botTokens.map((token) => token.trim()).filter(Boolean))];
+    if (uniqueTokens.length === 0) {
+      throw new AbortError('No bot token available for ticket paid confirmation');
+    }
+
+    let lastError: unknown = null;
+    for (const botToken of uniqueTokens) {
+      try {
+        await postMessageToDiscordChannel({
+          botToken,
+          channelId: input.ticketChannelId,
+          content: fitDiscordMessage(message),
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (this.isDiscordUnauthorized(error)) {
+          continue;
+        }
+      }
+    }
+
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+
+    throw new AbortError('Failed to post ticket paid confirmation');
   }
 
   private async fetchWooNotes(input: {
