@@ -128,6 +128,10 @@ const initialState: RequestState = {
   error: '',
 };
 
+const DEFAULT_CURRENCY = 'GBP';
+const DEFAULT_VOODOO_CHECKOUT_DOMAIN = 'checkout.voodoo-pay.uk';
+const DASHBOARD_CONTEXT_STORAGE_KEY = 'voodoo_dashboard_context_v1';
+
 const nativeSelectClass =
   'dark:bg-input/30 dark:border-input dark:hover:bg-input/40 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -207,12 +211,12 @@ export default function DashboardPage() {
 
   const [paidLogChannelId, setPaidLogChannelId] = useState('');
   const [selectedStaffRoleIds, setSelectedStaffRoleIds] = useState<string[]>([]);
-  const [defaultCurrency, setDefaultCurrency] = useState('GBP');
+  const [defaultCurrency, setDefaultCurrency] = useState(DEFAULT_CURRENCY);
 
   const [botToken, setBotToken] = useState('');
 
   const [voodooMerchantWalletAddress, setVoodooMerchantWalletAddress] = useState('');
-  const [voodooCheckoutDomain, setVoodooCheckoutDomain] = useState('checkout.voodoo-pay.uk');
+  const [voodooCheckoutDomain, setVoodooCheckoutDomain] = useState(DEFAULT_VOODOO_CHECKOUT_DOMAIN);
   const [voodooCallbackSecret, setVoodooCallbackSecret] = useState('');
   const [voodooWebhookKey, setVoodooWebhookKey] = useState('');
   const [voodooWebhookUrl, setVoodooWebhookUrl] = useState('');
@@ -233,7 +237,7 @@ export default function DashboardPage() {
     {
       label: 'Basic',
       priceMajor: '9.99',
-      currency: 'GBP',
+      currency: DEFAULT_CURRENCY,
     },
   ]);
 
@@ -258,10 +262,6 @@ export default function DashboardPage() {
   const selectedDiscordGuild = useMemo(
     () => discordGuilds.find((guild) => guild.id === guildId) ?? null,
     [discordGuilds, guildId],
-  );
-  const contextKey = useMemo(
-    () => (tenantId && guildId ? `${tenantId}:${guildId}` : ''),
-    [guildId, tenantId],
   );
   const serverReady = Boolean(guildResources?.botInGuild);
 
@@ -317,6 +317,21 @@ export default function DashboardPage() {
       const mePayload = payload as MeResponse;
       const tenants = Array.isArray(mePayload.tenants) ? mePayload.tenants : [];
       const guilds = Array.isArray(mePayload.discordGuilds) ? mePayload.discordGuilds : [];
+      let storedTenantId = '';
+      let storedGuildId = '';
+
+      if (typeof window !== 'undefined') {
+        const storedRaw = window.localStorage.getItem(DASHBOARD_CONTEXT_STORAGE_KEY);
+        if (storedRaw) {
+          const parsed = safeJsonParse(storedRaw);
+          if (parsed && typeof parsed === 'object') {
+            storedTenantId =
+              'tenantId' in parsed && typeof parsed.tenantId === 'string' ? parsed.tenantId : '';
+            storedGuildId =
+              'guildId' in parsed && typeof parsed.guildId === 'string' ? parsed.guildId : '';
+          }
+        }
+      }
 
       setIsSuperAdmin(Boolean(mePayload.me.isSuperAdmin));
       setMyTenants(tenants);
@@ -325,6 +340,10 @@ export default function DashboardPage() {
       setTenantId((current) => {
         if (current && tenants.some((tenant) => tenant.id === current)) {
           return current;
+        }
+
+        if (storedTenantId && tenants.some((tenant) => tenant.id === storedTenantId)) {
+          return storedTenantId;
         }
 
         if (mePayload.me.tenantIds.length === 1) {
@@ -336,6 +355,10 @@ export default function DashboardPage() {
       setGuildId((current) => {
         if (current && guilds.some((guild) => guild.id === current)) {
           return current;
+        }
+
+        if (storedGuildId && guilds.some((guild) => guild.id === storedGuildId)) {
+          return storedGuildId;
         }
 
         return guilds[0]?.id ?? '';
@@ -369,11 +392,47 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const ensureGuildLinked = useCallback(
+    async (workspaceId: string, discordServerId: string): Promise<void> => {
+      if (!workspaceId || !discordServerId || guildLinking) {
+        return;
+      }
+
+      const key = `${workspaceId}:${discordServerId}`;
+      if (linkedContextKeys[key]) {
+        return;
+      }
+
+      const selectedGuildName = discordGuilds.find((guild) => guild.id === discordServerId)?.name;
+      if (!selectedGuildName) {
+        return;
+      }
+
+      setGuildLinking(true);
+      try {
+        await apiCall(`/api/guilds/${encodeURIComponent(discordServerId)}/connect`, 'POST', {
+          tenantId: workspaceId,
+          guildName: selectedGuildName,
+        });
+        setLinkedContextKeys((current) => ({ ...current, [key]: true }));
+      } finally {
+        setGuildLinking(false);
+      }
+    },
+    [discordGuilds, guildLinking, linkedContextKeys],
+  );
+
   const hydrateContextData = useCallback(async () => {
     const selectedTenantId = tenantId.trim();
     const selectedGuildId = guildId.trim();
     if (!selectedTenantId || !selectedGuildId) {
       return;
+    }
+
+    try {
+      await ensureGuildLinked(selectedTenantId, selectedGuildId);
+    } catch {
+      // Continue loading context data even if linking cannot be confirmed yet.
     }
 
     try {
@@ -383,18 +442,19 @@ export default function DashboardPage() {
         config?: {
           paidLogChannelId: string | null;
           staffRoleIds: string[];
+          defaultCurrency: string;
         };
       };
 
       if (configPayload.config) {
         setPaidLogChannelId(configPayload.config.paidLogChannelId ?? '');
         setSelectedStaffRoleIds(Array.isArray(configPayload.config.staffRoleIds) ? configPayload.config.staffRoleIds : []);
-        setDefaultCurrency('GBP');
+        setDefaultCurrency(configPayload.config.defaultCurrency || DEFAULT_CURRENCY);
       }
     } catch {
       setPaidLogChannelId('');
       setSelectedStaffRoleIds([]);
-      setDefaultCurrency('GBP');
+      setDefaultCurrency(DEFAULT_CURRENCY);
     }
 
     try {
@@ -415,10 +475,14 @@ export default function DashboardPage() {
         setVoodooWebhookKey(integrationPayload.integration.tenantWebhookKey);
         setVoodooWebhookUrl(integrationPayload.integration.webhookUrl);
       } else {
+        setVoodooMerchantWalletAddress('');
+        setVoodooCheckoutDomain(DEFAULT_VOODOO_CHECKOUT_DOMAIN);
         setVoodooWebhookKey('');
         setVoodooWebhookUrl('');
       }
     } catch {
+      setVoodooMerchantWalletAddress('');
+      setVoodooCheckoutDomain(DEFAULT_VOODOO_CHECKOUT_DOMAIN);
       setVoodooWebhookKey('');
       setVoodooWebhookUrl('');
     }
@@ -434,11 +498,25 @@ export default function DashboardPage() {
     } finally {
       setProductsLoading(false);
     }
-  }, [guildId, tenantId]);
+  }, [ensureGuildLinked, guildId, tenantId]);
 
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      DASHBOARD_CONTEXT_STORAGE_KEY,
+      JSON.stringify({
+        tenantId,
+        guildId,
+      }),
+    );
+  }, [guildId, tenantId]);
 
   useEffect(() => {
     void loadGuildResources(guildId);
@@ -447,69 +525,23 @@ export default function DashboardPage() {
   useEffect(() => {
     setPaidLogChannelId('');
     setSelectedStaffRoleIds([]);
-    setDefaultCurrency('GBP');
+    setDefaultCurrency(DEFAULT_CURRENCY);
     setProducts([]);
     setEditingProductId(null);
+    setVoodooMerchantWalletAddress('');
+    setVoodooCheckoutDomain(DEFAULT_VOODOO_CHECKOUT_DOMAIN);
     setVoodooWebhookKey('');
     setVoodooWebhookUrl('');
     setAutoGeneratedCallbackSecret('');
   }, [tenantId, guildId]);
 
   useEffect(() => {
-    if (!contextKey || !tenantId || !guildId || !selectedDiscordGuild || !guildResources?.botInGuild) {
-      return;
-    }
-
-    if (guildLinking || linkedContextKeys[contextKey]) {
-      return;
-    }
-
-    let cancelled = false;
-    const selectedGuildName = selectedDiscordGuild.name;
-
-    async function autoLinkSelectedGuild(): Promise<void> {
-      setGuildLinking(true);
-      try {
-        await apiCall(`/api/guilds/${encodeURIComponent(guildId)}/connect`, 'POST', {
-          tenantId,
-          guildName: selectedGuildName,
-        });
-        if (!cancelled) {
-          setLinkedContextKeys((current) => ({ ...current, [contextKey]: true }));
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setGuildResourcesError(error instanceof Error ? error.message : 'Unable to link selected server');
-        }
-      } finally {
-        if (!cancelled) {
-          setGuildLinking(false);
-        }
-      }
-    }
-
-    void autoLinkSelectedGuild();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    contextKey,
-    guildId,
-    guildLinking,
-    guildResources?.botInGuild,
-    linkedContextKeys,
-    selectedDiscordGuild,
-    tenantId,
-  ]);
-
-  useEffect(() => {
-    if (!contextKey || !linkedContextKeys[contextKey]) {
+    if (!tenantId || !guildId) {
       return;
     }
 
     void hydrateContextData();
-  }, [contextKey, hydrateContextData, linkedContextKeys]);
+  }, [guildId, hydrateContextData, tenantId]);
 
   function requireWorkspaceAndServer(options?: { requireBot?: boolean }): { workspaceId: string; discordServerId: string } {
     const workspaceId = tenantId.trim();
@@ -555,7 +587,7 @@ export default function DashboardPage() {
       {
         label: variantLabelInput.trim(),
         priceMajor: variantPriceInput.trim(),
-        currency: 'GBP',
+        currency: DEFAULT_CURRENCY,
       },
     ]);
   }
@@ -567,6 +599,12 @@ export default function DashboardPage() {
   function addQuestion() {
     if (!questionKeyInput.trim() || !questionLabelInput.trim()) {
       setState({ loading: false, response: '', error: 'Question key and question label are required.' });
+      return;
+    }
+
+    const normalizedKey = questionKeyInput.trim().toLowerCase();
+    if (questions.some((question) => question.key.trim().toLowerCase() === normalizedKey)) {
+      setState({ loading: false, response: '', error: 'Question key must be unique per product.' });
       return;
     }
 
@@ -593,6 +631,7 @@ export default function DashboardPage() {
 
   async function refreshProducts(): Promise<void> {
     const context = requireWorkspaceAndServer({ requireBot: true });
+    await ensureGuildLinked(context.workspaceId, context.discordServerId);
     const payload = (await apiCall(
       `/api/guilds/${encodeURIComponent(context.discordServerId)}/products?tenantId=${encodeURIComponent(context.workspaceId)}`,
     )) as { products?: ProductRecord[] };
@@ -609,7 +648,7 @@ export default function DashboardPage() {
       {
         label: 'Basic',
         priceMajor: '9.99',
-        currency: 'GBP',
+        currency: DEFAULT_CURRENCY,
       },
     ]);
     setQuestions([
@@ -968,16 +1007,19 @@ export default function DashboardPage() {
                 type="button"
                 disabled={state.loading || !serverReady}
                 onClick={() =>
-                  runAction(() => {
+                  runAction(async () => {
                     const context = requireWorkspaceAndServer({ requireBot: true });
+                    await ensureGuildLinked(context.workspaceId, context.discordServerId);
 
-                    return apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
+                    const result = await apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
                       tenantId: context.workspaceId,
                       paidLogChannelId: paidLogChannelId || null,
                       staffRoleIds: selectedStaffRoleIds,
-                      defaultCurrency: 'GBP',
+                      defaultCurrency: DEFAULT_CURRENCY,
                       ticketMetadataKey: 'isTicket',
                     });
+                    await hydrateContextData();
+                    return result;
                   })
                 }
               >
@@ -1032,6 +1074,7 @@ export default function DashboardPage() {
                 onClick={() =>
                   runAction(async () => {
                     const context = requireWorkspaceAndServer({ requireBot: true });
+                    await ensureGuildLinked(context.workspaceId, context.discordServerId);
                     const payload: {
                       tenantId: string;
                       merchantWalletAddress: string;
@@ -1379,15 +1422,29 @@ export default function DashboardPage() {
                   onClick={() =>
                     runAction(async () => {
                       const context = requireWorkspaceAndServer({ requireBot: true });
+                      await ensureGuildLinked(context.workspaceId, context.discordServerId);
 
                       if (variants.length === 0) {
                         throw new Error('Add at least one price option.');
                       }
 
+                      const seenQuestionKeys = new Set<string>();
+                      for (const question of questions) {
+                        const normalizedKey = question.key.trim().toLowerCase();
+                        if (!normalizedKey) {
+                          throw new Error('Question key is required.');
+                        }
+
+                        if (seenQuestionKeys.has(normalizedKey)) {
+                          throw new Error(`Question key "${question.key}" is duplicated. Use unique keys.`);
+                        }
+                        seenQuestionKeys.add(normalizedKey);
+                      }
+
                       const preparedVariants = variants.map((variant) => ({
                         label: variant.label.trim(),
                         priceMinor: parsePriceToMinor(variant.priceMajor),
-                        currency: 'GBP',
+                        currency: DEFAULT_CURRENCY,
                       }));
 
                       const preparedQuestions = questions.map((question, sortOrder) => ({
