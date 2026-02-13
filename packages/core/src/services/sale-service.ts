@@ -16,23 +16,6 @@ import { IntegrationService } from './integration-service.js';
 const answerSchema = z.record(z.string(), z.string().max(2000));
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function normalizeCheckoutDomain(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return 'checkout.voodoo-pay.uk';
-  }
-
-  try {
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return new URL(trimmed).host;
-    }
-  } catch {
-    // fall through to best-effort normalization below
-  }
-
-  return trimmed.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-}
-
 type SaleSessionInput = {
   tenantId: string;
   guildId: string;
@@ -251,6 +234,7 @@ export class SaleService {
         currency: variant.currency,
         answers: parsedAnswers.data,
         integration: voodooIntegration.value,
+        token,
       });
 
       if (voodooCheckout.isErr()) {
@@ -313,6 +297,7 @@ export class SaleService {
       callbackSecret: string;
       checkoutDomain: string;
     };
+    token: string;
   }): Promise<Result<string, AppError>> {
     try {
       const callbackToken = signVoodooCallbackToken(
@@ -349,7 +334,6 @@ export class SaleService {
       const walletPayload = (await walletResponse.json()) as {
         address_in?: unknown;
         ipn_token?: unknown;
-        token?: unknown;
       };
 
       if (typeof walletPayload.address_in !== 'string' || walletPayload.address_in.length === 0) {
@@ -362,25 +346,17 @@ export class SaleService {
       checkoutUrl.searchParams.set('address', walletPayload.address_in);
       checkoutUrl.searchParams.set('amount', (input.variantPriceMinor / 100).toFixed(2));
       checkoutUrl.searchParams.set('currency', input.currency);
-      checkoutUrl.searchParams.set('domain', normalizeCheckoutDomain(input.integration.checkoutDomain));
+      checkoutUrl.searchParams.set('domain', input.integration.checkoutDomain);
+      checkoutUrl.searchParams.set('vd_token', input.token);
+      checkoutUrl.searchParams.set('vd_order_session_id', input.orderSessionId);
 
       const customerEmail = this.findCustomerEmail(input.answers);
       if (customerEmail) {
         checkoutUrl.searchParams.set('email', customerEmail);
       }
 
-      const providerToken =
-        typeof walletPayload.ipn_token === 'string' && walletPayload.ipn_token.length > 0
-          ? walletPayload.ipn_token
-          : typeof walletPayload.token === 'string' && walletPayload.token.length > 0
-            ? walletPayload.token
-            : null;
-
-      if (providerToken) {
-        // Provider checkout expects `token` in multi-provider mode.
-        checkoutUrl.searchParams.set('token', providerToken);
-        // Keep compatibility with payloads/scripts that still look for ipn_token.
-        checkoutUrl.searchParams.set('ipn_token', providerToken);
+      if (typeof walletPayload.ipn_token === 'string' && walletPayload.ipn_token.length > 0) {
+        checkoutUrl.searchParams.set('ipn_token', walletPayload.ipn_token);
       }
 
       return ok(checkoutUrl.toString());
