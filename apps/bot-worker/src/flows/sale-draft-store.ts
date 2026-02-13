@@ -1,5 +1,20 @@
 ﻿import crypto from 'node:crypto';
 
+export type SaleDraftVariantOption = {
+  variantId: string;
+  label: string;
+  priceMinor: number;
+  currency: string;
+};
+
+export type SaleDraftFormField = {
+  fieldKey: string;
+  label: string;
+  required: boolean;
+  fieldType: 'short_text' | 'long_text' | 'email' | 'number';
+  validation: Record<string, unknown> | null;
+};
+
 export type SaleDraft = {
   id: string;
   tenantId: string;
@@ -8,12 +23,11 @@ export type SaleDraft = {
   staffDiscordUserId: string;
   customerDiscordUserId: string;
   category: string | null;
+  productName: string | null;
   productId: string | null;
   variantId: string | null;
-  formFields: Array<{
-    fieldKey: string;
-    required: boolean;
-  }>;
+  variantOptions: SaleDraftVariantOption[];
+  formFields: SaleDraftFormField[];
   answers: Record<string, string>;
   expiresAt: number;
 };
@@ -37,8 +51,10 @@ export function createSaleDraft(input: {
     staffDiscordUserId: input.staffDiscordUserId,
     customerDiscordUserId: input.customerDiscordUserId,
     category: null,
+    productName: null,
     productId: null,
     variantId: null,
+    variantOptions: [],
     formFields: [],
     answers: {},
     expiresAt: Date.now() + DRAFT_TTL_MS,

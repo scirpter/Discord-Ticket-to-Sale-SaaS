@@ -113,11 +113,23 @@ async function finalizeDraft(input: {
 
   removeSaleDraft(input.draftId);
 
-  await sendCheckoutMessage(input.interaction.channel as any, {
-    checkoutUrl: created.value.checkoutUrl,
-    orderSessionId: created.value.orderSessionId,
-    customerDiscordUserId: input.draft.customerDiscordUserId,
-  });
+  try {
+    await sendCheckoutMessage(input.interaction.channel as any, {
+      checkoutUrl: created.value.checkoutUrl,
+      orderSessionId: created.value.orderSessionId,
+      customerDiscordUserId: input.draft.customerDiscordUserId,
+    });
+  } catch {
+    await input.interaction.editReply({
+      content: [
+        'Checkout created, but I could not post the public checkout message in this channel.',
+        `Order Session: \`${created.value.orderSessionId}\``,
+        `Checkout URL: ${created.value.checkoutUrl}`,
+      ].join('\n'),
+      components: [],
+    });
+    return;
+  }
 
   await input.interaction.editReply({
     content: `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
@@ -157,8 +169,10 @@ async function handleCategorySelection(
   }
 
   draft.category = category;
+  draft.productName = null;
   draft.productId = null;
   draft.variantId = null;
+  draft.variantOptions = [];
   draft.formFields = [];
   draft.answers = {};
   updateSaleDraft(draft);
@@ -228,16 +242,51 @@ async function handleProductSelection(
     return;
   }
 
+  const fullProduct = await productRepository.getById({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+    productId: selectedProduct.productId,
+  });
+  if (!fullProduct) {
+    await interaction.update({
+      content: 'Product details could not be loaded. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (fullProduct.formFields.length > 5) {
+    await interaction.update({
+      content:
+        'This product has more than 5 form fields. Current modal flow supports up to 5 fields per sale.',
+      components: [],
+    });
+    return;
+  }
+
+  draft.productName = selectedProduct.name;
   draft.productId = selectedProduct.productId;
   draft.variantId = null;
-  draft.formFields = [];
+  draft.variantOptions = selectedProduct.variants.map((variant) => ({
+    variantId: variant.variantId,
+    label: variant.label,
+    priceMinor: variant.priceMinor,
+    currency: variant.currency,
+  }));
+  draft.formFields = fullProduct.formFields.map((field) => ({
+    fieldKey: field.fieldKey,
+    label: field.label,
+    required: field.required,
+    fieldType: field.fieldType,
+    validation: field.validation,
+  }));
   draft.answers = {};
   updateSaleDraft(draft);
 
   const row = buildSelectRow({
     customId: `sale:start:${draft.id}:variant`,
     placeholder: 'Select price option',
-    options: selectedProduct.variants.map((variant) => ({
+    options: draft.variantOptions.map((variant) => ({
       label: variant.label.slice(0, 100),
       description: `${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`.slice(0, 100),
       value: variant.variantId,
@@ -259,7 +308,7 @@ async function handleVariantSelection(
   draft: SaleDraft,
   selectedVariantId: string,
 ): Promise<void> {
-  if (!draft.productId) {
+  if (!draft.productId || !draft.productName) {
     await interaction.update({
       content: 'Product not selected. Start `/sale` again.',
       components: [],
@@ -267,21 +316,7 @@ async function handleVariantSelection(
     return;
   }
 
-  const product = await productRepository.getById({
-    tenantId: draft.tenantId,
-    guildId: draft.guildId,
-    productId: draft.productId,
-  });
-
-  if (!product) {
-    await interaction.update({
-      content: 'Product not found. Please restart `/sale`.',
-      components: [],
-    });
-    return;
-  }
-
-  const variant = product.variants.find((item) => item.id === selectedVariantId);
+  const variant = draft.variantOptions.find((item) => item.variantId === selectedVariantId);
   if (!variant) {
     await interaction.update({
       content: 'Variant not found. Please restart `/sale`.',
@@ -290,7 +325,7 @@ async function handleVariantSelection(
     return;
   }
 
-  if (product.formFields.length > 5) {
+  if (draft.formFields.length > 5) {
     await interaction.update({
       content:
         'This product has more than 5 form fields. Current modal flow supports up to 5 fields per sale.',
@@ -300,14 +335,10 @@ async function handleVariantSelection(
   }
 
   draft.variantId = selectedVariantId;
-  draft.formFields = product.formFields.map((field) => ({
-    fieldKey: field.fieldKey,
-    required: field.required,
-  }));
   draft.answers = {};
   updateSaleDraft(draft);
 
-  if (product.formFields.length === 0) {
+  if (draft.formFields.length === 0) {
     await interaction.deferUpdate();
     await finalizeDraft({
       draftId: draft.id,
@@ -321,7 +352,7 @@ async function handleVariantSelection(
     return;
   }
 
-  const modal = buildFormModal(draft.id, product.formFields, draft.answers);
+  const modal = buildFormModal(draft.id, draft.formFields, draft.answers);
   await interaction.showModal(modal);
 }
 
@@ -466,4 +497,3 @@ export async function handleSaleButtonStart(interaction: Interaction): Promise<v
 
   await startSaleFlowFromButton(interaction);
 }
-
