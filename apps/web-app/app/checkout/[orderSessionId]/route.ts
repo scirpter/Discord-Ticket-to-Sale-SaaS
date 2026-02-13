@@ -4,6 +4,15 @@ import { NextResponse } from 'next/server';
 
 const orderRepository = new OrderRepository();
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ orderSessionId: string }> },
@@ -27,7 +36,32 @@ export async function GET(
       return NextResponse.json({ error: 'Checkout URL unavailable for this session' }, { status: 404 });
     }
 
-    return NextResponse.redirect(session.checkoutUrl);
+    const safeUrl = escapeHtml(session.checkoutUrl);
+    const jsUrl = JSON.stringify(session.checkoutUrl);
+    const html = [
+      '<!doctype html>',
+      '<html lang="en">',
+      '<head>',
+      '  <meta charset="utf-8" />',
+      '  <meta name="viewport" content="width=device-width, initial-scale=1" />',
+      `  <meta http-equiv="refresh" content="0;url=${safeUrl}" />`,
+      '  <title>Redirecting to Checkout</title>',
+      '</head>',
+      '<body>',
+      '  <p>Redirecting to checkout...</p>',
+      `  <p>If nothing happens, <a href="${safeUrl}" rel="noreferrer">continue here</a>.</p>`,
+      `  <script>window.location.replace(${jsUrl});</script>`,
+      '</body>',
+      '</html>',
+    ].join('\n');
+
+    return new NextResponse(html, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    });
   } catch (error) {
     if (error instanceof AppError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.statusCode });
