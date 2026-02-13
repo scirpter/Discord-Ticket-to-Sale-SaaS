@@ -237,7 +237,6 @@ export class SaleService {
         currency: variant.currency,
         answers: parsedAnswers.data,
         integration: voodooIntegration.value,
-        token,
       });
 
       if (voodooCheckout.isErr()) {
@@ -287,7 +286,6 @@ export class SaleService {
       callbackSecret: string;
       checkoutDomain: string;
     };
-    token: string;
   }): Promise<Result<string, AppError>> {
     try {
       const callbackToken = signVoodooCallbackToken(
@@ -337,8 +335,6 @@ export class SaleService {
       checkoutUrl.searchParams.set('amount', (input.variantPriceMinor / 100).toFixed(2));
       checkoutUrl.searchParams.set('currency', input.currency);
       checkoutUrl.searchParams.set('domain', input.integration.checkoutDomain);
-      checkoutUrl.searchParams.set('vd_token', input.token);
-      checkoutUrl.searchParams.set('vd_order_session_id', input.orderSessionId);
 
       const customerEmail = this.findCustomerEmail(input.answers);
       if (customerEmail) {

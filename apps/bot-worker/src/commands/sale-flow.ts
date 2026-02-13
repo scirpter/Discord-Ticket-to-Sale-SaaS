@@ -12,7 +12,6 @@
 } from 'discord.js';
 import { SaleService, TenantRepository } from '@voodoo/core';
 
-import { rememberCheckoutLink } from '../flows/checkout-link-store.js';
 import { canStartSale } from '../permissions/sale-permissions.js';
 import { createSaleDraft } from '../flows/sale-draft-store.js';
 
@@ -225,14 +224,9 @@ export async function sendCheckoutMessage(
     customerDiscordUserId: string;
   },
 ): Promise<void> {
-  rememberCheckoutLink({
-    orderSessionId: input.orderSessionId,
-    checkoutUrl: input.checkoutUrl,
-  });
-
   const payButton = new ButtonBuilder()
-    .setStyle(ButtonStyle.Primary)
-    .setCustomId(`sale:pay:${input.orderSessionId}`)
+    .setStyle(ButtonStyle.Link)
+    .setURL(input.checkoutUrl)
     .setLabel('Pay Now');
 
   const cancelButton = new ButtonBuilder()

@@ -6,7 +6,6 @@ import {
   handleSaleButtonStart,
   handleSaleCancel,
   handleSaleModal,
-  handleSalePayLink,
   handleSaleSelect,
 } from './commands/sale-interactions.js';
 
@@ -56,11 +55,6 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
 
     if (interaction.isButton() && interaction.customId === 'sale:start') {
       await handleSaleButtonStart(interaction);
-      return;
-    }
-
-    if (interaction.isButton() && interaction.customId.startsWith('sale:pay:')) {
-      await handleSalePayLink(interaction);
       return;
     }
 
