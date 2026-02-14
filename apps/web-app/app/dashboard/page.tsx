@@ -131,6 +131,8 @@ const initialState: RequestState = {
 const DEFAULT_CURRENCY = 'GBP';
 const DEFAULT_VOODOO_CHECKOUT_DOMAIN = 'checkout.voodoo-pay.uk';
 const DASHBOARD_CONTEXT_STORAGE_KEY = 'voodoo_dashboard_context_v1';
+const REQUIRED_EMAIL_QUESTION_KEY = 'email';
+const REQUIRED_EMAIL_QUESTION_LABEL = 'What is your email?';
 
 const nativeSelectClass =
   'dark:bg-input/30 dark:border-input dark:hover:bg-input/40 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
@@ -195,17 +197,35 @@ function normalizeCategoryKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function ensureRequiredEmailQuestion(questions: QuestionDraft[]): QuestionDraft[] {
+  const nonEmailQuestions = questions.filter(
+    (question) => question.key.trim().toLowerCase() !== REQUIRED_EMAIL_QUESTION_KEY,
+  );
+
+  const requiredEmailQuestion: QuestionDraft = {
+    key: REQUIRED_EMAIL_QUESTION_KEY,
+    label: REQUIRED_EMAIL_QUESTION_LABEL,
+    fieldType: 'email',
+    required: true,
+    sensitive: false,
+    sortOrder: 0,
+  };
+
+  const merged = [requiredEmailQuestion, ...nonEmailQuestions];
+  return merged.map((question, sortOrder) => ({ ...question, sortOrder }));
+}
+
 function getDefaultQuestions(): QuestionDraft[] {
-  return [
+  return ensureRequiredEmailQuestion([
     {
       key: 'username',
       label: 'What is your username?',
       fieldType: 'short_text',
       required: true,
       sensitive: false,
-      sortOrder: 0,
+      sortOrder: 1,
     },
-  ];
+  ]);
 }
 
 function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
@@ -224,7 +244,7 @@ function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
     return getDefaultQuestions();
   }
 
-  return mapped.map((question, sortOrder) => ({ ...question, sortOrder }));
+  return ensureRequiredEmailQuestion(mapped.map((question, sortOrder) => ({ ...question, sortOrder })));
 }
 
 export default function DashboardPage() {
@@ -694,17 +714,29 @@ export default function DashboardPage() {
   }
 
   function removeQuestion(index: number) {
+    const targetQuestion = questions[index];
+    if (targetQuestion && targetQuestion.key.trim().toLowerCase() === REQUIRED_EMAIL_QUESTION_KEY) {
+      setState({
+        loading: false,
+        response: '',
+        error: 'Email is a required system question and cannot be removed.',
+      });
+      return;
+    }
+
     setQuestions((current) =>
-      current
-        .filter((_, currentIndex) => currentIndex !== index)
-        .map((question, sortOrder) => ({ ...question, sortOrder })),
+      ensureRequiredEmailQuestion(
+        current
+          .filter((_, currentIndex) => currentIndex !== index)
+          .map((question, sortOrder) => ({ ...question, sortOrder })),
+      ),
     );
   }
 
   function prepareQuestionsForApi(): QuestionDraft[] {
     const seenQuestionKeys = new Set<string>();
-
-    return questions.map((question, sortOrder) => {
+    const normalizedQuestions = ensureRequiredEmailQuestion(questions);
+    return normalizedQuestions.map((question, sortOrder) => {
       const key = question.key.trim();
       const label = question.label.trim();
       const normalizedKey = key.toLowerCase();
@@ -722,10 +754,15 @@ export default function DashboardPage() {
       }
       seenQuestionKeys.add(normalizedKey);
 
+      const isRequiredEmailField = normalizedKey === REQUIRED_EMAIL_QUESTION_KEY;
+
       return {
         ...question,
-        key,
-        label,
+        key: isRequiredEmailField ? REQUIRED_EMAIL_QUESTION_KEY : key,
+        label: isRequiredEmailField ? REQUIRED_EMAIL_QUESTION_LABEL : label,
+        fieldType: isRequiredEmailField ? 'email' : question.fieldType,
+        required: isRequiredEmailField ? true : question.required,
+        sensitive: isRequiredEmailField ? false : question.sensitive,
         sortOrder,
       };
     });
@@ -744,7 +781,7 @@ export default function DashboardPage() {
       return;
     }
 
-    setQuestions(template.questions.map((question, sortOrder) => ({ ...question, sortOrder })));
+    setQuestions(ensureRequiredEmailQuestion(template.questions.map((question, sortOrder) => ({ ...question, sortOrder }))));
   }
 
   async function refreshProducts(): Promise<ProductRecord[]> {
@@ -1507,23 +1544,32 @@ export default function DashboardPage() {
                   {questions.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No questions yet.</p>
                   ) : (
-                    questions.map((question, index) => (
-                      <div
-                        key={`${question.key}-${index}`}
-                        className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{question.label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {question.fieldType} - {question.required ? 'Required' : 'Optional'} -{' '}
-                            {question.sensitive ? 'Sensitive' : 'Not sensitive'}
-                          </p>
+                    questions.map((question, index) => {
+                      const isLockedEmailQuestion =
+                        question.key.trim().toLowerCase() === REQUIRED_EMAIL_QUESTION_KEY;
+                      return (
+                        <div
+                          key={`${question.key}-${index}`}
+                          className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                        >
+                          <div>
+                            <p className="text-sm font-medium">{question.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {question.fieldType} - {question.required ? 'Required' : 'Optional'} -{' '}
+                              {question.sensitive ? 'Sensitive' : 'Not sensitive'}
+                              {isLockedEmailQuestion ? ' - System field (locked)' : ''}
+                            </p>
+                          </div>
+                          {isLockedEmailQuestion ? (
+                            <Badge variant="outline">Locked</Badge>
+                          ) : (
+                            <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeQuestion(index)}>
+                              <X className="size-4" />
+                            </Button>
+                          )}
                         </div>
-                        <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeQuestion(index)}>
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
 
@@ -1534,7 +1580,7 @@ export default function DashboardPage() {
                       id="question-key"
                       value={questionKeyInput}
                       onChange={(event) => setQuestionKeyInput(event.target.value)}
-                      placeholder="email"
+                      placeholder="username"
                     />
                   </div>
                   <div className="space-y-2">

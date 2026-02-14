@@ -61,8 +61,10 @@ Copy `.env.example` to `.env` and fill values.
 - Staff runs `/sale` in any server channel where they have required permissions.
 - Bot shows product+variant select.
 - Bot gathers custom form answers through modals.
+- Email is now a mandatory system question (always first, always required) for all category form sets.
 - Bot creates `order_session` and sends a direct checkout hyperlink message in the ticket (`Click here to pay`).
 - If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
+- Checkout URL now always includes the `email` query parameter (from answers, or a safe fallback email when missing).
 - Voodoo Pay callbacks accept query/form/json payloads, and paid logs fall back to the ticket channel if paid-log channel delivery fails.
 - Woo webhook confirms payment (`processing`/`completed`).
 - Voodoo Pay callback endpoint can also finalize paid orders.

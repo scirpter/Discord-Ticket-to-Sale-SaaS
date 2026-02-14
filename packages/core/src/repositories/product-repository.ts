@@ -9,6 +9,9 @@ import type {
 import { getDb } from '../infra/db/client.js';
 import { productFormFields, productVariants, products } from '../infra/db/schema/index.js';
 
+const REQUIRED_EMAIL_FIELD_KEY = 'email';
+const REQUIRED_EMAIL_FIELD_LABEL = 'What is your email?';
+
 export type ProductAggregate = {
   id: string;
   tenantId: string;
@@ -36,6 +39,35 @@ export type ProductAggregate = {
     validation: Record<string, unknown> | null;
   }>;
 };
+
+type ProductAggregateField = ProductAggregate['formFields'][number];
+
+function ensureRequiredEmailField(fields: ProductAggregateField[]): ProductAggregateField[] {
+  const sorted = [...fields].sort((a, b) => a.sortOrder - b.sortOrder);
+  const existingEmailField = sorted.find(
+    (field) => field.fieldKey.trim().toLowerCase() === REQUIRED_EMAIL_FIELD_KEY,
+  );
+
+  const nonEmailFields = sorted.filter(
+    (field) => field.fieldKey.trim().toLowerCase() !== REQUIRED_EMAIL_FIELD_KEY,
+  );
+
+  const requiredEmailField: ProductAggregateField = {
+    id: existingEmailField?.id ?? 'system-email',
+    fieldKey: REQUIRED_EMAIL_FIELD_KEY,
+    label: REQUIRED_EMAIL_FIELD_LABEL,
+    fieldType: 'email',
+    required: true,
+    sensitive: false,
+    sortOrder: 0,
+    validation: null,
+  };
+
+  return [requiredEmailField, ...nonEmailFields].map((field, index) => ({
+    ...field,
+    sortOrder: index,
+  }));
+}
 
 export class ProductRepository {
   private readonly db = getDb();
@@ -75,16 +107,18 @@ export class ProductRepository {
           wooProductId: variant.wooProductId,
           wooCheckoutPath: variant.wooCheckoutPath,
         })),
-        formFields: fields.map((field) => ({
-          id: field.id,
-          fieldKey: field.fieldKey,
-          label: field.label,
-          fieldType: field.fieldType,
-          required: field.required,
-          sensitive: field.sensitive,
-          sortOrder: field.sortOrder,
-          validation: (field.validation ?? null) as Record<string, unknown> | null,
-        })),
+        formFields: ensureRequiredEmailField(
+          fields.map((field) => ({
+            id: field.id,
+            fieldKey: field.fieldKey,
+            label: field.label,
+            fieldType: field.fieldType,
+            required: field.required,
+            sensitive: field.sensitive,
+            sortOrder: field.sortOrder,
+            validation: (field.validation ?? null) as Record<string, unknown> | null,
+          })),
+        ),
       });
     }
 
@@ -134,16 +168,18 @@ export class ProductRepository {
         wooProductId: variant.wooProductId,
         wooCheckoutPath: variant.wooCheckoutPath,
       })),
-      formFields: fields.map((field) => ({
-        id: field.id,
-        fieldKey: field.fieldKey,
-        label: field.label,
-        fieldType: field.fieldType,
-        required: field.required,
-        sensitive: field.sensitive,
-        sortOrder: field.sortOrder,
-        validation: (field.validation ?? null) as Record<string, unknown> | null,
-      })),
+      formFields: ensureRequiredEmailField(
+        fields.map((field) => ({
+          id: field.id,
+          fieldKey: field.fieldKey,
+          label: field.label,
+          fieldType: field.fieldType,
+          required: field.required,
+          sensitive: field.sensitive,
+          sortOrder: field.sortOrder,
+          validation: (field.validation ?? null) as Record<string, unknown> | null,
+        })),
+      ),
     };
   }
 

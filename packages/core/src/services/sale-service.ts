@@ -15,6 +15,7 @@ import { IntegrationService } from './integration-service.js';
 
 const answerSchema = z.record(z.string(), z.string().max(2000));
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FALLBACK_EMAIL_DOMAIN = 'voodoopaybot.online';
 
 type SaleSessionInput = {
   tenantId: string;
@@ -227,6 +228,7 @@ export class SaleService {
         tenantId: input.tenantId,
         guildId: input.guildId,
         orderSessionId: orderSession.id,
+        customerDiscordUserId: input.customerDiscordUserId,
         variantPriceMinor: variant.priceMinor,
         currency: variant.currency,
         answers: parsedAnswers.data,
@@ -285,6 +287,7 @@ export class SaleService {
     tenantId: string;
     guildId: string;
     orderSessionId: string;
+    customerDiscordUserId: string;
     variantPriceMinor: number;
     currency: string;
     answers: Record<string, string>;
@@ -348,10 +351,12 @@ export class SaleService {
       checkoutUrl.searchParams.set('vd_token', input.token);
       checkoutUrl.searchParams.set('vd_order_session_id', input.orderSessionId);
 
-      const customerEmail = this.findCustomerEmail(input.answers);
-      if (customerEmail) {
-        checkoutUrl.searchParams.set('email', customerEmail);
-      }
+      const customerEmail = this.resolveCheckoutEmail({
+        answers: input.answers,
+        customerDiscordUserId: input.customerDiscordUserId,
+        orderSessionId: input.orderSessionId,
+      });
+      checkoutUrl.searchParams.set('email', customerEmail);
 
       if (typeof walletPayload.ipn_token === 'string' && walletPayload.ipn_token.length > 0) {
         checkoutUrl.searchParams.set('ipn_token', walletPayload.ipn_token);
@@ -371,6 +376,39 @@ export class SaleService {
     }
 
     return null;
+  }
+
+  private resolveCheckoutEmail(input: {
+    answers: Record<string, string>;
+    customerDiscordUserId: string;
+    orderSessionId: string;
+  }): string {
+    const emailFromAnswers = this.findCustomerEmail(input.answers);
+    if (emailFromAnswers) {
+      return emailFromAnswers;
+    }
+
+    const localPartBase =
+      input.customerDiscordUserId.trim().length > 0
+        ? `discord-${input.customerDiscordUserId.trim()}`
+        : `order-${input.orderSessionId.toLowerCase()}`;
+    const localPart = localPartBase.replace(/[^a-zA-Z0-9._+-]/g, '').slice(0, 60) || 'customer';
+
+    return `${localPart}@${this.resolveFallbackEmailDomain()}`;
+  }
+
+  private resolveFallbackEmailDomain(): string {
+    try {
+      const url = new URL(this.env.BOT_PUBLIC_URL);
+      const hostname = url.hostname.trim().toLowerCase();
+      if (hostname.includes('.')) {
+        return hostname;
+      }
+    } catch {
+      // ignore URL parsing failures and use static fallback domain.
+    }
+
+    return FALLBACK_EMAIL_DOMAIN;
   }
 
   private async tryCancelPendingOrderSession(input: {

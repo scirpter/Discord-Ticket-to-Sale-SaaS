@@ -2,6 +2,7 @@ import { err, ok, type Result } from 'neverthrow';
 import { z } from 'zod';
 
 import { AppError, fromUnknownError, validationError } from '../domain/errors.js';
+import type { ProductFormFieldInput } from '../domain/types.js';
 import type { SessionPayload } from '../security/session-token.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { AuthorizationService } from './authorization-service.js';
@@ -44,6 +45,8 @@ const formFieldSchema = z.object({
 });
 
 const formFieldsSchema = z.array(formFieldSchema).max(100);
+const REQUIRED_EMAIL_FIELD_KEY = 'email';
+const REQUIRED_EMAIL_FIELD_LABEL = 'What is your email?';
 
 export class ProductService {
   private readonly productRepository = new ProductRepository();
@@ -115,6 +118,7 @@ export class ProductService {
           category: parsedProduct.data.category,
         });
       }
+      formFields = this.normalizeCategoryFormFields(formFields);
 
       const created = await this.productRepository.create({
         tenantId: input.tenantId,
@@ -262,7 +266,7 @@ export class ProductService {
         guildId: input.guildId,
         productIds:
           productIdsInCategory.length > 0 ? productIdsInCategory : [input.productId],
-        formFields: parsedFields.data,
+        formFields: this.normalizeCategoryFormFields(parsedFields.data),
       });
 
       return ok(undefined);
@@ -417,6 +421,34 @@ export class ProductService {
     } catch (error) {
       return err(fromUnknownError(error));
     }
+  }
+
+  private normalizeCategoryFormFields(fields: ProductFormFieldInput[]): ProductFormFieldInput[] {
+    const normalized = fields.map((field) => ({
+      ...field,
+      key: field.key.trim(),
+      label: field.label.trim(),
+    }));
+
+    const nonEmailFields = normalized
+      .filter((field) => field.key.toLowerCase() !== REQUIRED_EMAIL_FIELD_KEY)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+
+    const requiredEmailField = {
+      key: REQUIRED_EMAIL_FIELD_KEY,
+      label: REQUIRED_EMAIL_FIELD_LABEL,
+      fieldType: 'email' as const,
+      required: true,
+      sensitive: false,
+      sortOrder: 0,
+      validation: undefined,
+    };
+
+    const merged = [requiredEmailField, ...nonEmailFields];
+    return merged.map((field, index) => ({
+      ...field,
+      sortOrder: index,
+    }));
   }
 }
 

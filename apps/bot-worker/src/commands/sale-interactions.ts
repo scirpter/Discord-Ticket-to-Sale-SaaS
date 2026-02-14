@@ -16,6 +16,10 @@ import { sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 
 const productRepository = new ProductRepository();
 const saleService = new SaleService();
+const displayLabelCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: 'base',
+});
 
 function canInteractWithDraft(draft: SaleDraft, userId: string): boolean {
   return draft.customerDiscordUserId === userId || draft.staffDiscordUserId === userId;
@@ -28,6 +32,34 @@ function normalizeCategoryLabel(category: string): string {
   }
 
   return trimmed;
+}
+
+function compareVariantForDisplay(
+  left: { label: string; priceMinor: number; variantId: string },
+  right: { label: string; priceMinor: number; variantId: string },
+): number {
+  const labelCompare = displayLabelCollator.compare(left.label, right.label);
+  if (labelCompare !== 0) {
+    return labelCompare;
+  }
+
+  if (left.priceMinor !== right.priceMinor) {
+    return left.priceMinor - right.priceMinor;
+  }
+
+  return left.variantId.localeCompare(right.variantId);
+}
+
+function compareProductNameForDisplay(
+  left: { name: string; productId: string },
+  right: { name: string; productId: string },
+): number {
+  const nameCompare = displayLabelCollator.compare(left.name, right.name);
+  if (nameCompare !== 0) {
+    return nameCompare;
+  }
+
+  return left.productId.localeCompare(right.productId);
 }
 
 function buildSelectRow(input: {
@@ -185,7 +217,7 @@ async function handleCategorySelection(
     customId: `sale:start:${draft.id}:product`,
     placeholder: 'Select product',
     options: products
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort(compareProductNameForDisplay)
       .map((product) => ({
         label: product.name.slice(0, 100),
         description: `${product.variants.length} price option(s)`.slice(0, 100),
@@ -271,12 +303,14 @@ async function handleProductSelection(
   draft.productName = selectedProduct.name;
   draft.productId = selectedProduct.productId;
   draft.variantId = null;
-  draft.variantOptions = selectedProduct.variants.map((variant) => ({
-    variantId: variant.variantId,
-    label: variant.label,
-    priceMinor: variant.priceMinor,
-    currency: variant.currency,
-  }));
+  draft.variantOptions = [...selectedProduct.variants]
+    .sort(compareVariantForDisplay)
+    .map((variant) => ({
+      variantId: variant.variantId,
+      label: variant.label,
+      priceMinor: variant.priceMinor,
+      currency: variant.currency,
+    }));
   draft.formFields = fullProduct.formFields.map((field) => ({
     fieldKey: field.fieldKey,
     label: field.label,
