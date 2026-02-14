@@ -53,6 +53,7 @@ Copy `.env.example` to `.env` and fill values.
 - Callback endpoint: `GET /api/auth/discord/callback`
 - Dashboard page: `/dashboard`
 - Dashboard now loads Discord servers from OAuth (manage-server capable guilds), auto-checks bot installation, and auto-links selected server to workspace.
+- A Discord server is now bound to exactly one workspace at a time; reconnecting a server moves it to the current workspace mapping.
 - Server settings now use Discord channel/role selectors instead of manual ID fields.
 - Workspace deletion is available from dashboard for owner/super-admin cleanup.
 

@@ -106,7 +106,11 @@ async function runSaleStart(input: {
   const products = optionsResult.value.filter((product) => product.variants.length > 0);
   if (products.length === 0) {
     await input.editReply({
-      content: 'No active products/variants are configured for this guild yet.',
+      content: [
+        'No active products/variants are configured for this server yet.',
+        `Server ID: \`${input.guildId}\``,
+        'Check dashboard: select this exact server, ensure product is Active, and each product has at least one price option.',
+      ].join('\n'),
       components: [],
     });
     return;
@@ -138,7 +142,11 @@ async function runSaleStart(input: {
 
   if (categoryOptions.length === 0) {
     await input.editReply({
-      content: 'No active products/variants are configured for this guild yet.',
+      content: [
+        'No active products/variants are configured for this server yet.',
+        `Server ID: \`${input.guildId}\``,
+        'Check dashboard: select this exact server, ensure product is Active, and each product has at least one price option.',
+      ].join('\n'),
       components: [],
     });
     return;

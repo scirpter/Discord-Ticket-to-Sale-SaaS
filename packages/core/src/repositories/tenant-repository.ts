@@ -1,4 +1,4 @@
-﻿import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, ne } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
@@ -183,6 +183,14 @@ export class TenantRepository {
     }
 
     await this.db.transaction(async (tx) => {
+      // Keep ownership deterministic: one Discord server maps to one workspace.
+      await tx
+        .delete(guildConfigs)
+        .where(and(eq(guildConfigs.guildId, input.guildId), ne(guildConfigs.tenantId, input.tenantId)));
+      await tx
+        .delete(tenantGuilds)
+        .where(and(eq(tenantGuilds.guildId, input.guildId), ne(tenantGuilds.tenantId, input.tenantId)));
+
       await tx.insert(tenantGuilds).values({
         id: ulid(),
         tenantId: input.tenantId,
@@ -212,17 +220,30 @@ export class TenantRepository {
   }
 
   public async getTenantByGuildId(guildId: string): Promise<{ tenantId: string; guildId: string } | null> {
-    const row = await this.db.query.tenantGuilds.findFirst({
-      where: eq(tenantGuilds.guildId, guildId),
-    });
+    const rows = await this.db
+      .select({
+        tenantId: tenantGuilds.tenantId,
+        guildId: tenantGuilds.guildId,
+        tenantStatus: tenants.status,
+      })
+      .from(tenantGuilds)
+      .innerJoin(tenants, eq(tenants.id, tenantGuilds.tenantId))
+      .where(eq(tenantGuilds.guildId, guildId))
+      .orderBy(desc(tenantGuilds.createdAt));
 
-    if (!row) {
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const active = rows.find((row) => row.tenantStatus === 'active');
+    const selected = active ?? rows[0];
+    if (!selected) {
       return null;
     }
 
     return {
-      tenantId: row.tenantId,
-      guildId: row.guildId,
+      tenantId: selected.tenantId,
+      guildId: selected.guildId,
     };
   }
 
