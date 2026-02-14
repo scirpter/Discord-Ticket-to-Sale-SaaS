@@ -170,18 +170,6 @@ export class TenantRepository {
     guildId: string;
     guildName: string;
   }): Promise<void> {
-    const existing = await this.db.query.tenantGuilds.findFirst({
-      where: and(eq(tenantGuilds.tenantId, input.tenantId), eq(tenantGuilds.guildId, input.guildId)),
-    });
-
-    if (existing) {
-      await this.db
-        .update(tenantGuilds)
-        .set({ guildName: input.guildName, updatedAt: new Date() })
-        .where(eq(tenantGuilds.id, existing.id));
-      return;
-    }
-
     await this.db.transaction(async (tx) => {
       // Keep ownership deterministic: one Discord server maps to one workspace.
       await tx
@@ -191,22 +179,44 @@ export class TenantRepository {
         .delete(tenantGuilds)
         .where(and(eq(tenantGuilds.guildId, input.guildId), ne(tenantGuilds.tenantId, input.tenantId)));
 
-      await tx.insert(tenantGuilds).values({
-        id: ulid(),
-        tenantId: input.tenantId,
-        guildId: input.guildId,
-        guildName: input.guildName,
-      });
+      const existingTenantGuild = await tx
+        .select({ id: tenantGuilds.id })
+        .from(tenantGuilds)
+        .where(and(eq(tenantGuilds.tenantId, input.tenantId), eq(tenantGuilds.guildId, input.guildId)))
+        .limit(1);
 
-      await tx.insert(guildConfigs).values({
-        id: ulid(),
-        tenantId: input.tenantId,
-        guildId: input.guildId,
-        paidLogChannelId: null,
-        staffRoleIds: [],
-        defaultCurrency: 'GBP',
-        ticketMetadataKey: 'isTicket',
-      });
+      const existingTenantGuildRow = existingTenantGuild[0];
+      if (existingTenantGuildRow) {
+        await tx
+          .update(tenantGuilds)
+          .set({ guildName: input.guildName, updatedAt: new Date() })
+          .where(eq(tenantGuilds.id, existingTenantGuildRow.id));
+      } else {
+        await tx.insert(tenantGuilds).values({
+          id: ulid(),
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          guildName: input.guildName,
+        });
+      }
+
+      const existingConfig = await tx
+        .select({ id: guildConfigs.id })
+        .from(guildConfigs)
+        .where(and(eq(guildConfigs.tenantId, input.tenantId), eq(guildConfigs.guildId, input.guildId)))
+        .limit(1);
+
+      if (existingConfig.length === 0) {
+        await tx.insert(guildConfigs).values({
+          id: ulid(),
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          paidLogChannelId: null,
+          staffRoleIds: [],
+          defaultCurrency: 'GBP',
+          ticketMetadataKey: 'isTicket',
+        });
+      }
     });
   }
 
@@ -229,7 +239,7 @@ export class TenantRepository {
       .from(tenantGuilds)
       .innerJoin(tenants, eq(tenants.id, tenantGuilds.tenantId))
       .where(eq(tenantGuilds.guildId, guildId))
-      .orderBy(desc(tenantGuilds.createdAt));
+      .orderBy(desc(tenantGuilds.updatedAt), desc(tenantGuilds.createdAt));
 
     if (rows.length === 0) {
       return null;
