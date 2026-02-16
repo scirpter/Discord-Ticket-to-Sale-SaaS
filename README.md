@@ -55,16 +55,22 @@ Copy `.env.example` to `.env` and fill values.
 - Dashboard now loads Discord servers from OAuth (manage-server capable guilds), auto-checks bot installation, and auto-links selected server to workspace.
 - A Discord server is now bound to exactly one workspace at a time; reconnecting a server moves it to the current workspace mapping.
 - Server settings now use Discord channel/role selectors instead of manual ID fields.
+- Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Workspace deletion is available from dashboard for owner/super-admin cleanup.
+- Coupons can be created, edited, and deleted per server from dashboard (`code`, fixed discount amount, active flag).
 
 ## Ticket Sale Flow
 
 - Staff runs `/sale` in any server channel where they have required permissions.
 - Bot shows category -> product -> variant flow with Back buttons on selection steps.
+- After variant selection, bot supports basket flow (`Add More Products` or continue).
+- Coupon step is optional; entered code is validated against server coupon settings.
 - Product description is shown in the bot flow when configured.
 - Bot gathers custom form answers through modals.
+- Optional tip prompt (yes/no) can be enabled per server; yes-path collects custom GBP tip amount.
 - Email is now a mandatory system question (always first, always required) for all category form sets.
 - Bot creates `order_session` and sends a direct checkout hyperlink message in the ticket (`Click here to pay`).
+- Checkout amount now reflects basket total minus coupon plus tip.
 - If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
 - Checkout URL now always includes the `email` query parameter (from answers, or a safe fallback email when missing).
 - Voodoo Pay callbacks accept query/form/json payloads, and paid logs fall back to the ticket channel if paid-log channel delivery fails.
@@ -76,6 +82,10 @@ Copy `.env.example` to `.env` and fill values.
 ## WordPress / WooCommerce Setup
 
 See `docs/wordpress-setup.md` and `docs/wordpress-snippet.php`.
+
+## Basket / Coupon / Tip Behavior
+
+See `docs/coupons-basket-tip.md`.
 
 ## Production Deployment Guide
 

@@ -9,6 +9,16 @@ import {
   webhookEvents,
 } from '../infra/db/schema/index.js';
 
+export type OrderSessionBasketItem = {
+  productId: string;
+  productName: string;
+  category: string;
+  variantId: string;
+  variantLabel: string;
+  priceMinor: number;
+  currency: string;
+};
+
 export type OrderSessionRecord = {
   id: string;
   tenantId: string;
@@ -18,6 +28,12 @@ export type OrderSessionRecord = {
   customerDiscordId: string;
   productId: string;
   variantId: string;
+  basketItems: OrderSessionBasketItem[];
+  couponCode: string | null;
+  couponDiscountMinor: number;
+  tipMinor: number;
+  subtotalMinor: number;
+  totalMinor: number;
   status: 'pending_payment' | 'cancelled' | 'paid';
   answers: Record<string, string>;
   checkoutUrl: string | null;
@@ -35,6 +51,12 @@ export class OrderRepository {
     customerDiscordId: string;
     productId: string;
     variantId: string;
+    basketItems: OrderSessionBasketItem[];
+    couponCode: string | null;
+    couponDiscountMinor: number;
+    tipMinor: number;
+    subtotalMinor: number;
+    totalMinor: number;
     answers: Record<string, string>;
     checkoutTokenExpiresAt: Date;
   }): Promise<OrderSessionRecord> {
@@ -49,6 +71,12 @@ export class OrderRepository {
       customerDiscordId: input.customerDiscordId,
       productId: input.productId,
       variantId: input.variantId,
+      basketItems: input.basketItems,
+      couponCode: input.couponCode,
+      couponDiscountMinor: input.couponDiscountMinor,
+      tipMinor: input.tipMinor,
+      subtotalMinor: input.subtotalMinor,
+      totalMinor: input.totalMinor,
       answers: input.answers,
       checkoutTokenExpiresAt: input.checkoutTokenExpiresAt,
       status: 'pending_payment',
@@ -63,6 +91,12 @@ export class OrderRepository {
       customerDiscordId: input.customerDiscordId,
       productId: input.productId,
       variantId: input.variantId,
+      basketItems: input.basketItems,
+      couponCode: input.couponCode,
+      couponDiscountMinor: input.couponDiscountMinor,
+      tipMinor: input.tipMinor,
+      subtotalMinor: input.subtotalMinor,
+      totalMinor: input.totalMinor,
       status: 'pending_payment',
       answers: input.answers,
       checkoutUrl: null,
@@ -91,6 +125,12 @@ export class OrderRepository {
       customerDiscordId: row.customerDiscordId,
       productId: row.productId,
       variantId: row.variantId,
+      basketItems: row.basketItems,
+      couponCode: row.couponCode,
+      couponDiscountMinor: row.couponDiscountMinor,
+      tipMinor: row.tipMinor,
+      subtotalMinor: row.subtotalMinor,
+      totalMinor: row.totalMinor,
       status: row.status,
       answers: row.answers,
       checkoutUrl: row.checkoutUrl,
@@ -116,6 +156,12 @@ export class OrderRepository {
       customerDiscordId: row.customerDiscordId,
       productId: row.productId,
       variantId: row.variantId,
+      basketItems: row.basketItems,
+      couponCode: row.couponCode,
+      couponDiscountMinor: row.couponDiscountMinor,
+      tipMinor: row.tipMinor,
+      subtotalMinor: row.subtotalMinor,
+      totalMinor: row.totalMinor,
       status: row.status,
       answers: row.answers,
       checkoutUrl: row.checkoutUrl,
@@ -154,6 +200,12 @@ export class OrderRepository {
       customerDiscordId: pending.customerDiscordId,
       productId: pending.productId,
       variantId: pending.variantId,
+      basketItems: pending.basketItems,
+      couponCode: pending.couponCode,
+      couponDiscountMinor: pending.couponDiscountMinor,
+      tipMinor: pending.tipMinor,
+      subtotalMinor: pending.subtotalMinor,
+      totalMinor: pending.totalMinor,
       status: pending.status,
       answers: pending.answers,
       checkoutUrl: pending.checkoutUrl,

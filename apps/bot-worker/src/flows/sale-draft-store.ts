@@ -7,6 +7,16 @@ export type SaleDraftVariantOption = {
   currency: string;
 };
 
+export type SaleDraftBasketItem = {
+  productId: string;
+  productName: string;
+  category: string;
+  variantId: string;
+  variantLabel: string;
+  priceMinor: number;
+  currency: string;
+};
+
 export type SaleDraftFormField = {
   fieldKey: string;
   label: string;
@@ -27,6 +37,11 @@ export type SaleDraft = {
   productId: string | null;
   variantId: string | null;
   variantOptions: SaleDraftVariantOption[];
+  basketItems: SaleDraftBasketItem[];
+  couponCode: string | null;
+  tipMinor: number;
+  tipEnabled: boolean;
+  defaultCurrency: string;
   formFields: SaleDraftFormField[];
   answers: Record<string, string>;
   expiresAt: number;
@@ -42,6 +57,8 @@ export function createSaleDraft(input: {
   ticketChannelId: string;
   staffDiscordUserId: string;
   customerDiscordUserId: string;
+  tipEnabled?: boolean;
+  defaultCurrency?: string;
 }): SaleDraft {
   const draft: SaleDraft = {
     id: crypto.randomUUID(),
@@ -55,6 +72,11 @@ export function createSaleDraft(input: {
     productId: null,
     variantId: null,
     variantOptions: [],
+    basketItems: [],
+    couponCode: null,
+    tipMinor: 0,
+    tipEnabled: input.tipEnabled ?? false,
+    defaultCurrency: input.defaultCurrency ?? 'GBP',
     formFields: [],
     answers: {},
     expiresAt: Date.now() + DRAFT_TTL_MS,

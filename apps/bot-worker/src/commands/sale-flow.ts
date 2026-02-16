@@ -33,7 +33,10 @@ async function enforceSalePreconditions(input: {
   guildId: string;
   channelId: string;
   member: GuildMember;
-}): Promise<{ ok: true; tenantId: string } | { ok: false; message: string }> {
+}): Promise<
+  | { ok: true; tenantId: string; tipEnabled: boolean; defaultCurrency: string }
+  | { ok: false; message: string }
+> {
   const tenant = await resolveTenantFromGuild(input.guildId);
   if (!tenant) {
     return { ok: false, message: 'This guild is not connected to any tenant in the SaaS dashboard.' };
@@ -59,6 +62,8 @@ async function enforceSalePreconditions(input: {
   return {
     ok: true,
     tenantId: tenant.tenantId,
+    tipEnabled: configResult.value.tipEnabled,
+    defaultCurrency: configResult.value.defaultCurrency,
   };
 }
 
@@ -158,6 +163,8 @@ async function runSaleStart(input: {
     ticketChannelId: input.channel.id,
     staffDiscordUserId: input.staffUserId,
     customerDiscordUserId: input.customerUserId,
+    tipEnabled: preconditions.tipEnabled,
+    defaultCurrency: preconditions.defaultCurrency,
   });
 
   const select = new StringSelectMenuBuilder()

@@ -99,6 +99,7 @@ export const guildConfigs = mysqlTable(
     paidLogChannelId: varchar('paid_log_channel_id', { length: 32 }),
     staffRoleIds: json('staff_role_ids').$type<string[]>().notNull().default([]),
     defaultCurrency: varchar('default_currency', { length: 3 }).notNull().default('USD'),
+    tipEnabled: boolean('tip_enabled').notNull().default(false),
     ticketMetadataKey: varchar('ticket_metadata_key', { length: 64 }).notNull().default('isTicket'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
@@ -107,6 +108,29 @@ export const guildConfigs = mysqlTable(
     tenantGuildUnique: uniqueIndex('guild_configs_tenant_guild_uq').on(table.tenantId, table.guildId),
     tenantGuildIdx: index('guild_configs_tenant_guild_idx').on(table.tenantId, table.guildId),
     tenantCreatedIdx: index('guild_configs_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const discountCoupons = mysqlTable(
+  'discount_coupons',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    code: varchar('code', { length: 40 }).notNull(),
+    discountMinor: int('discount_minor').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildCodeUnique: uniqueIndex('discount_coupons_tenant_guild_code_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.code,
+    ),
+    tenantGuildIdx: index('discount_coupons_tenant_guild_idx').on(table.tenantId, table.guildId),
+    tenantCreatedIdx: index('discount_coupons_tenant_created_idx').on(table.tenantId, table.createdAt),
   }),
 );
 
@@ -250,6 +274,25 @@ export const orderSessions = mysqlTable(
     status: mysqlEnum('status', ['pending_payment', 'cancelled', 'paid'])
       .notNull()
       .default('pending_payment'),
+    basketItems: json('basket_items')
+      .$type<
+        Array<{
+          productId: string;
+          productName: string;
+          category: string;
+          variantId: string;
+          variantLabel: string;
+          priceMinor: number;
+          currency: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
+    couponCode: varchar('coupon_code', { length: 40 }),
+    couponDiscountMinor: int('coupon_discount_minor').notNull().default(0),
+    tipMinor: int('tip_minor').notNull().default(0),
+    subtotalMinor: int('subtotal_minor').notNull().default(0),
+    totalMinor: int('total_minor').notNull().default(0),
     answers: json('answers').$type<Record<string, string>>().notNull().default({}),
     checkoutUrl: text('checkout_url'),
     checkoutTokenExpiresAt: timestamp('checkout_token_expires_at', { mode: 'date' }).notNull(),

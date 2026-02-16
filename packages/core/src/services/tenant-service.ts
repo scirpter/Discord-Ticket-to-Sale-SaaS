@@ -183,12 +183,14 @@ export class TenantService {
       paidLogChannelId: string | null;
       staffRoleIds: string[];
       defaultCurrency: string;
+      tipEnabled: boolean;
       ticketMetadataKey: string;
     },
   ): Promise<Result<{
     paidLogChannelId: string | null;
     staffRoleIds: string[];
     defaultCurrency: string;
+    tipEnabled: boolean;
     ticketMetadataKey: string;
   }, AppError>> {
     try {
@@ -202,6 +204,7 @@ export class TenantService {
         paidLogChannelId: config.paidLogChannelId,
         staffRoleIds: config.staffRoleIds,
         defaultCurrency: config.defaultCurrency,
+        tipEnabled: config.tipEnabled,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {
@@ -218,6 +221,7 @@ export class TenantService {
         paidLogChannelId: string | null;
         staffRoleIds: string[];
         defaultCurrency: string;
+        tipEnabled: boolean;
         ticketMetadataKey: string;
       },
       AppError
@@ -238,6 +242,7 @@ export class TenantService {
         paidLogChannelId: config.paidLogChannelId,
         staffRoleIds: config.staffRoleIds,
         defaultCurrency: config.defaultCurrency,
+        tipEnabled: config.tipEnabled,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {

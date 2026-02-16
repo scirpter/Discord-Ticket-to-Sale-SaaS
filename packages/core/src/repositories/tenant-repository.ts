@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { getDb } from '../infra/db/client.js';
 import {
   auditLogs,
+  discountCoupons,
   guildConfigs,
   orderNotesCache,
   orderSessions,
@@ -35,6 +36,7 @@ export type GuildConfigRecord = {
   paidLogChannelId: string | null;
   staffRoleIds: string[];
   defaultCurrency: string;
+  tipEnabled: boolean;
   ticketMetadataKey: string;
 };
 
@@ -214,6 +216,7 @@ export class TenantRepository {
           paidLogChannelId: null,
           staffRoleIds: [],
           defaultCurrency: 'GBP',
+          tipEnabled: false,
           ticketMetadataKey: 'isTicket',
         });
       }
@@ -295,6 +298,7 @@ export class TenantRepository {
       paidLogChannelId: row.paidLogChannelId,
       staffRoleIds: row.staffRoleIds,
       defaultCurrency: row.defaultCurrency,
+      tipEnabled: row.tipEnabled,
       ticketMetadataKey: row.ticketMetadataKey,
     };
   }
@@ -305,6 +309,7 @@ export class TenantRepository {
     paidLogChannelId: string | null;
     staffRoleIds: string[];
     defaultCurrency: string;
+    tipEnabled: boolean;
     ticketMetadataKey: string;
   }): Promise<GuildConfigRecord> {
     const existing = await this.db.query.guildConfigs.findFirst({
@@ -318,6 +323,7 @@ export class TenantRepository {
           paidLogChannelId: input.paidLogChannelId,
           staffRoleIds: input.staffRoleIds,
           defaultCurrency: input.defaultCurrency,
+          tipEnabled: input.tipEnabled,
           ticketMetadataKey: input.ticketMetadataKey,
           updatedAt: new Date(),
         })
@@ -330,6 +336,7 @@ export class TenantRepository {
         paidLogChannelId: input.paidLogChannelId,
         staffRoleIds: input.staffRoleIds,
         defaultCurrency: input.defaultCurrency,
+        tipEnabled: input.tipEnabled,
         ticketMetadataKey: input.ticketMetadataKey,
       };
     }
@@ -342,6 +349,7 @@ export class TenantRepository {
       paidLogChannelId: input.paidLogChannelId,
       staffRoleIds: input.staffRoleIds,
       defaultCurrency: input.defaultCurrency,
+      tipEnabled: input.tipEnabled,
       ticketMetadataKey: input.ticketMetadataKey,
     });
 
@@ -352,6 +360,7 @@ export class TenantRepository {
       paidLogChannelId: input.paidLogChannelId,
       staffRoleIds: input.staffRoleIds,
       defaultCurrency: input.defaultCurrency,
+      tipEnabled: input.tipEnabled,
       ticketMetadataKey: input.ticketMetadataKey,
     };
   }
@@ -367,6 +376,7 @@ export class TenantRepository {
       await tx.delete(productFormFields).where(eq(productFormFields.tenantId, input.tenantId));
       await tx.delete(productVariants).where(eq(productVariants.tenantId, input.tenantId));
       await tx.delete(products).where(eq(products.tenantId, input.tenantId));
+      await tx.delete(discountCoupons).where(eq(discountCoupons.tenantId, input.tenantId));
 
       await tx
         .delete(tenantIntegrationsVoodooPay)

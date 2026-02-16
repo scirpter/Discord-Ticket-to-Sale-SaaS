@@ -96,6 +96,13 @@ type ProductRecord = {
   formFields: ProductFormFieldRecord[];
 };
 
+type CouponRecord = {
+  id: string;
+  code: string;
+  discountMinor: number;
+  active: boolean;
+};
+
 type MeResponse = {
   me: {
     userId: string;
@@ -268,6 +275,7 @@ export default function DashboardPage() {
   const [paidLogChannelId, setPaidLogChannelId] = useState('');
   const [selectedStaffRoleIds, setSelectedStaffRoleIds] = useState<string[]>([]);
   const [defaultCurrency, setDefaultCurrency] = useState(DEFAULT_CURRENCY);
+  const [tipEnabled, setTipEnabled] = useState(false);
 
   const [botToken, setBotToken] = useState('');
 
@@ -281,6 +289,11 @@ export default function DashboardPage() {
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [coupons, setCoupons] = useState<CouponRecord[]>([]);
+  const [editingCouponId, setEditingCouponId] = useState<string | null>(null);
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [couponDiscountInput, setCouponDiscountInput] = useState('1.00');
+  const [couponActiveInput, setCouponActiveInput] = useState(true);
 
   const [categoryBuilderName, setCategoryBuilderName] = useState('Accounts');
   const [categoryRenameTo, setCategoryRenameTo] = useState('');
@@ -322,8 +335,17 @@ export default function DashboardPage() {
       discordServerName: selectedDiscordGuild?.name ?? '',
       botInstalled: Boolean(guildResources?.botInGuild),
       defaultCurrency,
+      tipEnabled,
     }),
-    [defaultCurrency, guildId, guildResources?.botInGuild, myTenants, selectedDiscordGuild?.name, tenantId],
+    [
+      defaultCurrency,
+      guildId,
+      guildResources?.botInGuild,
+      myTenants,
+      selectedDiscordGuild?.name,
+      tenantId,
+      tipEnabled,
+    ],
   );
   const existingCategories = useMemo(
     () =>
@@ -531,6 +553,7 @@ export default function DashboardPage() {
           paidLogChannelId: string | null;
           staffRoleIds: string[];
           defaultCurrency: string;
+          tipEnabled: boolean;
         };
       };
 
@@ -538,11 +561,13 @@ export default function DashboardPage() {
         setPaidLogChannelId(configPayload.config.paidLogChannelId ?? '');
         setSelectedStaffRoleIds(Array.isArray(configPayload.config.staffRoleIds) ? configPayload.config.staffRoleIds : []);
         setDefaultCurrency(configPayload.config.defaultCurrency || DEFAULT_CURRENCY);
+        setTipEnabled(Boolean(configPayload.config.tipEnabled));
       }
     } catch {
       setPaidLogChannelId('');
       setSelectedStaffRoleIds([]);
       setDefaultCurrency(DEFAULT_CURRENCY);
+      setTipEnabled(false);
     }
 
     try {
@@ -586,6 +611,17 @@ export default function DashboardPage() {
     } finally {
       setProductsLoading(false);
     }
+
+    try {
+      const couponsPayload = (await apiCall(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/coupons?tenantId=${encodeURIComponent(selectedTenantId)}`,
+      )) as {
+        coupons?: CouponRecord[];
+      };
+      setCoupons(Array.isArray(couponsPayload.coupons) ? couponsPayload.coupons : []);
+    } catch {
+      setCoupons([]);
+    }
   }, [ensureGuildLinked, guildId, tenantId]);
 
   useEffect(() => {
@@ -614,8 +650,14 @@ export default function DashboardPage() {
     setPaidLogChannelId('');
     setSelectedStaffRoleIds([]);
     setDefaultCurrency(DEFAULT_CURRENCY);
+    setTipEnabled(false);
     setProducts([]);
     setEditingProductId(null);
+    setCoupons([]);
+    setEditingCouponId(null);
+    setCouponCodeInput('');
+    setCouponDiscountInput('1.00');
+    setCouponActiveInput(true);
     setCategoryBuilderName('Accounts');
     setCategoryRenameTo('');
     setProductCategory('Accounts');
@@ -793,6 +835,31 @@ export default function DashboardPage() {
     const nextProducts = Array.isArray(payload.products) ? payload.products : [];
     setProducts(nextProducts);
     return nextProducts;
+  }
+
+  async function refreshCoupons(): Promise<CouponRecord[]> {
+    const context = requireWorkspaceAndServer({ requireBot: true });
+    await ensureGuildLinked(context.workspaceId, context.discordServerId);
+    const payload = (await apiCall(
+      `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons?tenantId=${encodeURIComponent(context.workspaceId)}`,
+    )) as { coupons?: CouponRecord[] };
+    const nextCoupons = Array.isArray(payload.coupons) ? payload.coupons : [];
+    setCoupons(nextCoupons);
+    return nextCoupons;
+  }
+
+  function resetCouponBuilder(): void {
+    setEditingCouponId(null);
+    setCouponCodeInput('');
+    setCouponDiscountInput('1.00');
+    setCouponActiveInput(true);
+  }
+
+  function loadCouponIntoBuilder(coupon: CouponRecord): void {
+    setEditingCouponId(coupon.id);
+    setCouponCodeInput(coupon.code);
+    setCouponDiscountInput((coupon.discountMinor / 100).toFixed(2));
+    setCouponActiveInput(coupon.active);
   }
 
   function resetProductBuilder(options?: { keepCategory?: string }): void {
@@ -1140,6 +1207,17 @@ export default function DashboardPage() {
                 <Input id="currency" value={defaultCurrency} readOnly />
               </div>
 
+              <div className="inline-flex items-center gap-2">
+                <Checkbox
+                  id="tip-enabled"
+                  checked={tipEnabled}
+                  onCheckedChange={(checked) => setTipEnabled(checked === true)}
+                />
+                <Label htmlFor="tip-enabled" className="text-sm font-normal text-muted-foreground">
+                  Ask customer for optional tip before checkout link
+                </Label>
+              </div>
+
               <Button
                 type="button"
                 disabled={state.loading || !serverReady}
@@ -1153,6 +1231,7 @@ export default function DashboardPage() {
                       paidLogChannelId: paidLogChannelId || null,
                       staffRoleIds: selectedStaffRoleIds,
                       defaultCurrency: DEFAULT_CURRENCY,
+                      tipEnabled,
                       ticketMetadataKey: 'isTicket',
                     });
                     await hydrateContextData();
@@ -1267,6 +1346,179 @@ export default function DashboardPage() {
                   </p>
                 </div>
               ) : null}
+            </CardContent>
+          </Card>
+        </section>
+        <section className="grid gap-6 lg:grid-cols-1">
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Wallet className="size-4 text-primary" />
+                3.1 Coupons
+              </CardTitle>
+              <CardDescription>Create coupon codes that reduce order total before checkout.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {coupons.length} coupon(s) configured for this server.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={state.loading || !serverReady}
+                  onClick={() =>
+                    runAction(async () => {
+                      const refreshed = await refreshCoupons();
+                      return { couponCount: refreshed.length };
+                    })
+                  }
+                >
+                  Refresh Coupons
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {coupons.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No coupons yet for this server.</p>
+                ) : (
+                  coupons.map((coupon) => (
+                    <div
+                      key={coupon.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/35 px-3 py-2 text-sm"
+                    >
+                      <div>
+                        <p className="font-medium">{coupon.code}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Discount: {(coupon.discountMinor / 100).toFixed(2)} {DEFAULT_CURRENCY} -{' '}
+                          {coupon.active ? 'Active' : 'Inactive'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => loadCouponIntoBuilder(coupon)}>
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() =>
+                            runAction(async () => {
+                              const context = requireWorkspaceAndServer({ requireBot: true });
+                              const confirmed = window.confirm(`Delete coupon "${coupon.code}"?`);
+                              if (!confirmed) {
+                                return { cancelled: true };
+                              }
+
+                              await apiCall(
+                                `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons/${encodeURIComponent(coupon.id)}?tenantId=${encodeURIComponent(context.workspaceId)}`,
+                                'DELETE',
+                              );
+                              await refreshCoupons();
+                              if (editingCouponId === coupon.id) {
+                                resetCouponBuilder();
+                              }
+
+                              return { deletedCouponId: coupon.id };
+                            })
+                          }
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <Separator />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="coupon-code">Coupon Code</Label>
+                  <Input
+                    id="coupon-code"
+                    value={couponCodeInput}
+                    onChange={(event) => setCouponCodeInput(event.target.value.toUpperCase())}
+                    placeholder="SAVE10"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="coupon-discount">Discount Amount (GBP)</Label>
+                  <Input
+                    id="coupon-discount"
+                    value={couponDiscountInput}
+                    onChange={(event) => setCouponDiscountInput(event.target.value)}
+                    placeholder="5.00"
+                  />
+                </div>
+              </div>
+
+              <div className="inline-flex items-center gap-2">
+                <Checkbox
+                  id="coupon-active"
+                  checked={couponActiveInput}
+                  onCheckedChange={(checked) => setCouponActiveInput(checked === true)}
+                />
+                <Label htmlFor="coupon-active" className="text-sm font-normal text-muted-foreground">
+                  Coupon active
+                </Label>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  disabled={state.loading || !serverReady}
+                  className="sm:flex-1"
+                  onClick={() =>
+                    runAction(async () => {
+                      const context = requireWorkspaceAndServer({ requireBot: true });
+                      await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                      const normalizedCode = couponCodeInput.trim().toUpperCase();
+                      if (!normalizedCode) {
+                        throw new Error('Coupon code is required.');
+                      }
+
+                      const discountMinor = parsePriceToMinor(couponDiscountInput);
+                      const payload = {
+                        tenantId: context.workspaceId,
+                        coupon: {
+                          code: normalizedCode,
+                          discountMinor,
+                          active: couponActiveInput,
+                        },
+                      };
+
+                      if (editingCouponId) {
+                        await apiCall(
+                          `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons/${encodeURIComponent(editingCouponId)}`,
+                          'PATCH',
+                          payload,
+                        );
+                      } else {
+                        await apiCall(
+                          `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons`,
+                          'POST',
+                          payload,
+                        );
+                      }
+
+                      await refreshCoupons();
+                      resetCouponBuilder();
+
+                      return { mode: editingCouponId ? 'updated' : 'created', code: normalizedCode };
+                    })
+                  }
+                >
+                  {editingCouponId ? 'Update Coupon' : 'Create Coupon'}
+                </Button>
+                {editingCouponId ? (
+                  <Button type="button" variant="outline" className="sm:flex-1" onClick={() => resetCouponBuilder()}>
+                    Cancel Edit
+                  </Button>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
         </section>

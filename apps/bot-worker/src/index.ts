@@ -3,6 +3,7 @@ import { getEnv, logger } from '@voodoo/core';
 
 import { saleCommand } from './commands/sale.js';
 import {
+  handleSaleAction,
   handleSaleBack,
   handleSaleButtonStart,
   handleSaleCancel,
@@ -61,6 +62,11 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
 
     if (interaction.isButton() && interaction.customId.startsWith('sale:back:')) {
       await handleSaleBack(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('sale:action:')) {
+      await handleSaleAction(interaction);
       return;
     }
 

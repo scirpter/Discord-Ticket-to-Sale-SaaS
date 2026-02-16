@@ -1,10 +1,10 @@
-﻿import { TenantService } from '@voodoo/core';
-import type { NextRequest} from 'next/server';
+import { CouponService } from '@voodoo/core';
+import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 import { jsonError, readJson, requireSession } from '@/lib/http';
 
-const tenantService = new TenantService();
+const couponService = new CouponService();
 
 export async function GET(
   request: NextRequest,
@@ -22,7 +22,7 @@ export async function GET(
     }
 
     const { guildId } = await context.params;
-    const result = await tenantService.getGuildConfig(auth.session, {
+    const result = await couponService.listCoupons(auth.session, {
       tenantId,
       guildId,
     });
@@ -31,13 +31,13 @@ export async function GET(
       return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
     }
 
-    return NextResponse.json({ config: result.value });
+    return NextResponse.json({ coupons: result.value });
   } catch (error) {
     return jsonError(error);
   }
 }
 
-export async function PATCH(
+export async function POST(
   request: NextRequest,
   context: { params: Promise<{ guildId: string }> },
 ): Promise<NextResponse> {
@@ -50,28 +50,20 @@ export async function PATCH(
     const { guildId } = await context.params;
     const body = await readJson<{
       tenantId: string;
-      paidLogChannelId: string | null;
-      staffRoleIds: string[];
-      defaultCurrency: string;
-      tipEnabled?: boolean;
-      ticketMetadataKey?: string;
+      coupon: unknown;
     }>(request);
 
-    const result = await tenantService.updateGuildConfig(auth.session, {
+    const result = await couponService.createCoupon(auth.session, {
       tenantId: body.tenantId,
       guildId,
-      paidLogChannelId: body.paidLogChannelId,
-      staffRoleIds: body.staffRoleIds,
-      defaultCurrency: body.defaultCurrency,
-      tipEnabled: body.tipEnabled ?? false,
-      ticketMetadataKey: body.ticketMetadataKey ?? 'isTicket',
+      coupon: body.coupon,
     });
 
     if (result.isErr()) {
-      return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
+      return NextResponse.json({ error: result.error.message, code: result.error.code }, { status: result.error.statusCode });
     }
 
-    return NextResponse.json({ config: result.value });
+    return NextResponse.json({ coupon: result.value }, { status: 201 });
   } catch (error) {
     return jsonError(error);
   }

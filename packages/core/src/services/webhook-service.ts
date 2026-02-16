@@ -251,6 +251,44 @@ function fitDiscordMessage(content: string, maxLength = 1900): string {
   return `${content.slice(0, maxLength - 20)}\n\n[message truncated]`;
 }
 
+function formatMinorAmount(minor: number, currency: string): string {
+  return `${(minor / 100).toFixed(2)} ${currency}`;
+}
+
+function formatBasketLines(
+  basketItems: Array<{
+    category: string;
+    productName: string;
+    variantLabel: string;
+    priceMinor: number;
+    currency: string;
+  }>,
+  fallback: {
+    category: string;
+    productName: string;
+    variantLabel: string;
+    priceMinor: number;
+    currency: string;
+  },
+): string {
+  if (basketItems.length === 0) {
+    return `- \`${fallback.category} / ${fallback.productName} / ${fallback.variantLabel}\` - \`${formatMinorAmount(
+      fallback.priceMinor,
+      fallback.currency,
+    )}\``;
+  }
+
+  return basketItems
+    .map(
+      (item, index) =>
+        `${index + 1}. \`${item.category} / ${item.productName} / ${item.variantLabel}\` - \`${formatMinorAmount(
+          item.priceMinor,
+          item.currency,
+        )}\``,
+    )
+    .join('\n');
+}
+
 export class WebhookService {
   private readonly env = getEnv();
   private readonly integrationService = new IntegrationService();
@@ -703,14 +741,42 @@ export class WebhookService {
       throw new AbortError('Variant not found for paid order');
     }
 
+    const basketItems = orderSession.basketItems;
+    const paidCurrency = basketItems[0]?.currency ?? variant.currency ?? order.currency ?? 'USD';
+    const totalMinor =
+      orderSession.totalMinor > 0
+        ? orderSession.totalMinor
+        : variant.priceMinor > 0
+          ? variant.priceMinor
+          : toMinor(order.total);
+    const subtotalMinor = orderSession.subtotalMinor > 0 ? orderSession.subtotalMinor : totalMinor;
+    const basketContent = formatBasketLines(basketItems, {
+      category: product.category,
+      productName: product.name,
+      variantLabel: variant.label,
+      priceMinor: variant.priceMinor,
+      currency: variant.currency,
+    });
+    const couponLine =
+      orderSession.couponCode && orderSession.couponDiscountMinor > 0
+        ? `Coupon (${orderSession.couponCode}): -${formatMinorAmount(
+            orderSession.couponDiscountMinor,
+            paidCurrency,
+          )}`
+        : 'Coupon: (none)';
+    const tipLine =
+      orderSession.tipMinor > 0
+        ? `Tip: +${formatMinorAmount(orderSession.tipMinor, paidCurrency)}`
+        : `Tip: ${formatMinorAmount(0, paidCurrency)}`;
+
     const created = await this.orderRepository.createPaidOrder({
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
       orderSessionId: orderSession.id,
       providerOrderId: String(order.id),
       status: order.status,
-      priceMinor: variant.priceMinor || toMinor(order.total),
-      currency: variant.currency || order.currency || 'USD',
+      priceMinor: totalMinor,
+      currency: paidCurrency,
       paymentReference: order.number ?? null,
     });
 
@@ -769,14 +835,17 @@ export class WebhookService {
     const message = [
       '**Order Paid**',
       `Provider: WooCommerce`,
-      `Order Session: ${orderSession.id}`,
+      `Order Session: \`${orderSession.id}\``,
       `Woo Order: ${order.id}`,
       '',
       '**Order Details**',
-      `Category: ${product.category}`,
-      `Product: ${product.name}`,
-      `Variant: ${variant.label}`,
-      `Price: ${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`,
+      `Subtotal: ${formatMinorAmount(subtotalMinor, paidCurrency)}`,
+      couponLine,
+      tipLine,
+      `Total: ${formatMinorAmount(totalMinor, paidCurrency)}`,
+      '',
+      '**Basket**',
+      basketContent,
       '',
       '**Answers**',
       answersContent || '- (none)',
@@ -799,8 +868,8 @@ export class WebhookService {
       orderSessionId: orderSession.id,
       productName: product.name,
       variantLabel: variant.label,
-      currency: variant.currency,
-      priceMinor: variant.priceMinor,
+      currency: paidCurrency,
+      priceMinor: totalMinor,
     });
 
     logger.info(
@@ -879,6 +948,34 @@ export class WebhookService {
       throw new AbortError('Variant not found for paid order');
     }
 
+    const basketItems = orderSession.basketItems;
+    const paidCurrency = basketItems[0]?.currency ?? variant.currency ?? input.query.currency ?? 'USD';
+    const totalMinor =
+      orderSession.totalMinor > 0
+        ? orderSession.totalMinor
+        : variant.priceMinor > 0
+          ? variant.priceMinor
+          : toMinor(input.query.value_forwarded_coin ?? input.query.value_coin ?? input.query.amount);
+    const subtotalMinor = orderSession.subtotalMinor > 0 ? orderSession.subtotalMinor : totalMinor;
+    const basketContent = formatBasketLines(basketItems, {
+      category: product.category,
+      productName: product.name,
+      variantLabel: variant.label,
+      priceMinor: variant.priceMinor,
+      currency: variant.currency,
+    });
+    const couponLine =
+      orderSession.couponCode && orderSession.couponDiscountMinor > 0
+        ? `Coupon (${orderSession.couponCode}): -${formatMinorAmount(
+            orderSession.couponDiscountMinor,
+            paidCurrency,
+          )}`
+        : 'Coupon: (none)';
+    const tipLine =
+      orderSession.tipMinor > 0
+        ? `Tip: +${formatMinorAmount(orderSession.tipMinor, paidCurrency)}`
+        : `Tip: ${formatMinorAmount(0, paidCurrency)}`;
+
     const providerOrderId =
       paymentState.txidIn ??
       paymentState.txidOut ??
@@ -894,8 +991,8 @@ export class WebhookService {
       orderSessionId: orderSession.id,
       providerOrderId,
       status: paymentState.status ?? 'paid',
-      priceMinor: variant.priceMinor,
-      currency: variant.currency,
+      priceMinor: totalMinor,
+      currency: paidCurrency,
       paymentReference,
     });
 
@@ -938,7 +1035,7 @@ export class WebhookService {
     const message = [
       '**Order Paid**',
       `Provider: Voodoo Pay`,
-      `Order Session: ${orderSession.id}`,
+      `Order Session: \`${orderSession.id}\``,
       `Status: ${paymentState.status ?? 'paid'}`,
       `Transaction In: ${paymentState.txidIn ?? '(none)'}`,
       `Transaction Out: ${paymentState.txidOut ?? '(none)'}`,
@@ -947,10 +1044,13 @@ export class WebhookService {
       `Forwarded Value: ${input.query.value_forwarded_coin ?? input.query.value_coin ?? '(unknown)'}`,
       '',
       '**Order Details**',
-      `Category: ${product.category}`,
-      `Product: ${product.name}`,
-      `Variant: ${variant.label}`,
-      `Price: ${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`,
+      `Subtotal: ${formatMinorAmount(subtotalMinor, paidCurrency)}`,
+      couponLine,
+      tipLine,
+      `Total: ${formatMinorAmount(totalMinor, paidCurrency)}`,
+      '',
+      '**Basket**',
+      basketContent,
       '',
       '**Answers**',
       answersContent || '- (none)',
@@ -969,8 +1069,8 @@ export class WebhookService {
       orderSessionId: orderSession.id,
       productName: product.name,
       variantLabel: variant.label,
-      currency: variant.currency,
-      priceMinor: variant.priceMinor,
+      currency: paidCurrency,
+      priceMinor: totalMinor,
     });
 
     logger.info(

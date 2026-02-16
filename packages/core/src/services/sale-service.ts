@@ -6,6 +6,7 @@ import { AppError, fromUnknownError, validationError } from '../domain/errors.js
 import type { SessionPayload } from '../security/session-token.js';
 import { signCheckoutToken } from '../security/checkout-token.js';
 import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
+import { CouponRepository } from '../repositories/coupon-repository.js';
 import { OrderRepository } from '../repositories/order-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
@@ -25,11 +26,28 @@ type SaleSessionInput = {
   customerDiscordUserId: string;
   productId: string;
   variantId: string;
+  items?: Array<{
+    productId: string;
+    variantId: string;
+  }>;
+  couponCode?: string | null;
+  tipMinor?: number;
   answers: Record<string, string>;
+};
+
+type ResolvedSaleItem = {
+  productId: string;
+  productName: string;
+  category: string;
+  variantId: string;
+  variantLabel: string;
+  priceMinor: number;
+  currency: string;
 };
 
 export class SaleService {
   private readonly env = getEnv();
+  private readonly couponRepository = new CouponRepository();
   private readonly orderRepository = new OrderRepository();
   private readonly productRepository = new ProductRepository();
   private readonly tenantRepository = new TenantRepository();
@@ -171,19 +189,52 @@ export class SaleService {
       return err(validationError(parsedAnswers.error.issues));
     }
 
-    const product = await this.productRepository.getById({
+    const requestedItems =
+      input.items && input.items.length > 0
+        ? input.items
+        : [
+            {
+              productId: input.productId,
+              variantId: input.variantId,
+            },
+          ];
+
+    const resolvedItemsResult = await this.resolveSaleItems({
       tenantId: input.tenantId,
       guildId: input.guildId,
-      productId: input.productId,
+      requestedItems,
     });
-    if (!product) {
-      return err(new AppError('PRODUCT_NOT_FOUND', 'Product not found', 404));
+    if (resolvedItemsResult.isErr()) {
+      return err(resolvedItemsResult.error);
+    }
+    const resolvedItems = resolvedItemsResult.value;
+    const primaryItem = resolvedItems[0];
+    if (!primaryItem) {
+      return err(new AppError('BASKET_EMPTY', 'Basket must include at least one item', 400));
     }
 
-    const variant = product.variants.find((item) => item.id === input.variantId);
-    if (!variant) {
-      return err(new AppError('VARIANT_NOT_FOUND', 'Variant not found', 404));
+    const subtotalMinor = resolvedItems.reduce((sum, item) => sum + item.priceMinor, 0);
+    const normalizedCouponCode = input.couponCode?.trim().toUpperCase() ?? null;
+    let couponDiscountMinor = 0;
+    if (normalizedCouponCode) {
+      const coupon = await this.couponRepository.getByCode({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        code: normalizedCouponCode,
+      });
+      if (!coupon || !coupon.active) {
+        return err(new AppError('COUPON_NOT_FOUND', 'Coupon code is invalid or inactive', 404));
+      }
+
+      couponDiscountMinor = Math.min(subtotalMinor, coupon.discountMinor);
     }
+
+    const tipMinorRaw = input.tipMinor ?? 0;
+    if (!Number.isInteger(tipMinorRaw) || tipMinorRaw < 0) {
+      return err(new AppError('TIP_INVALID', 'Tip amount must be a non-negative integer minor amount', 400));
+    }
+
+    const totalMinor = Math.max(0, subtotalMinor - couponDiscountMinor + tipMinorRaw);
 
     const voodooIntegration = await this.integrationService.getResolvedVoodooPayIntegrationByGuild({
       tenantId: input.tenantId,
@@ -211,8 +262,14 @@ export class SaleService {
       ticketChannelId: input.ticketChannelId,
       staffUserId: input.staffDiscordUserId,
       customerDiscordId: input.customerDiscordUserId,
-      productId: input.productId,
-      variantId: input.variantId,
+      productId: primaryItem.productId,
+      variantId: primaryItem.variantId,
+      basketItems: resolvedItems,
+      couponCode: normalizedCouponCode,
+      couponDiscountMinor,
+      tipMinor: tipMinorRaw,
+      subtotalMinor,
+      totalMinor,
       answers: parsedAnswers.data,
       checkoutTokenExpiresAt: expiresAt,
     });
@@ -231,8 +288,8 @@ export class SaleService {
         guildId: input.guildId,
         orderSessionId: orderSession.id,
         customerDiscordUserId: input.customerDiscordUserId,
-        variantPriceMinor: variant.priceMinor,
-        currency: variant.currency,
+        totalMinor,
+        currency: primaryItem.currency,
         answers: parsedAnswers.data,
         integration: voodooIntegration.value,
         token,
@@ -263,14 +320,22 @@ export class SaleService {
       return err(wooIntegration.error);
     }
 
-    const checkoutBase =
-      variant.wooCheckoutPath && variant.wooCheckoutPath.length > 0
-        ? new URL(variant.wooCheckoutPath, wooIntegration.value.wpBaseUrl)
+    const productForCheckout = await this.productRepository.getById({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      productId: primaryItem.productId,
+    });
+    const primaryVariantCheckoutPath =
+      productForCheckout?.variants.find((item) => item.id === primaryItem.variantId)?.wooCheckoutPath ?? null;
+
+    const checkoutTarget =
+      primaryVariantCheckoutPath && primaryVariantCheckoutPath.length > 0
+        ? new URL(primaryVariantCheckoutPath, wooIntegration.value.wpBaseUrl)
         : new URL(wooIntegration.value.wpBaseUrl);
 
-    checkoutBase.searchParams.set('vd_token', token);
-    checkoutBase.searchParams.set('vd_order_session_id', orderSession.id);
-    const providerCheckoutUrl = checkoutBase.toString();
+    checkoutTarget.searchParams.set('vd_token', token);
+    checkoutTarget.searchParams.set('vd_order_session_id', orderSession.id);
+    const providerCheckoutUrl = checkoutTarget.toString();
 
     await this.orderRepository.setCheckoutUrl({
       tenantId: input.tenantId,
@@ -290,7 +355,7 @@ export class SaleService {
     guildId: string;
     orderSessionId: string;
     customerDiscordUserId: string;
-    variantPriceMinor: number;
+    totalMinor: number;
     currency: string;
     answers: Record<string, string>;
     integration: {
@@ -347,7 +412,7 @@ export class SaleService {
 
       const checkoutUrl = new URL('/pay.php', this.env.VOODOO_PAY_CHECKOUT_BASE_URL);
       checkoutUrl.searchParams.set('address', walletPayload.address_in);
-      checkoutUrl.searchParams.set('amount', (input.variantPriceMinor / 100).toFixed(2));
+      checkoutUrl.searchParams.set('amount', (input.totalMinor / 100).toFixed(2));
       checkoutUrl.searchParams.set('currency', input.currency);
       checkoutUrl.searchParams.set('domain', input.integration.checkoutDomain);
       checkoutUrl.searchParams.set('vd_token', input.token);
@@ -424,6 +489,54 @@ export class SaleService {
     }
   }
 
+  private async resolveSaleItems(input: {
+    tenantId: string;
+    guildId: string;
+    requestedItems: Array<{ productId: string; variantId: string }>;
+  }): Promise<Result<ResolvedSaleItem[], AppError>> {
+    const resolvedItems: ResolvedSaleItem[] = [];
+    let basketCurrency: string | null = null;
+
+    for (const requested of input.requestedItems) {
+      const product = await this.productRepository.getById({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        productId: requested.productId,
+      });
+      if (!product || !product.active) {
+        return err(new AppError('PRODUCT_NOT_FOUND', 'Product not found', 404));
+      }
+
+      const variant = product.variants.find((item) => item.id === requested.variantId);
+      if (!variant) {
+        return err(new AppError('VARIANT_NOT_FOUND', 'Variant not found', 404));
+      }
+
+      if (basketCurrency && basketCurrency !== variant.currency) {
+        return err(
+          new AppError(
+            'BASKET_CURRENCY_MISMATCH',
+            'All basket items must use the same currency',
+            400,
+          ),
+        );
+      }
+      basketCurrency = variant.currency;
+
+      resolvedItems.push({
+        productId: product.id,
+        productName: product.name,
+        category: product.category,
+        variantId: variant.id,
+        variantLabel: variant.label,
+        priceMinor: variant.priceMinor,
+        currency: variant.currency,
+      });
+    }
+
+    return ok(resolvedItems);
+  }
+
   public async cancelLatestPendingSession(input: {
     tenantId: string;
     guildId: string;
@@ -459,6 +572,7 @@ export class SaleService {
         paidLogChannelId: string | null;
         staffRoleIds: string[];
         defaultCurrency: string;
+        tipEnabled: boolean;
         ticketMetadataKey: string;
       },
       AppError
@@ -474,6 +588,7 @@ export class SaleService {
         paidLogChannelId: config.paidLogChannelId,
         staffRoleIds: config.staffRoleIds,
         defaultCurrency: config.defaultCurrency,
+        tipEnabled: config.tipEnabled,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {

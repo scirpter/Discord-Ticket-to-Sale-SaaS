@@ -12,12 +12,19 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from 'discord.js';
-import { ProductRepository, SaleService, TenantRepository } from '@voodoo/core';
+import { CouponRepository, ProductRepository, SaleService, TenantRepository } from '@voodoo/core';
 
-import { getSaleDraft, removeSaleDraft, updateSaleDraft, type SaleDraft } from '../flows/sale-draft-store.js';
+import {
+  getSaleDraft,
+  removeSaleDraft,
+  updateSaleDraft,
+  type SaleDraft,
+  type SaleDraftFormField,
+} from '../flows/sale-draft-store.js';
 import { sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 
 const productRepository = new ProductRepository();
+const couponRepository = new CouponRepository();
 const saleService = new SaleService();
 const displayLabelCollator = new Intl.Collator(undefined, {
   numeric: true,
@@ -66,6 +73,44 @@ function compareProductNameForDisplay(
 }
 
 type SaleStepInteraction = StringSelectMenuInteraction | ButtonInteraction;
+type StepButton = {
+  customId: string;
+  label: string;
+  style: ButtonStyle;
+};
+
+function formatMinorCurrency(minor: number, currency: string): string {
+  const major = (minor / 100).toFixed(2);
+  return `${major} ${currency}`;
+}
+
+function getBasketSubtotalMinor(draft: SaleDraft): number {
+  return draft.basketItems.reduce((sum, item) => sum + item.priceMinor, 0);
+}
+
+function buildBasketSummaryLines(draft: SaleDraft): string[] {
+  if (draft.basketItems.length === 0) {
+    return ['Basket: (empty)'];
+  }
+
+  const lines = draft.basketItems.map(
+    (item, index) =>
+      `${index + 1}. ${item.category} / ${item.productName} / ${item.variantLabel} - ${formatMinorCurrency(item.priceMinor, item.currency)}`,
+  );
+
+  const currency = draft.basketItems[0]?.currency ?? draft.defaultCurrency;
+  lines.push(`Subtotal: ${formatMinorCurrency(getBasketSubtotalMinor(draft), currency)}`);
+
+  if (draft.couponCode) {
+    lines.push(`Coupon: ${draft.couponCode}`);
+  }
+
+  if (draft.tipMinor > 0) {
+    lines.push(`Tip: ${formatMinorCurrency(draft.tipMinor, currency)}`);
+  }
+
+  return lines;
+}
 
 function buildSelectRow(input: {
   customId: string;
@@ -89,6 +134,17 @@ function buildBackRow(input: { customId: string; label?: string }): ActionRowBui
   return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
 }
 
+function buildButtonRow(buttons: StepButton[]): ActionRowBuilder<ButtonBuilder> {
+  const row = new ActionRowBuilder<ButtonBuilder>();
+  for (const button of buttons.slice(0, 5)) {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(button.customId).setLabel(button.label).setStyle(button.style),
+    );
+  }
+
+  return row;
+}
+
 function toOptionDescription(input: { description: string; variantCount: number }): string {
   const description = input.description.trim();
   if (description.length > 0) {
@@ -109,7 +165,7 @@ function buildFormModal(
   }>,
   existingAnswers: Record<string, string>,
 ): ModalBuilder {
-  const modal = new ModalBuilder().setCustomId(`sale:modal:${draftId}`).setTitle('Customer Details');
+  const modal = new ModalBuilder().setCustomId(`sale:modal:${draftId}:answers`).setTitle('Customer Details');
 
   for (const field of productFields) {
     const validation = field.validation ?? {};
@@ -137,18 +193,126 @@ function buildFormModal(
   return modal;
 }
 
+function buildCouponModal(draftId: string, existingCouponCode: string | null): ModalBuilder {
+  const modal = new ModalBuilder().setCustomId(`sale:modal:${draftId}:coupon`).setTitle('Apply Coupon');
+
+  const codeInput = new TextInputBuilder()
+    .setCustomId('couponCode')
+    .setLabel('Coupon code')
+    .setRequired(true)
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(40)
+    .setPlaceholder('SAVE10');
+
+  if (existingCouponCode) {
+    codeInput.setValue(existingCouponCode);
+  }
+
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(codeInput));
+  return modal;
+}
+
+function buildTipModal(draftId: string, existingTipMinor: number): ModalBuilder {
+  const modal = new ModalBuilder().setCustomId(`sale:modal:${draftId}:tip`).setTitle('Add Tip (GBP)');
+
+  const tipInput = new TextInputBuilder()
+    .setCustomId('tipAmount')
+    .setLabel('Tip amount in GBP')
+    .setRequired(true)
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(12)
+    .setPlaceholder('2.50');
+
+  if (existingTipMinor > 0) {
+    tipInput.setValue((existingTipMinor / 100).toFixed(2));
+  }
+
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(tipInput));
+  return modal;
+}
+
+function parseTipToMinor(rawValue: string): number {
+  const value = rawValue.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) {
+    throw new Error('Tip must be a valid GBP amount, for example 2.50');
+  }
+
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Tip must be greater than zero.');
+  }
+
+  return Math.round(amount * 100);
+}
+
+function mergeFormFields(existing: SaleDraftFormField[], incoming: SaleDraftFormField[]): SaleDraftFormField[] {
+  const merged = [...existing];
+  const existingKeys = new Set(existing.map((field) => field.fieldKey.toLowerCase()));
+
+  for (const field of incoming) {
+    const key = field.fieldKey.toLowerCase();
+    if (existingKeys.has(key)) {
+      continue;
+    }
+
+    merged.push(field);
+    existingKeys.add(key);
+  }
+
+  return merged;
+}
+
+async function rebuildFormFieldsFromBasket(draft: SaleDraft): Promise<SaleDraftFormField[]> {
+  const uniqueProductIds = Array.from(new Set(draft.basketItems.map((item) => item.productId)));
+  let merged: SaleDraftFormField[] = [];
+
+  for (const productId of uniqueProductIds) {
+    const product = await productRepository.getById({
+      tenantId: draft.tenantId,
+      guildId: draft.guildId,
+      productId,
+    });
+
+    if (!product) {
+      continue;
+    }
+
+    merged = mergeFormFields(
+      merged,
+      product.formFields.map((field) => ({
+        fieldKey: field.fieldKey,
+        label: field.label,
+        required: field.required,
+        fieldType: field.fieldType,
+        validation: field.validation,
+      })),
+    );
+  }
+
+  return merged;
+}
+
 async function finalizeDraft(input: {
   draftId: string;
   draft: SaleDraft;
   interaction: {
-    channel: ModalSubmitInteraction['channel'] | StringSelectMenuInteraction['channel'];
-    editReply: (payload: { content: string; components?: [] }) => Promise<unknown>;
+    channel: ModalSubmitInteraction['channel'] | StringSelectMenuInteraction['channel'] | ButtonInteraction['channel'];
+    editReply: (payload: { content: string; components?: any[] }) => Promise<unknown>;
     inGuild: () => boolean;
   };
 }): Promise<void> {
-  if (!input.interaction.inGuild() || !input.interaction.channel || !input.draft.productId || !input.draft.variantId) {
+  if (!input.interaction.inGuild() || !input.interaction.channel || input.draft.basketItems.length === 0) {
     await input.interaction.editReply({
       content: 'Sale draft expired. Please start again with `/sale`.',
+      components: [],
+    });
+    return;
+  }
+
+  const primaryItem = input.draft.basketItems[0];
+  if (!primaryItem) {
+    await input.interaction.editReply({
+      content: 'Basket is empty. Please restart `/sale`.',
       components: [],
     });
     return;
@@ -160,8 +324,14 @@ async function finalizeDraft(input: {
     ticketChannelId: input.draft.ticketChannelId,
     staffDiscordUserId: input.draft.staffDiscordUserId,
     customerDiscordUserId: input.draft.customerDiscordUserId,
-    productId: input.draft.productId,
-    variantId: input.draft.variantId,
+    productId: primaryItem.productId,
+    variantId: primaryItem.variantId,
+    items: input.draft.basketItems.map((item) => ({
+      productId: item.productId,
+      variantId: item.variantId,
+    })),
+    couponCode: input.draft.couponCode,
+    tipMinor: input.draft.tipMinor,
     answers: input.draft.answers,
   });
 
@@ -247,8 +417,6 @@ async function renderCategorySelectionStep(
   draft.productId = null;
   draft.variantId = null;
   draft.variantOptions = [];
-  draft.formFields = [];
-  draft.answers = {};
   updateSaleDraft(draft);
 
   const row = buildSelectRow({
@@ -258,7 +426,10 @@ async function renderCategorySelectionStep(
   });
 
   await interaction.update({
-    content: `Step 1/4: Select category for <@${draft.customerDiscordUserId}>`,
+    content: [
+      `Step 1/7: Select category for <@${draft.customerDiscordUserId}>`,
+      ...buildBasketSummaryLines(draft),
+    ].join('\n'),
     components: [row],
   });
 }
@@ -304,8 +475,6 @@ async function renderProductSelectionStep(
   draft.productId = null;
   draft.variantId = null;
   draft.variantOptions = [];
-  draft.formFields = [];
-  draft.answers = {};
   updateSaleDraft(draft);
 
   const row = buildSelectRow({
@@ -324,7 +493,10 @@ async function renderProductSelectionStep(
   });
 
   await interaction.update({
-    content: `Step 2/4: Category **${draft.category}** selected. Now select product for <@${draft.customerDiscordUserId}>`,
+    content: [
+      `Step 2/7: Category **${draft.category}** selected. Now select product.`,
+      ...buildBasketSummaryLines(draft),
+    ].join('\n'),
     components: [row, buildBackRow({ customId: `sale:back:${draft.id}:category` })],
   });
 }
@@ -337,6 +509,227 @@ async function handleCategorySelection(
   draft.category = normalizeCategoryLabel(selectedCategory);
   updateSaleDraft(draft);
   await renderProductSelectionStep(interaction, draft);
+}
+
+async function renderVariantSelectionStep(
+  interaction: SaleStepInteraction,
+  draft: SaleDraft,
+): Promise<void> {
+  if (!draft.productId || !draft.productName || !draft.category) {
+    await interaction.update({
+      content: 'Product not selected. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (draft.variantOptions.length === 0) {
+    await interaction.update({
+      content: 'No variants available for this product. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  const row = buildSelectRow({
+    customId: `sale:start:${draft.id}:variant`,
+    placeholder: 'Select price option',
+    options: draft.variantOptions.map((variant) => ({
+      label: variant.label.slice(0, 100),
+      description: `${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`.slice(0, 100),
+      value: variant.variantId,
+    })),
+  });
+
+  const optionsResult = await saleService.getSaleOptions({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+  });
+
+  const selectedProduct = optionsResult.isOk()
+    ? optionsResult.value.find((product) => product.productId === draft.productId)
+    : null;
+  const description = selectedProduct?.description?.trim() ?? '';
+  const descriptionLine =
+    description.length > 0
+      ? `Description: ${description.length > 280 ? `${description.slice(0, 277)}...` : description}`
+      : null;
+
+  await interaction.update({
+    content: [
+      `Step 3/7: Product **${draft.productName}** selected.`,
+      `Category: **${draft.category}**`,
+      descriptionLine,
+      'Now select a price option.',
+      ...buildBasketSummaryLines(draft),
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join('\n'),
+    components: [row, buildBackRow({ customId: `sale:back:${draft.id}:product` })],
+  });
+}
+
+async function renderBasketDecisionStep(
+  interaction: SaleStepInteraction,
+  draft: SaleDraft,
+): Promise<void> {
+  const last = draft.basketItems[draft.basketItems.length - 1];
+  const lastLine =
+    last && last.currency
+      ? `Added: ${last.category} / ${last.productName} / ${last.variantLabel} - ${formatMinorCurrency(last.priceMinor, last.currency)}`
+      : null;
+
+  const buttons: StepButton[] = [
+    {
+      customId: `sale:action:${draft.id}:add_more`,
+      label: 'Add More Products',
+      style: ButtonStyle.Secondary,
+    },
+    {
+      customId: `sale:action:${draft.id}:continue_checkout`,
+      label: 'Continue',
+      style: ButtonStyle.Primary,
+    },
+  ];
+
+  if (draft.productId && draft.variantOptions.length > 0) {
+    buttons.unshift({
+      customId: `sale:action:${draft.id}:change_last`,
+      label: 'Change Last Item',
+      style: ButtonStyle.Secondary,
+    });
+  }
+
+  await interaction.update({
+    content: [
+      'Step 4/7: Basket updated.',
+      lastLine,
+      ...buildBasketSummaryLines(draft),
+      'Would you like to add another product?',
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join('\n'),
+    components: [buildButtonRow(buttons)],
+  });
+}
+
+async function renderCouponSelectionStep(
+  interaction: SaleStepInteraction,
+  draft: SaleDraft,
+): Promise<void> {
+  const applyLabel = draft.couponCode ? 'Change Coupon' : 'Apply Coupon';
+
+  await interaction.update({
+    content: [
+      'Step 5/7: Coupon (optional)',
+      ...buildBasketSummaryLines(draft),
+      draft.couponCode ? `Current coupon: ${draft.couponCode}` : 'No coupon selected.',
+    ].join('\n'),
+    components: [
+      buildButtonRow([
+        {
+          customId: `sale:action:${draft.id}:coupon_apply`,
+          label: applyLabel,
+          style: ButtonStyle.Secondary,
+        },
+        {
+          customId: `sale:action:${draft.id}:coupon_skip`,
+          label: 'No Coupon',
+          style: ButtonStyle.Secondary,
+        },
+        {
+          customId: `sale:action:${draft.id}:coupon_continue`,
+          label: 'Continue',
+          style: ButtonStyle.Primary,
+        },
+      ]),
+      buildBackRow({ customId: `sale:back:${draft.id}:category`, label: 'Back To Category' }),
+    ],
+  });
+}
+
+async function renderAnswerCollectionStep(
+  interaction: SaleStepInteraction,
+  draft: SaleDraft,
+): Promise<void> {
+  if (draft.formFields.length > 5) {
+    await interaction.update({
+      content:
+        'This basket requires more than 5 questions. Current modal flow supports up to 5 questions total. Reduce category questions and try again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (draft.formFields.length === 0) {
+    if (draft.tipEnabled) {
+      await renderTipDecisionStep(interaction, draft);
+      return;
+    }
+
+    await interaction.update({
+      content: 'Creating checkout link...',
+      components: [],
+    });
+
+    await finalizeDraft({
+      draftId: draft.id,
+      draft,
+      interaction: {
+        channel: interaction.channel,
+        editReply: async (payload) => interaction.editReply(payload),
+        inGuild: () => interaction.inGuild(),
+      },
+    });
+
+    return;
+  }
+
+  await interaction.update({
+    content: [
+      'Step 6/7: Customer details',
+      ...buildBasketSummaryLines(draft),
+      `Questions required: ${draft.formFields.length}`,
+      'Click the button below to enter customer answers.',
+    ].join('\n'),
+    components: [
+      buildButtonRow([
+        {
+          customId: `sale:action:${draft.id}:answers_open`,
+          label: 'Enter Answers',
+          style: ButtonStyle.Primary,
+        },
+      ]),
+      buildBackRow({ customId: `sale:back:${draft.id}:coupon` }),
+    ],
+  });
+}
+
+async function renderTipDecisionStep(
+  interaction: SaleStepInteraction,
+  draft: SaleDraft,
+): Promise<void> {
+  await interaction.update({
+    content: [
+      'Step 7/7: Tip (optional)',
+      ...buildBasketSummaryLines(draft),
+      'Would the customer like to add a tip in GBP?',
+    ].join('\n'),
+    components: [
+      buildButtonRow([
+        {
+          customId: `sale:action:${draft.id}:tip_yes`,
+          label: 'Yes, Add Tip',
+          style: ButtonStyle.Secondary,
+        },
+        {
+          customId: `sale:action:${draft.id}:tip_skip`,
+          label: 'No Tip, Continue',
+          style: ButtonStyle.Primary,
+        },
+      ]),
+    ],
+  });
 }
 
 async function handleProductSelection(
@@ -386,28 +779,6 @@ async function handleProductSelection(
     return;
   }
 
-  const fullProduct = await productRepository.getById({
-    tenantId: draft.tenantId,
-    guildId: draft.guildId,
-    productId: selectedProduct.productId,
-  });
-  if (!fullProduct) {
-    await interaction.update({
-      content: 'Product details could not be loaded. Start `/sale` again.',
-      components: [],
-    });
-    return;
-  }
-
-  if (fullProduct.formFields.length > 5) {
-    await interaction.update({
-      content:
-        'This product has more than 5 form fields. Current modal flow supports up to 5 fields per sale.',
-      components: [],
-    });
-    return;
-  }
-
   draft.productName = selectedProduct.name;
   draft.productId = selectedProduct.productId;
   draft.variantId = null;
@@ -419,43 +790,9 @@ async function handleProductSelection(
       priceMinor: variant.priceMinor,
       currency: variant.currency,
     }));
-  draft.formFields = fullProduct.formFields.map((field) => ({
-    fieldKey: field.fieldKey,
-    label: field.label,
-    required: field.required,
-    fieldType: field.fieldType,
-    validation: field.validation,
-  }));
-  draft.answers = {};
   updateSaleDraft(draft);
 
-  const row = buildSelectRow({
-    customId: `sale:start:${draft.id}:variant`,
-    placeholder: 'Select price option',
-    options: draft.variantOptions.map((variant) => ({
-      label: variant.label.slice(0, 100),
-      description: `${(variant.priceMinor / 100).toFixed(2)} ${variant.currency}`.slice(0, 100),
-      value: variant.variantId,
-    })),
-  });
-
-  const description = fullProduct.description.trim();
-  const descriptionLine =
-    description.length > 0
-      ? `Description: ${description.length > 280 ? `${description.slice(0, 277)}...` : description}`
-      : null;
-
-  await interaction.update({
-    content: [
-      `Step 3/4: Product **${selectedProduct.name}** selected.`,
-      `Category: **${draft.category}**`,
-      descriptionLine,
-      'Now select a price option.',
-    ]
-      .filter((line): line is string => Boolean(line))
-      .join('\n'),
-    components: [row, buildBackRow({ customId: `sale:back:${draft.id}:product` })],
-  });
+  await renderVariantSelectionStep(interaction, draft);
 }
 
 async function handleVariantSelection(
@@ -463,7 +800,7 @@ async function handleVariantSelection(
   draft: SaleDraft,
   selectedVariantId: string,
 ): Promise<void> {
-  if (!draft.productId || !draft.productName) {
+  if (!draft.productId || !draft.productName || !draft.category) {
     await interaction.update({
       content: 'Product not selected. Start `/sale` again.',
       components: [],
@@ -480,35 +817,62 @@ async function handleVariantSelection(
     return;
   }
 
-  if (draft.formFields.length > 5) {
+  const existingCurrency = draft.basketItems[0]?.currency;
+  if (existingCurrency && existingCurrency !== variant.currency) {
+    await interaction.update({
+      content: `Basket currency mismatch. Existing basket uses ${existingCurrency}, but this option uses ${variant.currency}.`,
+      components: [],
+    });
+    return;
+  }
+
+  const fullProduct = await productRepository.getById({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+    productId: draft.productId,
+  });
+  if (!fullProduct) {
+    await interaction.update({
+      content: 'Product details could not be loaded. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  const mergedFields = mergeFormFields(
+    draft.formFields,
+    fullProduct.formFields.map((field) => ({
+      fieldKey: field.fieldKey,
+      label: field.label,
+      required: field.required,
+      fieldType: field.fieldType,
+      validation: field.validation,
+    })),
+  );
+
+  if (mergedFields.length > 5) {
     await interaction.update({
       content:
-        'This product has more than 5 form fields. Current modal flow supports up to 5 fields per sale.',
+        'This basket requires more than 5 questions. Current modal flow supports up to 5 questions total. Reduce category questions and try again.',
       components: [],
     });
     return;
   }
 
   draft.variantId = selectedVariantId;
-  draft.answers = {};
+  draft.formFields = mergedFields;
+  draft.basketItems.push({
+    productId: draft.productId,
+    productName: draft.productName,
+    category: draft.category,
+    variantId: variant.variantId,
+    variantLabel: variant.label,
+    priceMinor: variant.priceMinor,
+    currency: variant.currency,
+  });
   updateSaleDraft(draft);
 
-  if (draft.formFields.length === 0) {
-    await interaction.deferUpdate();
-    await finalizeDraft({
-      draftId: draft.id,
-      draft,
-      interaction: {
-        channel: interaction.channel,
-        editReply: async (payload) => interaction.editReply(payload),
-        inGuild: () => interaction.inGuild(),
-      },
-    });
-    return;
-  }
-
-  const modal = buildFormModal(draft.id, draft.formFields, draft.answers);
-  await interaction.showModal(modal);
+  await renderBasketDecisionStep(interaction, draft);
 }
 
 export async function handleSaleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -608,33 +972,148 @@ export async function handleSaleBack(interaction: Interaction): Promise<void> {
     return;
   }
 
+  if (targetStep === 'coupon') {
+    await renderCouponSelectionStep(interaction, draft);
+    return;
+  }
+
   await interaction.update({ content: 'Unknown sale step. Start `/sale` again.', components: [] });
 }
 
-export async function handleSaleModal(interaction: ModalSubmitInteraction): Promise<void> {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-  const [, , draftId] = interaction.customId.split(':');
-  if (!draftId) {
-    await interaction.editReply({ content: 'Invalid sale draft.' });
-    return;
-  }
-
+function getDraftFromInteraction(interaction: SaleStepInteraction, draftId: string): SaleDraft | null {
   const draft = getSaleDraft(draftId);
-  if (!draft || !draft.productId || !draft.variantId) {
-    await interaction.editReply({
-      content: 'Sale draft expired. Start `/sale` again.',
-    });
-    return;
+  if (!draft) {
+    return null;
   }
 
   if (!canInteractWithDraft(draft, interaction.user.id)) {
-    await interaction.editReply({
-      content: 'Only the selected customer (or the staff member who started this sale) can submit this form.',
+    return null;
+  }
+
+  return draft;
+}
+
+export async function handleSaleAction(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.customId.startsWith('sale:action:')) {
+    return;
+  }
+
+  const [, , draftId, action] = interaction.customId.split(':');
+  if (!draftId || !action) {
+    await interaction.update({ content: 'Invalid sale draft.', components: [] });
+    return;
+  }
+
+  const draft = getDraftFromInteraction(interaction, draftId);
+  if (!draft) {
+    if (getSaleDraft(draftId)) {
+      await interaction.reply({
+        content: 'Only the selected customer (or the staff member who started this sale) can use this button.',
+        flags: MessageFlags.Ephemeral,
+      });
+    } else {
+      await interaction.update({ content: 'Sale draft expired. Start `/sale` again.', components: [] });
+    }
+    return;
+  }
+
+  if (action === 'add_more') {
+    await renderCategorySelectionStep(interaction, draft);
+    return;
+  }
+
+  if (action === 'change_last') {
+    const popped = draft.basketItems.pop();
+    if (!popped) {
+      await interaction.update({ content: 'No basket item to change.', components: [] });
+      return;
+    }
+
+    draft.formFields = await rebuildFormFieldsFromBasket(draft);
+    updateSaleDraft(draft);
+    await renderVariantSelectionStep(interaction, draft);
+    return;
+  }
+
+  if (action === 'continue_checkout') {
+    if (draft.basketItems.length === 0) {
+      await interaction.update({
+        content: 'Basket is empty. Please select at least one item.',
+        components: [],
+      });
+      return;
+    }
+
+    await renderCouponSelectionStep(interaction, draft);
+    return;
+  }
+
+  if (action === 'coupon_apply') {
+    await interaction.showModal(buildCouponModal(draft.id, draft.couponCode));
+    return;
+  }
+
+  if (action === 'coupon_skip') {
+    draft.couponCode = null;
+    updateSaleDraft(draft);
+    await renderAnswerCollectionStep(interaction, draft);
+    return;
+  }
+
+  if (action === 'coupon_continue') {
+    await renderAnswerCollectionStep(interaction, draft);
+    return;
+  }
+
+  if (action === 'answers_open') {
+    if (draft.formFields.length === 0) {
+      await renderAnswerCollectionStep(interaction, draft);
+      return;
+    }
+
+    if (draft.formFields.length > 5) {
+      await interaction.update({
+        content:
+          'This basket requires more than 5 questions. Current modal flow supports up to 5 questions total. Reduce category questions and try again.',
+        components: [],
+      });
+      return;
+    }
+
+    await interaction.showModal(buildFormModal(draft.id, draft.formFields, draft.answers));
+    return;
+  }
+
+  if (action === 'tip_yes') {
+    await interaction.showModal(buildTipModal(draft.id, draft.tipMinor));
+    return;
+  }
+
+  if (action === 'tip_skip') {
+    draft.tipMinor = 0;
+    updateSaleDraft(draft);
+
+    await interaction.update({
+      content: 'Creating checkout link...',
+      components: [],
+    });
+
+    await finalizeDraft({
+      draftId: draft.id,
+      draft,
+      interaction: {
+        channel: interaction.channel,
+        editReply: async (payload) => interaction.editReply(payload),
+        inGuild: () => interaction.inGuild(),
+      },
     });
     return;
   }
 
+  await interaction.update({ content: 'Unknown sale action. Start `/sale` again.', components: [] });
+}
+
+async function handleAnswersModal(interaction: ModalSubmitInteraction, draft: SaleDraft): Promise<void> {
   for (const field of draft.formFields) {
     let value = '';
 
@@ -664,6 +1143,31 @@ export async function handleSaleModal(interaction: ModalSubmitInteraction): Prom
 
   updateSaleDraft(draft);
 
+  if (draft.tipEnabled) {
+    await interaction.editReply({
+      content: [
+        'Step 7/7: Tip (optional)',
+        ...buildBasketSummaryLines(draft),
+        'Would the customer like to add a tip in GBP?',
+      ].join('\n'),
+      components: [
+        buildButtonRow([
+          {
+            customId: `sale:action:${draft.id}:tip_yes`,
+            label: 'Yes, Add Tip',
+            style: ButtonStyle.Secondary,
+          },
+          {
+            customId: `sale:action:${draft.id}:tip_skip`,
+            label: 'No Tip, Continue',
+            style: ButtonStyle.Primary,
+          },
+        ]),
+      ],
+    });
+    return;
+  }
+
   await finalizeDraft({
     draftId: draft.id,
     draft,
@@ -673,6 +1177,158 @@ export async function handleSaleModal(interaction: ModalSubmitInteraction): Prom
       inGuild: () => interaction.inGuild(),
     },
   });
+}
+
+async function handleCouponModal(interaction: ModalSubmitInteraction, draft: SaleDraft): Promise<void> {
+  const rawCoupon = interaction.fields.getTextInputValue('couponCode').trim().toUpperCase();
+
+  if (!rawCoupon) {
+    await interaction.editReply({
+      content: 'Coupon code cannot be empty. Enter a code or continue without coupon.',
+      components: [
+        buildButtonRow([
+          {
+            customId: `sale:action:${draft.id}:coupon_apply`,
+            label: 'Try Again',
+            style: ButtonStyle.Secondary,
+          },
+          {
+            customId: `sale:action:${draft.id}:coupon_skip`,
+            label: 'No Coupon',
+            style: ButtonStyle.Primary,
+          },
+        ]),
+      ],
+    });
+    return;
+  }
+
+  const coupon = await couponRepository.getByCode({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+    code: rawCoupon,
+  });
+
+  if (!coupon || !coupon.active) {
+    await interaction.editReply({
+      content: `Coupon \`${rawCoupon}\` is invalid or inactive.`,
+      components: [
+        buildButtonRow([
+          {
+            customId: `sale:action:${draft.id}:coupon_apply`,
+            label: 'Try Another Code',
+            style: ButtonStyle.Secondary,
+          },
+          {
+            customId: `sale:action:${draft.id}:coupon_skip`,
+            label: 'No Coupon',
+            style: ButtonStyle.Primary,
+          },
+        ]),
+      ],
+    });
+    return;
+  }
+
+  draft.couponCode = coupon.code;
+  updateSaleDraft(draft);
+
+  await interaction.editReply({
+    content: [
+      `Coupon \`${coupon.code}\` applied (-${formatMinorCurrency(coupon.discountMinor, draft.basketItems[0]?.currency ?? draft.defaultCurrency)}).`,
+      ...buildBasketSummaryLines(draft),
+      'Continue to customer details.',
+    ].join('\n'),
+    components: [
+      buildButtonRow([
+        {
+          customId: `sale:action:${draft.id}:coupon_continue`,
+          label: 'Continue',
+          style: ButtonStyle.Primary,
+        },
+      ]),
+    ],
+  });
+}
+
+async function handleTipModal(interaction: ModalSubmitInteraction, draft: SaleDraft): Promise<void> {
+  const rawTip = interaction.fields.getTextInputValue('tipAmount');
+
+  let tipMinor = 0;
+  try {
+    tipMinor = parseTipToMinor(rawTip);
+  } catch (error) {
+    await interaction.editReply({
+      content: error instanceof Error ? error.message : 'Invalid tip amount.',
+      components: [
+        buildButtonRow([
+          {
+            customId: `sale:action:${draft.id}:tip_yes`,
+            label: 'Try Tip Again',
+            style: ButtonStyle.Secondary,
+          },
+          {
+            customId: `sale:action:${draft.id}:tip_skip`,
+            label: 'No Tip, Continue',
+            style: ButtonStyle.Primary,
+          },
+        ]),
+      ],
+    });
+    return;
+  }
+
+  draft.tipMinor = tipMinor;
+  updateSaleDraft(draft);
+
+  await finalizeDraft({
+    draftId: draft.id,
+    draft,
+    interaction: {
+      channel: interaction.channel,
+      editReply: async (payload) => interaction.editReply(payload),
+      inGuild: () => interaction.inGuild(),
+    },
+  });
+}
+
+export async function handleSaleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const [, , draftId, modalStepRaw] = interaction.customId.split(':');
+  const modalStep = modalStepRaw ?? 'answers';
+
+  if (!draftId) {
+    await interaction.editReply({ content: 'Invalid sale draft.' });
+    return;
+  }
+
+  const draft = getSaleDraft(draftId);
+  if (!draft || draft.basketItems.length === 0) {
+    await interaction.editReply({
+      content: 'Sale draft expired. Start `/sale` again.',
+    });
+    return;
+  }
+
+  if (!canInteractWithDraft(draft, interaction.user.id)) {
+    await interaction.editReply({
+      content: 'Only the selected customer (or the staff member who started this sale) can submit this form.',
+    });
+    return;
+  }
+
+  if (modalStep === 'coupon') {
+    await handleCouponModal(interaction, draft);
+    return;
+  }
+
+  if (modalStep === 'tip') {
+    await handleTipModal(interaction, draft);
+    return;
+  }
+
+  await handleAnswersModal(interaction, draft);
 }
 
 export async function handleSaleCancel(interaction: Interaction): Promise<void> {
