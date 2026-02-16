@@ -88,6 +88,17 @@ function getBasketSubtotalMinor(draft: SaleDraft): number {
   return draft.basketItems.reduce((sum, item) => sum + item.priceMinor, 0);
 }
 
+function getCouponDiscountMinor(draft: SaleDraft): number {
+  const subtotal = getBasketSubtotalMinor(draft);
+  return Math.min(subtotal, Math.max(0, draft.couponDiscountMinor));
+}
+
+function getBasketTotalMinor(draft: SaleDraft): number {
+  const subtotal = getBasketSubtotalMinor(draft);
+  const couponDiscountMinor = getCouponDiscountMinor(draft);
+  return Math.max(0, subtotal - couponDiscountMinor + draft.tipMinor);
+}
+
 function buildBasketSummaryLines(draft: SaleDraft): string[] {
   if (draft.basketItems.length === 0) {
     return ['Basket: (empty)'];
@@ -99,15 +110,25 @@ function buildBasketSummaryLines(draft: SaleDraft): string[] {
   );
 
   const currency = draft.basketItems[0]?.currency ?? draft.defaultCurrency;
-  lines.push(`Subtotal: ${formatMinorCurrency(getBasketSubtotalMinor(draft), currency)}`);
+  const subtotalMinor = getBasketSubtotalMinor(draft);
+  const couponDiscountMinor = getCouponDiscountMinor(draft);
+  const totalMinor = getBasketTotalMinor(draft);
+
+  lines.push(`Subtotal: ${formatMinorCurrency(subtotalMinor, currency)}`);
 
   if (draft.couponCode) {
-    lines.push(`Coupon: ${draft.couponCode}`);
+    if (couponDiscountMinor > 0) {
+      lines.push(`Coupon (${draft.couponCode}): -${formatMinorCurrency(couponDiscountMinor, currency)}`);
+    } else {
+      lines.push(`Coupon (${draft.couponCode}): 0.00 ${currency}`);
+    }
   }
 
   if (draft.tipMinor > 0) {
-    lines.push(`Tip: ${formatMinorCurrency(draft.tipMinor, currency)}`);
+    lines.push(`Tip: +${formatMinorCurrency(draft.tipMinor, currency)}`);
   }
+
+  lines.push(`Total Due: ${formatMinorCurrency(totalMinor, currency)}`);
 
   return lines;
 }
@@ -1055,6 +1076,7 @@ export async function handleSaleAction(interaction: Interaction): Promise<void> 
 
   if (action === 'coupon_skip') {
     draft.couponCode = null;
+    draft.couponDiscountMinor = 0;
     updateSaleDraft(draft);
     await renderAnswerCollectionStep(interaction, draft);
     return;
@@ -1230,12 +1252,16 @@ async function handleCouponModal(interaction: ModalSubmitInteraction, draft: Sal
     return;
   }
 
+  const subtotalMinor = getBasketSubtotalMinor(draft);
+  const effectiveCouponDiscountMinor = Math.min(subtotalMinor, coupon.discountMinor);
+
   draft.couponCode = coupon.code;
+  draft.couponDiscountMinor = effectiveCouponDiscountMinor;
   updateSaleDraft(draft);
 
   await interaction.editReply({
     content: [
-      `Coupon \`${coupon.code}\` applied (-${formatMinorCurrency(coupon.discountMinor, draft.basketItems[0]?.currency ?? draft.defaultCurrency)}).`,
+      `Coupon \`${coupon.code}\` applied (-${formatMinorCurrency(effectiveCouponDiscountMinor, draft.basketItems[0]?.currency ?? draft.defaultCurrency)}).`,
       ...buildBasketSummaryLines(draft),
       'Continue to customer details.',
     ].join('\n'),

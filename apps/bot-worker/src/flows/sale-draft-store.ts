@@ -39,6 +39,7 @@ export type SaleDraft = {
   variantOptions: SaleDraftVariantOption[];
   basketItems: SaleDraftBasketItem[];
   couponCode: string | null;
+  couponDiscountMinor: number;
   tipMinor: number;
   tipEnabled: boolean;
   defaultCurrency: string;
@@ -74,6 +75,7 @@ export function createSaleDraft(input: {
     variantOptions: [],
     basketItems: [],
     couponCode: null,
+    couponDiscountMinor: 0,
     tipMinor: 0,
     tipEnabled: input.tipEnabled ?? false,
     defaultCurrency: input.defaultCurrency ?? 'GBP',
