@@ -46,6 +46,7 @@ export class SaleService {
         productId: string;
         name: string;
         category: string;
+        description: string;
         variants: Array<{ variantId: string; label: string; priceMinor: number; currency: string }>;
       }>,
       AppError
@@ -64,6 +65,7 @@ export class SaleService {
             productId: product.id,
             name: product.name,
             category: product.category,
+            description: product.description,
             variants: product.variants.map((variant) => ({
               variantId: variant.id,
               label: variant.label,

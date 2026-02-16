@@ -1,10 +1,13 @@
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags,
   ModalBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
+  type ButtonInteraction,
   type Interaction,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
@@ -62,6 +65,8 @@ function compareProductNameForDisplay(
   return left.productId.localeCompare(right.productId);
 }
 
+type SaleStepInteraction = StringSelectMenuInteraction | ButtonInteraction;
+
 function buildSelectRow(input: {
   customId: string;
   placeholder: string;
@@ -73,6 +78,24 @@ function buildSelectRow(input: {
     .addOptions(input.options.slice(0, 25));
 
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+}
+
+function buildBackRow(input: { customId: string; label?: string }): ActionRowBuilder<ButtonBuilder> {
+  const button = new ButtonBuilder()
+    .setCustomId(input.customId)
+    .setLabel(input.label ?? 'Back')
+    .setStyle(ButtonStyle.Secondary);
+
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+}
+
+function toOptionDescription(input: { description: string; variantCount: number }): string {
+  const description = input.description.trim();
+  if (description.length > 0) {
+    return description.slice(0, 100);
+  }
+
+  return `${input.variantCount} price option(s)`.slice(0, 100);
 }
 
 function buildFormModal(
@@ -173,10 +196,9 @@ async function finalizeDraft(input: {
   });
 }
 
-async function handleCategorySelection(
-  interaction: StringSelectMenuInteraction,
+async function renderCategorySelectionStep(
+  interaction: SaleStepInteraction,
   draft: SaleDraft,
-  selectedCategory: string,
 ): Promise<void> {
   const optionsResult = await saleService.getSaleOptions({
     tenantId: draft.tenantId,
@@ -187,24 +209,97 @@ async function handleCategorySelection(
     return;
   }
 
-  const category = normalizeCategoryLabel(selectedCategory);
-  const products = optionsResult.value.filter((product) => {
-    if (product.variants.length === 0) {
-      return false;
-    }
-
-    return normalizeCategoryLabel(product.category).toLowerCase() === category.toLowerCase();
-  });
-
+  const products = optionsResult.value.filter((product) => product.variants.length > 0);
   if (products.length === 0) {
     await interaction.update({
-      content: `No products found for category "${category}". Start \`/sale\` again.`,
+      content: 'No active products/variants are configured for this server yet.',
       components: [],
     });
     return;
   }
 
-  draft.category = category;
+  const categoryCounts = new Map<string, { label: string; productCount: number }>();
+  for (const product of products) {
+    const normalizedCategory = normalizeCategoryLabel(product.category);
+    const key = normalizedCategory.toLowerCase();
+    const existing = categoryCounts.get(key);
+    if (existing) {
+      existing.productCount += 1;
+      continue;
+    }
+
+    categoryCounts.set(key, {
+      label: normalizedCategory,
+      productCount: 1,
+    });
+  }
+
+  const categoryOptions = Array.from(categoryCounts.values())
+    .sort((left, right) => displayLabelCollator.compare(left.label, right.label))
+    .map((category) => ({
+      label: category.label.slice(0, 100),
+      description: `${category.productCount} product(s)`.slice(0, 100),
+      value: category.label,
+    }));
+
+  draft.category = null;
+  draft.productName = null;
+  draft.productId = null;
+  draft.variantId = null;
+  draft.variantOptions = [];
+  draft.formFields = [];
+  draft.answers = {};
+  updateSaleDraft(draft);
+
+  const row = buildSelectRow({
+    customId: `sale:start:${draft.id}:category`,
+    placeholder: 'Select category',
+    options: categoryOptions,
+  });
+
+  await interaction.update({
+    content: `Step 1/4: Select category for <@${draft.customerDiscordUserId}>`,
+    components: [row],
+  });
+}
+
+async function renderProductSelectionStep(
+  interaction: SaleStepInteraction,
+  draft: SaleDraft,
+): Promise<void> {
+  if (!draft.category) {
+    await interaction.update({
+      content: 'Category not selected. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  const optionsResult = await saleService.getSaleOptions({
+    tenantId: draft.tenantId,
+    guildId: draft.guildId,
+  });
+  if (optionsResult.isErr()) {
+    await interaction.update({ content: optionsResult.error.message, components: [] });
+    return;
+  }
+
+  const products = optionsResult.value.filter((product) => {
+    if (product.variants.length === 0) {
+      return false;
+    }
+
+    return normalizeCategoryLabel(product.category).toLowerCase() === draft.category?.toLowerCase();
+  });
+
+  if (products.length === 0) {
+    await interaction.update({
+      content: `No products found for category "${draft.category}". Start \`/sale\` again.`,
+      components: [],
+    });
+    return;
+  }
+
   draft.productName = null;
   draft.productId = null;
   draft.variantId = null;
@@ -220,15 +315,28 @@ async function handleCategorySelection(
       .sort(compareProductNameForDisplay)
       .map((product) => ({
         label: product.name.slice(0, 100),
-        description: `${product.variants.length} price option(s)`.slice(0, 100),
+        description: toOptionDescription({
+          description: product.description,
+          variantCount: product.variants.length,
+        }),
         value: product.productId,
       })),
   });
 
   await interaction.update({
-    content: `Step 2/4: Category **${category}** selected. Now select product for <@${draft.customerDiscordUserId}>`,
-    components: [row],
+    content: `Step 2/4: Category **${draft.category}** selected. Now select product for <@${draft.customerDiscordUserId}>`,
+    components: [row, buildBackRow({ customId: `sale:back:${draft.id}:category` })],
   });
+}
+
+async function handleCategorySelection(
+  interaction: StringSelectMenuInteraction,
+  draft: SaleDraft,
+  selectedCategory: string,
+): Promise<void> {
+  draft.category = normalizeCategoryLabel(selectedCategory);
+  updateSaleDraft(draft);
+  await renderProductSelectionStep(interaction, draft);
 }
 
 async function handleProductSelection(
@@ -331,13 +439,22 @@ async function handleProductSelection(
     })),
   });
 
+  const description = fullProduct.description.trim();
+  const descriptionLine =
+    description.length > 0
+      ? `Description: ${description.length > 280 ? `${description.slice(0, 277)}...` : description}`
+      : null;
+
   await interaction.update({
     content: [
       `Step 3/4: Product **${selectedProduct.name}** selected.`,
       `Category: **${draft.category}**`,
+      descriptionLine,
       'Now select a price option.',
-    ].join('\n'),
-    components: [row],
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join('\n'),
+    components: [row, buildBackRow({ customId: `sale:back:${draft.id}:product` })],
   });
 }
 
@@ -439,6 +556,55 @@ export async function handleSaleSelect(interaction: StringSelectMenuInteraction)
 
   if (step === 'variant') {
     await handleVariantSelection(interaction, draft, selectedValue);
+    return;
+  }
+
+  await interaction.update({ content: 'Unknown sale step. Start `/sale` again.', components: [] });
+}
+
+export async function handleSaleBack(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.customId.startsWith('sale:back:')) {
+    return;
+  }
+
+  const [, , draftId, targetStep] = interaction.customId.split(':');
+  if (!draftId || !targetStep) {
+    await interaction.update({ content: 'Invalid sale draft.', components: [] });
+    return;
+  }
+
+  const draft = getSaleDraft(draftId);
+  if (!draft) {
+    await interaction.update({
+      content: 'Sale draft expired. Start `/sale` again.',
+      components: [],
+    });
+    return;
+  }
+
+  if (!canInteractWithDraft(draft, interaction.user.id)) {
+    await interaction.reply({
+      content: 'Only the selected customer (or the staff member who started this sale) can use this button.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (targetStep === 'category') {
+    await renderCategorySelectionStep(interaction, draft);
+    return;
+  }
+
+  if (targetStep === 'product') {
+    if (!draft.category) {
+      await interaction.update({
+        content: 'Category not selected. Start `/sale` again.',
+        components: [],
+      });
+      return;
+    }
+
+    await renderProductSelectionStep(interaction, draft);
     return;
   }
 

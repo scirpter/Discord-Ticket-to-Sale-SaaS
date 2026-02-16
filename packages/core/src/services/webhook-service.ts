@@ -758,7 +758,7 @@ export class WebhookService {
     const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
     const maskedAnswers = maskAnswers(orderSession.answers, sensitiveKeys);
     const answersContent = Object.entries(maskedAnswers)
-      .map(([key, value]) => `- ${key}: ${value}`)
+      .map(([key, value]) => `- ${key}: \`${value.replace(/`/g, "'")}\``)
       .join('\n');
 
     const botTokensResult = await this.getBotTokenCandidates();
@@ -927,7 +927,7 @@ export class WebhookService {
     const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
     const maskedAnswers = maskAnswers(orderSession.answers, sensitiveKeys);
     const answersContent = Object.entries(maskedAnswers)
-      .map(([key, value]) => `- ${key}: ${value}`)
+      .map(([key, value]) => `- ${key}: \`${value.replace(/`/g, "'")}\``)
       .join('\n');
 
     const botTokensResult = await this.getBotTokenCandidates();

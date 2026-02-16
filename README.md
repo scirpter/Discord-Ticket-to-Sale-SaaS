@@ -60,7 +60,8 @@ Copy `.env.example` to `.env` and fill values.
 ## Ticket Sale Flow
 
 - Staff runs `/sale` in any server channel where they have required permissions.
-- Bot shows product+variant select.
+- Bot shows category -> product -> variant flow with Back buttons on selection steps.
+- Product description is shown in the bot flow when configured.
 - Bot gathers custom form answers through modals.
 - Email is now a mandatory system question (always first, always required) for all category form sets.
 - Bot creates `order_session` and sends a direct checkout hyperlink message in the ticket (`Click here to pay`).
