@@ -766,8 +766,8 @@ export class WebhookService {
         : 'Coupon: (none)';
     const tipLine =
       orderSession.tipMinor > 0
-        ? `Tip: +${formatMinorAmount(orderSession.tipMinor, paidCurrency)}`
-        : `Tip: ${formatMinorAmount(0, paidCurrency)}`;
+        ? `Tip Added: +\`${formatMinorAmount(orderSession.tipMinor, paidCurrency)}\``
+        : 'Tip Added: (none)';
 
     const created = await this.orderRepository.createPaidOrder({
       tenantId: orderSession.tenantId,
@@ -973,8 +973,8 @@ export class WebhookService {
         : 'Coupon: (none)';
     const tipLine =
       orderSession.tipMinor > 0
-        ? `Tip: +${formatMinorAmount(orderSession.tipMinor, paidCurrency)}`
-        : `Tip: ${formatMinorAmount(0, paidCurrency)}`;
+        ? `Tip Added: +\`${formatMinorAmount(orderSession.tipMinor, paidCurrency)}\``
+        : 'Tip Added: (none)';
 
     const providerOrderId =
       paymentState.txidIn ??
@@ -984,6 +984,8 @@ export class WebhookService {
       input.orderSessionId;
     const paymentReference =
       paymentState.txidOut ?? paymentState.txidIn ?? paymentState.transactionId ?? null;
+    const txidHash =
+      paymentState.txidIn ?? paymentState.txidOut ?? paymentState.transactionId ?? '(none)';
 
     const created = await this.orderRepository.createPaidOrder({
       tenantId: orderSession.tenantId,
@@ -1037,9 +1039,7 @@ export class WebhookService {
       `Provider: Voodoo Pay`,
       `Order Session: \`${orderSession.id}\``,
       `Status: ${paymentState.status ?? 'paid'}`,
-      `Transaction In: ${paymentState.txidIn ?? '(none)'}`,
-      `Transaction Out: ${paymentState.txidOut ?? '(none)'}`,
-      `Transaction: ${paymentState.transactionId ?? '(none)'}`,
+      `TXID Hash: \`${String(txidHash).replace(/`/g, "'")}\``,
       `Coin: ${input.query.coin ?? '(unknown)'}`,
       `Forwarded Value: ${input.query.value_forwarded_coin ?? input.query.value_coin ?? '(unknown)'}`,
       '',
