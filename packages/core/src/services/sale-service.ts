@@ -13,6 +13,7 @@ import { signCheckoutToken } from '../security/checkout-token.js';
 import type { SessionPayload } from '../security/session-token.js';
 import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
 import { AuthorizationService } from './authorization-service.js';
+import { computeCouponEligibleSubtotalMinor } from './coupon-scope.js';
 import { IntegrationService } from './integration-service.js';
 import {
   calculatePointsOrderTotals,
@@ -153,6 +154,8 @@ export class SaleService {
     tenantId: string;
     guildId: string;
     basketItems: Array<{
+      productId: string;
+      variantId: string;
       category: string;
       priceMinor: number;
     }>;
@@ -191,7 +194,11 @@ export class SaleService {
         tenantId: input.tenantId,
         guildId: input.guildId,
         couponCode: input.couponCode,
-        subtotalMinor: input.basketItems.reduce((sum, item) => sum + Math.max(0, item.priceMinor), 0),
+        basketItems: input.basketItems.map((item) => ({
+          productId: item.productId,
+          variantId: item.variantId,
+          priceMinor: item.priceMinor,
+        })),
       });
       if (couponDiscountMinorResult.isErr()) {
         return err(couponDiscountMinorResult.error);
@@ -383,12 +390,15 @@ export class SaleService {
       return err(new AppError('BASKET_EMPTY', 'Basket must include at least one item', 400));
     }
 
-    const subtotalMinor = resolvedItems.reduce((sum, item) => sum + item.priceMinor, 0);
     const couponDiscountMinorResult = await this.resolveCouponDiscountMinor({
       tenantId: input.tenantId,
       guildId: input.guildId,
       couponCode: input.couponCode,
-      subtotalMinor,
+      basketItems: resolvedItems.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        priceMinor: item.priceMinor,
+      })),
     });
     if (couponDiscountMinorResult.isErr()) {
       return err(couponDiscountMinorResult.error);
@@ -629,7 +639,11 @@ export class SaleService {
     tenantId: string;
     guildId: string;
     couponCode?: string | null;
-    subtotalMinor: number;
+    basketItems: Array<{
+      productId: string;
+      variantId: string;
+      priceMinor: number;
+    }>;
   }): Promise<Result<number, AppError>> {
     const normalizedCouponCode = input.couponCode?.trim().toUpperCase() ?? null;
     if (!normalizedCouponCode) {
@@ -645,7 +659,24 @@ export class SaleService {
       return err(new AppError('COUPON_NOT_FOUND', 'Coupon code is invalid or inactive', 404));
     }
 
-    return ok(Math.min(Math.max(0, input.subtotalMinor), coupon.discountMinor));
+    const eligibleSubtotalMinor = computeCouponEligibleSubtotalMinor(
+      {
+        allowedProductIds: coupon.allowedProductIds,
+        allowedVariantIds: coupon.allowedVariantIds,
+      },
+      input.basketItems,
+    );
+    if (eligibleSubtotalMinor <= 0) {
+      return err(
+        new AppError(
+          'COUPON_NOT_APPLICABLE',
+          'Coupon does not apply to the selected products/variations.',
+          409,
+        ),
+      );
+    }
+
+    return ok(Math.min(eligibleSubtotalMinor, coupon.discountMinor));
   }
 
   private async resolvePointsConfig(input: {

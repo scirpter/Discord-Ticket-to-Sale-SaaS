@@ -24,6 +24,7 @@ export * from './services/admin-service.js';
 export * from './services/auth-service.js';
 export * from './services/authorization-service.js';
 export * from './services/coupon-service.js';
+export * from './services/coupon-scope.js';
 export * from './services/integration-service.js';
 export * from './services/points-calculator.js';
 export * from './services/points-service.js';

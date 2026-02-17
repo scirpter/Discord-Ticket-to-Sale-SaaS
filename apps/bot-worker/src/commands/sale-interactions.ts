@@ -12,7 +12,13 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from 'discord.js';
-import { CouponRepository, ProductRepository, SaleService, TenantRepository } from '@voodoo/core';
+import {
+  computeCouponEligibleSubtotalMinor,
+  CouponRepository,
+  ProductRepository,
+  SaleService,
+  TenantRepository,
+} from '@voodoo/core';
 
 import {
   getSaleDraft,
@@ -409,6 +415,8 @@ async function maybePromptPointsBeforeFinalize(input: {
     tenantId: input.draft.tenantId,
     guildId: input.draft.guildId,
     basketItems: input.draft.basketItems.map((item) => ({
+      productId: item.productId,
+      variantId: item.variantId,
       category: item.category,
       priceMinor: item.priceMinor,
     })),
@@ -1405,8 +1413,39 @@ async function handleCouponModal(interaction: ModalSubmitInteraction, draft: Sal
     return;
   }
 
-  const subtotalMinor = getBasketSubtotalMinor(draft);
-  const effectiveCouponDiscountMinor = Math.min(subtotalMinor, coupon.discountMinor);
+  const eligibleSubtotalMinor = computeCouponEligibleSubtotalMinor(
+    {
+      allowedProductIds: coupon.allowedProductIds,
+      allowedVariantIds: coupon.allowedVariantIds,
+    },
+    draft.basketItems.map((item) => ({
+      productId: item.productId,
+      variantId: item.variantId,
+      priceMinor: item.priceMinor,
+    })),
+  );
+  if (eligibleSubtotalMinor <= 0) {
+    await interaction.editReply({
+      content: `Coupon \`${rawCoupon}\` does not apply to the selected products/variations.`,
+      components: [
+        buildButtonRow([
+          {
+            customId: `sale:action:${draft.id}:coupon_apply`,
+            label: 'Try Another Code',
+            style: ButtonStyle.Secondary,
+          },
+          {
+            customId: `sale:action:${draft.id}:coupon_skip`,
+            label: 'No Coupon',
+            style: ButtonStyle.Primary,
+          },
+        ]),
+      ],
+    });
+    return;
+  }
+
+  const effectiveCouponDiscountMinor = Math.min(eligibleSubtotalMinor, coupon.discountMinor);
 
   draft.couponCode = coupon.code;
   draft.couponDiscountMinor = effectiveCouponDiscountMinor;

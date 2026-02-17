@@ -11,6 +11,8 @@ export type CouponRecord = {
   code: string;
   discountMinor: number;
   active: boolean;
+  allowedProductIds: string[];
+  allowedVariantIds: string[];
   createdAt: Date;
   updatedAt: Date;
 };
@@ -31,6 +33,8 @@ export class CouponRepository {
       code: row.code,
       discountMinor: row.discountMinor,
       active: row.active,
+      allowedProductIds: Array.isArray(row.allowedProductIds) ? row.allowedProductIds : [],
+      allowedVariantIds: Array.isArray(row.allowedVariantIds) ? row.allowedVariantIds : [],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
@@ -60,6 +64,8 @@ export class CouponRepository {
       code: row.code,
       discountMinor: row.discountMinor,
       active: row.active,
+      allowedProductIds: Array.isArray(row.allowedProductIds) ? row.allowedProductIds : [],
+      allowedVariantIds: Array.isArray(row.allowedVariantIds) ? row.allowedVariantIds : [],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -71,6 +77,8 @@ export class CouponRepository {
     code: string;
     discountMinor: number;
     active: boolean;
+    allowedProductIds: string[];
+    allowedVariantIds: string[];
   }): Promise<CouponRecord> {
     const id = ulid();
     await this.db.insert(discountCoupons).values({
@@ -80,6 +88,8 @@ export class CouponRepository {
       code: input.code,
       discountMinor: input.discountMinor,
       active: input.active,
+      allowedProductIds: input.allowedProductIds,
+      allowedVariantIds: input.allowedVariantIds,
     });
 
     return {
@@ -89,6 +99,8 @@ export class CouponRepository {
       code: input.code,
       discountMinor: input.discountMinor,
       active: input.active,
+      allowedProductIds: input.allowedProductIds,
+      allowedVariantIds: input.allowedVariantIds,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -101,6 +113,8 @@ export class CouponRepository {
     code: string;
     discountMinor: number;
     active: boolean;
+    allowedProductIds: string[];
+    allowedVariantIds: string[];
   }): Promise<void> {
     await this.db
       .update(discountCoupons)
@@ -108,6 +122,8 @@ export class CouponRepository {
         code: input.code,
         discountMinor: input.discountMinor,
         active: input.active,
+        allowedProductIds: input.allowedProductIds,
+        allowedVariantIds: input.allowedVariantIds,
         updatedAt: new Date(),
       })
       .where(

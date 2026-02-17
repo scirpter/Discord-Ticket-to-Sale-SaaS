@@ -13,8 +13,11 @@
   - `Code` (e.g. `SAVE10`).
   - `Discount Amount (GBP)` (fixed amount).
   - `Active` toggle.
+  - Optional `Product Scope` and `Variation Scope`.
 - Coupons are scoped per server.
 - Coupons can be edited or deleted at any time.
+- If both scope lists are empty, the coupon applies to all basket items.
+- If scope is set, coupon only applies when at least one selected basket item matches scope.
 
 ## Bot Sale Flow
 
@@ -33,6 +36,7 @@
 `total = basket subtotal - coupon discount + tip`
 
 - Coupon is capped so total never goes below zero from discount alone.
+- For scoped coupons, cap is based on subtotal of matching scoped basket items.
 - Tip is added as minor currency amount (pence).
 
 ## Points Ordering and Formula

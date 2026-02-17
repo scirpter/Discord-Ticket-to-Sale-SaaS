@@ -103,6 +103,8 @@ type CouponRecord = {
   code: string;
   discountMinor: number;
   active: boolean;
+  allowedProductIds: string[];
+  allowedVariantIds: string[];
 };
 
 type PointsCustomerRecord = {
@@ -320,6 +322,14 @@ function normalizeCategoryKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function normalizeCouponRecord(coupon: CouponRecord): CouponRecord {
+  return {
+    ...coupon,
+    allowedProductIds: Array.isArray(coupon.allowedProductIds) ? coupon.allowedProductIds : [],
+    allowedVariantIds: Array.isArray(coupon.allowedVariantIds) ? coupon.allowedVariantIds : [],
+  };
+}
+
 function ensureRequiredEmailQuestion(questions: QuestionDraft[]): QuestionDraft[] {
   const nonEmailQuestions = questions.filter(
     (question) => question.key.trim().toLowerCase() !== REQUIRED_EMAIL_QUESTION_KEY,
@@ -339,16 +349,7 @@ function ensureRequiredEmailQuestion(questions: QuestionDraft[]): QuestionDraft[
 }
 
 function getDefaultQuestions(): QuestionDraft[] {
-  return ensureRequiredEmailQuestion([
-    {
-      key: 'username',
-      label: 'What is your username?',
-      fieldType: 'short_text',
-      required: true,
-      sensitive: false,
-      sortOrder: 1,
-    },
-  ]);
+  return ensureRequiredEmailQuestion([]);
 }
 
 function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
@@ -427,17 +428,19 @@ export default function DashboardPage() {
   const [couponCodeInput, setCouponCodeInput] = useState('');
   const [couponDiscountInput, setCouponDiscountInput] = useState('1.00');
   const [couponActiveInput, setCouponActiveInput] = useState(true);
+  const [couponAllowedProductIdsInput, setCouponAllowedProductIdsInput] = useState<string[]>([]);
+  const [couponAllowedVariantIdsInput, setCouponAllowedVariantIdsInput] = useState<string[]>([]);
 
   const [categoryBuilderName, setCategoryBuilderName] = useState('Accounts');
   const [categoryRenameTo, setCategoryRenameTo] = useState('');
   const [productCategory, setProductCategory] = useState('Accounts');
-  const [productName, setProductName] = useState('Starter Account');
+  const [productName, setProductName] = useState('');
   const [productDescription, setProductDescription] = useState('');
   const [productActive, setProductActive] = useState(true);
 
   const [variantLabelInput, setVariantLabelInput] = useState('');
   const [variantPriceInput, setVariantPriceInput] = useState('');
-  const [variantReferralRewardInput, setVariantReferralRewardInput] = useState(DEFAULT_REFERRAL_REWARD_MAJOR);
+  const [variantReferralRewardInput, setVariantReferralRewardInput] = useState('');
   const [editingVariantIndex, setEditingVariantIndex] = useState<number | null>(null);
   const [variants, setVariants] = useState<PriceOptionDraft[]>([]);
 
@@ -530,9 +533,9 @@ export default function DashboardPage() {
   const selectedExistingCategoryForBuilder = useMemo(() => {
     const normalizedBuilder = normalizeCategoryKey(categoryBuilderName);
     return (
-      existingCategories.find((category) => normalizeCategoryKey(category) === normalizedBuilder) ?? ''
+      categorySelectOptions.find((category) => normalizeCategoryKey(category) === normalizedBuilder) ?? ''
     );
-  }, [categoryBuilderName, existingCategories]);
+  }, [categoryBuilderName, categorySelectOptions]);
   const pointsCategoryOptions = useMemo(
     () =>
       existingCategories
@@ -543,6 +546,28 @@ export default function DashboardPage() {
         .filter((category) => Boolean(category.key))
         .sort((left, right) => left.label.localeCompare(right.label)),
     [existingCategories],
+  );
+  const couponProductOptions = useMemo(
+    () =>
+      products
+        .map((product) => ({
+          productId: product.id,
+          label: `${product.category} / ${product.name}`,
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [products],
+  );
+  const couponVariantOptions = useMemo(
+    () =>
+      products
+        .flatMap((product) =>
+          product.variants.map((variant) => ({
+            variantId: variant.id,
+            label: `${product.category} / ${product.name} / ${variant.label}`,
+          })),
+        )
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [products],
   );
 
   const runAction = useCallback(async (action: () => Promise<unknown>) => {
@@ -698,26 +723,6 @@ export default function DashboardPage() {
     }
 
     try {
-      const linkedTenantPayload = (await apiCall(
-        `/api/guilds/${encodeURIComponent(selectedGuildId)}/linked-tenant`,
-      )) as { tenantId?: string | null } | null;
-      const linkedTenantId =
-        linkedTenantPayload &&
-        typeof linkedTenantPayload === 'object' &&
-        'tenantId' in linkedTenantPayload &&
-        typeof linkedTenantPayload.tenantId === 'string'
-          ? linkedTenantPayload.tenantId
-          : '';
-
-      if (linkedTenantId && linkedTenantId !== selectedTenantId && myTenants.some((tenant) => tenant.id === linkedTenantId)) {
-        setTenantId(linkedTenantId);
-        return;
-      }
-    } catch {
-      // Fallback to currently selected workspace if link resolution is unavailable.
-    }
-
-    try {
       await ensureGuildLinked(selectedTenantId, selectedGuildId);
     } catch {
       // Continue loading context data even if linking cannot be confirmed yet.
@@ -839,7 +844,11 @@ export default function DashboardPage() {
       )) as {
         coupons?: CouponRecord[];
       };
-      setCoupons(Array.isArray(couponsPayload.coupons) ? couponsPayload.coupons : []);
+      setCoupons(
+        Array.isArray(couponsPayload.coupons)
+          ? couponsPayload.coupons.map((coupon) => normalizeCouponRecord(coupon))
+          : [],
+      );
     } catch {
       setCoupons([]);
     }
@@ -904,12 +913,17 @@ export default function DashboardPage() {
     setCouponCodeInput('');
     setCouponDiscountInput('1.00');
     setCouponActiveInput(true);
+    setCouponAllowedProductIdsInput([]);
+    setCouponAllowedVariantIdsInput([]);
     setCategoryBuilderName('Accounts');
     setCategoryRenameTo('');
     setProductCategory('Accounts');
+    setProductName('');
+    setProductDescription('');
+    setProductActive(true);
     setVariantLabelInput('');
     setVariantPriceInput('');
-    setVariantReferralRewardInput(DEFAULT_REFERRAL_REWARD_MAJOR);
+    setVariantReferralRewardInput('');
     setEditingVariantIndex(null);
     setQuestionKeyInput('');
     setQuestionLabelInput('');
@@ -960,9 +974,11 @@ export default function DashboardPage() {
       return;
     }
 
+    const normalizedReferralRewardInput = variantReferralRewardInput.trim() || referralRewardMajor;
+
     try {
       parsePriceToMinor(variantPriceInput);
-      parsePriceToMinor(variantReferralRewardInput);
+      parsePriceToMinor(normalizedReferralRewardInput);
     } catch (error) {
       setState({
         loading: false,
@@ -975,7 +991,7 @@ export default function DashboardPage() {
     const draft: PriceOptionDraft = {
       label: variantLabelInput.trim(),
       priceMajor: variantPriceInput.trim(),
-      referralRewardMajor: variantReferralRewardInput.trim(),
+      referralRewardMajor: normalizedReferralRewardInput,
       currency: DEFAULT_CURRENCY,
     };
 
@@ -990,7 +1006,7 @@ export default function DashboardPage() {
     setEditingVariantIndex(null);
     setVariantLabelInput('');
     setVariantPriceInput('');
-    setVariantReferralRewardInput(referralRewardMajor);
+    setVariantReferralRewardInput('');
   }
 
   function removePriceOption(index: number) {
@@ -1025,7 +1041,7 @@ export default function DashboardPage() {
     setEditingVariantIndex(null);
     setVariantLabelInput('');
     setVariantPriceInput('');
-    setVariantReferralRewardInput(referralRewardMajor);
+    setVariantReferralRewardInput('');
   }
 
   function addQuestion() {
@@ -1119,6 +1135,11 @@ export default function DashboardPage() {
     if (normalizedCategory) {
       setProductCategory(normalizedCategory);
     }
+    setQuestionKeyInput('');
+    setQuestionLabelInput('');
+    setQuestionTypeInput('short_text');
+    setQuestionRequiredInput(true);
+    setQuestionSensitiveInput(false);
 
     const template = categoryTemplateByKey.get(normalizeCategoryKey(normalizedCategory));
     if (!template) {
@@ -1146,7 +1167,9 @@ export default function DashboardPage() {
     const payload = (await apiCall(
       `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons?tenantId=${encodeURIComponent(context.workspaceId)}`,
     )) as { coupons?: CouponRecord[] };
-    const nextCoupons = Array.isArray(payload.coupons) ? payload.coupons : [];
+    const nextCoupons = Array.isArray(payload.coupons)
+      ? payload.coupons.map((coupon) => normalizeCouponRecord(coupon))
+      : [];
     setCoupons(nextCoupons);
     return nextCoupons;
   }
@@ -1196,11 +1219,31 @@ export default function DashboardPage() {
     });
   }
 
+  function toggleIdList(
+    id: string,
+    setter: (updater: (current: string[]) => string[]) => void,
+  ): void {
+    const normalized = id.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setter((current) => {
+      if (current.includes(normalized)) {
+        return current.filter((entry) => entry !== normalized);
+      }
+
+      return [...current, normalized];
+    });
+  }
+
   function resetCouponBuilder(): void {
     setEditingCouponId(null);
     setCouponCodeInput('');
     setCouponDiscountInput('1.00');
     setCouponActiveInput(true);
+    setCouponAllowedProductIdsInput([]);
+    setCouponAllowedVariantIdsInput([]);
   }
 
   function loadCouponIntoBuilder(coupon: CouponRecord): void {
@@ -1208,18 +1251,24 @@ export default function DashboardPage() {
     setCouponCodeInput(coupon.code);
     setCouponDiscountInput((coupon.discountMinor / 100).toFixed(2));
     setCouponActiveInput(coupon.active);
+    setCouponAllowedProductIdsInput(
+      Array.isArray(coupon.allowedProductIds) ? coupon.allowedProductIds : [],
+    );
+    setCouponAllowedVariantIdsInput(
+      Array.isArray(coupon.allowedVariantIds) ? coupon.allowedVariantIds : [],
+    );
   }
 
   function resetProductBuilder(options?: { keepCategory?: string }): void {
     setEditingProductId(null);
     setProductCategory(options?.keepCategory?.trim() || categoryBuilderName.trim() || 'Accounts');
-    setProductName('Starter Account');
+    setProductName('');
     setProductDescription('');
     setProductActive(true);
     setVariants([]);
     setVariantLabelInput('');
     setVariantPriceInput('');
-    setVariantReferralRewardInput(referralRewardMajor);
+    setVariantReferralRewardInput('');
     setEditingVariantIndex(null);
   }
 
@@ -1240,7 +1289,7 @@ export default function DashboardPage() {
     );
     setVariantLabelInput('');
     setVariantPriceInput('');
-    setVariantReferralRewardInput(referralRewardMajor);
+    setVariantReferralRewardInput('');
     setEditingVariantIndex(null);
     setQuestionKeyInput('');
     setQuestionLabelInput('');
@@ -1579,7 +1628,7 @@ export default function DashboardPage() {
               <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Rewards Settings</h3>
                 <p className="text-xs text-muted-foreground">
-                  Rewards are optional. Leave reward categories unselected to disable rewards for this server.
+                  Rewards are optional. Leave this section blank (no reward categories selected) to disable rewards.
                 </p>
 
                 <div className="space-y-2">
@@ -2062,6 +2111,12 @@ export default function DashboardPage() {
                           Discount: {(coupon.discountMinor / 100).toFixed(2)} {DEFAULT_CURRENCY} -{' '}
                           {coupon.active ? 'Active' : 'Inactive'}
                         </p>
+                        <p className="text-xs text-muted-foreground">
+                          Scope:{' '}
+                          {coupon.allowedProductIds.length === 0 && coupon.allowedVariantIds.length === 0
+                            ? 'All products and variations'
+                            : `${coupon.allowedProductIds.length} product(s), ${coupon.allowedVariantIds.length} variation(s)`}
+                        </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Button type="button" size="sm" variant="outline" onClick={() => loadCouponIntoBuilder(coupon)}>
@@ -2134,6 +2189,52 @@ export default function DashboardPage() {
                 </Label>
               </div>
 
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3">
+                  <Label className="text-sm">Product Scope (optional)</Label>
+                  {couponProductOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No products available yet.</p>
+                  ) : (
+                    <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                      {couponProductOptions.map((product) => (
+                        <label key={product.productId} className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Checkbox
+                            checked={couponAllowedProductIdsInput.includes(product.productId)}
+                            onCheckedChange={() =>
+                              toggleIdList(product.productId, setCouponAllowedProductIdsInput)
+                            }
+                          />
+                          <span>{product.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3">
+                  <Label className="text-sm">Variation Scope (optional)</Label>
+                  {couponVariantOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No variations available yet.</p>
+                  ) : (
+                    <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                      {couponVariantOptions.map((variant) => (
+                        <label key={variant.variantId} className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Checkbox
+                            checked={couponAllowedVariantIdsInput.includes(variant.variantId)}
+                            onCheckedChange={() =>
+                              toggleIdList(variant.variantId, setCouponAllowedVariantIdsInput)
+                            }
+                          />
+                          <span>{variant.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave both scope lists empty to let this coupon work on all products and variations.
+              </p>
+
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button
                   type="button"
@@ -2150,12 +2251,24 @@ export default function DashboardPage() {
                       }
 
                       const discountMinor = parsePriceToMinor(couponDiscountInput);
+                      const validCouponProductIds = new Set(
+                        couponProductOptions.map((product) => product.productId),
+                      );
+                      const validCouponVariantIds = new Set(
+                        couponVariantOptions.map((variant) => variant.variantId),
+                      );
                       const payload = {
                         tenantId: context.workspaceId,
                         coupon: {
                           code: normalizedCode,
                           discountMinor,
                           active: couponActiveInput,
+                          allowedProductIds: couponAllowedProductIdsInput.filter((id) =>
+                            validCouponProductIds.has(id),
+                          ),
+                          allowedVariantIds: couponAllowedVariantIdsInput.filter((id) =>
+                            validCouponVariantIds.has(id),
+                          ),
                         },
                       };
 
@@ -2308,7 +2421,7 @@ export default function DashboardPage() {
                       }}
                     >
                       <option value="">Select category</option>
-                      {existingCategories.map((category) => (
+                      {categorySelectOptions.map((category) => (
                         <option key={category} value={category}>
                           {category}
                         </option>
@@ -2334,7 +2447,18 @@ export default function DashboardPage() {
                     >
                       Load Existing Category Questions
                     </Button>
-                    <Button type="button" variant="outline" onClick={() => setQuestions(getDefaultQuestions())}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setQuestions(getDefaultQuestions());
+                        setQuestionKeyInput('');
+                        setQuestionLabelInput('');
+                        setQuestionTypeInput('short_text');
+                        setQuestionRequiredInput(true);
+                        setQuestionSensitiveInput(false);
+                      }}
+                    >
                       Reset Question Draft
                     </Button>
                   </div>
@@ -2653,7 +2777,12 @@ export default function DashboardPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="product-name">Product Name</Label>
-                    <Input id="product-name" value={productName} onChange={(event) => setProductName(event.target.value)} />
+                    <Input
+                      id="product-name"
+                      value={productName}
+                      onChange={(event) => setProductName(event.target.value)}
+                      placeholder="Starter Account"
+                    />
                   </div>
                 </div>
 
@@ -2737,7 +2866,7 @@ export default function DashboardPage() {
                         id="variant-referral-reward"
                         value={variantReferralRewardInput}
                         onChange={(event) => setVariantReferralRewardInput(event.target.value)}
-                        placeholder="10.00"
+                        placeholder={referralRewardMajor || DEFAULT_REFERRAL_REWARD_MAJOR}
                       />
                     </div>
                   </div>

@@ -68,15 +68,15 @@ Copy `.env.example` to `.env` and fill values.
 - Product variants now support per-variant referral reward amounts in the product builder.
 - Dashboard now includes customer points management (list balances, manual add/remove, search).
 - Workspace deletion is available from dashboard for owner/super-admin cleanup.
-- Coupons can be created, edited, and deleted per server from dashboard (`code`, fixed discount amount, active flag).
-- Dashboard resolves the linked workspace for a selected Discord server before loading server settings.
+- Coupons can be created, edited, and deleted per server from dashboard (`code`, fixed discount amount, active flag, optional product/variation scope).
+- Dashboard keeps the selected workspace/server context and links the selected server to that workspace automatically.
 
 ## Ticket Sale Flow
 
 - Staff runs `/sale` in any server channel where they have required permissions.
 - Bot shows category -> product -> variant flow with Back buttons on selection steps.
 - After variant selection, bot supports basket flow (`Add More Products` or continue).
-- Coupon step is optional; entered code is validated against server coupon settings.
+- Coupon step is optional; entered code is validated against server coupon settings and selected basket item scope.
 - Product description is shown in the bot flow when configured.
 - Bot gathers custom form answers through modals.
 - Optional tip prompt (yes/no) can be enabled per server; yes-path collects custom GBP tip amount.
