@@ -723,12 +723,6 @@ export default function DashboardPage() {
     }
 
     try {
-      await ensureGuildLinked(selectedTenantId, selectedGuildId);
-    } catch {
-      // Continue loading context data even if linking cannot be confirmed yet.
-    }
-
-    try {
       const configPayload = (await apiCall(
         `/api/guilds/${encodeURIComponent(selectedGuildId)}/config?tenantId=${encodeURIComponent(selectedTenantId)}`,
       )) as {
@@ -852,7 +846,7 @@ export default function DashboardPage() {
     } finally {
       setPointsCustomersLoading(false);
     }
-  }, [ensureGuildLinked, guildId, myTenants, tenantId]);
+  }, [guildId, myTenants, tenantId]);
 
   useEffect(() => {
     void loadSession();
@@ -1140,7 +1134,6 @@ export default function DashboardPage() {
 
   async function refreshProducts(): Promise<ProductRecord[]> {
     const context = requireWorkspaceAndServer({ requireBot: true });
-    await ensureGuildLinked(context.workspaceId, context.discordServerId);
     const payload = (await apiCall(
       `/api/guilds/${encodeURIComponent(context.discordServerId)}/products?tenantId=${encodeURIComponent(context.workspaceId)}`,
     )) as { products?: ProductRecord[] };
@@ -1151,7 +1144,6 @@ export default function DashboardPage() {
 
   async function refreshCoupons(): Promise<CouponRecord[]> {
     const context = requireWorkspaceAndServer({ requireBot: true });
-    await ensureGuildLinked(context.workspaceId, context.discordServerId);
     const payload = (await apiCall(
       `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons?tenantId=${encodeURIComponent(context.workspaceId)}`,
     )) as { coupons?: CouponRecord[] };
@@ -1164,7 +1156,6 @@ export default function DashboardPage() {
 
   async function refreshPointsCustomers(search = pointsSearchInput): Promise<PointsCustomerRecord[]> {
     const context = requireWorkspaceAndServer({ requireBot: true });
-    await ensureGuildLinked(context.workspaceId, context.discordServerId);
 
     setPointsCustomersLoading(true);
     try {
