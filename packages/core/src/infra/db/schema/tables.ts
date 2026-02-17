@@ -111,6 +111,11 @@ export const guildConfigs = mysqlTable(
       .default(
         'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.',
       ),
+    referralSubmissionTemplate: text('referral_submission_template')
+      .notNull()
+      .default(
+        'Referral submitted successfully. We will reward points automatically after the first paid order.',
+      ),
     ticketMetadataKey: varchar('ticket_metadata_key', { length: 64 }).notNull().default('isTicket'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),

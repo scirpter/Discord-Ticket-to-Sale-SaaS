@@ -557,6 +557,7 @@ export class ProductService {
       ),
       referralLogChannelId: config.referralLogChannelId,
       referralThankYouTemplate: config.referralThankYouTemplate,
+      referralSubmissionTemplate: config.referralSubmissionTemplate,
       ticketMetadataKey: config.ticketMetadataKey,
     });
   }
@@ -594,6 +595,7 @@ export class ProductService {
       ),
       referralLogChannelId: config.referralLogChannelId,
       referralThankYouTemplate: config.referralThankYouTemplate,
+      referralSubmissionTemplate: config.referralSubmissionTemplate,
       ticketMetadataKey: config.ticketMetadataKey,
     });
   }

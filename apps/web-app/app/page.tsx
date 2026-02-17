@@ -1,4 +1,4 @@
-﻿import { ArrowRight, Bot, ShieldCheck, Ticket } from 'lucide-react';
+import { ArrowRight, Bot, Gift, ShieldCheck, Ticket } from 'lucide-react';
 
 import { ModeToggle } from '@/components/mode-toggle';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,12 @@ const featureCards = [
     icon: Bot,
     title: 'Multi-Tenant Control',
     description: 'Each merchant keeps separate workspace config, products, pricing, and callback security.',
+  },
+  {
+    icon: Gift,
+    title: 'Points + Referrals',
+    description:
+      'Category-based rewards, first-paid referral payouts, custom private /refer replies, and thank-you DM templates.',
   },
   {
     icon: ShieldCheck,
@@ -46,13 +52,13 @@ export default function HomePage() {
             </CardTitle>
             <CardDescription className="max-w-3xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               Login with Discord, configure your workspace, connect your server, set Voodoo Pay details,
-              and run sales from tickets with structured logs.
+              and run sales from tickets with coupons, points, referrals, and structured paid logs.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4 sm:flex-row">
             <Button asChild size="lg" className="sm:w-auto">
               <a href="/api/auth/discord/login">
-                Login with Discord
+                Login to Dashboard
                 <ArrowRight className="size-4" />
               </a>
             </Button>
@@ -62,7 +68,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-2">
           {featureCards.map(({ icon: Icon, title, description }) => (
             <Card key={title} className="border-border/70 bg-card/70 backdrop-blur">
               <CardHeader className="pb-3">
@@ -81,4 +87,3 @@ export default function HomePage() {
     </main>
   );
 }
-

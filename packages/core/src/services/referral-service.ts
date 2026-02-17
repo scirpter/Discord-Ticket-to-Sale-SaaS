@@ -261,6 +261,7 @@ export class ReferralService {
         rewardMinor,
         referredEmail,
         referrerEmail: claim.referrerEmailDisplay,
+        referrerDiscordUserId: claim.referrerDiscordUserId,
         orderSessionId: input.orderSession.id,
       });
 
@@ -286,24 +287,33 @@ export class ReferralService {
     rewardMinor: number;
     referredEmail: string;
     referrerEmail: string;
+    referrerDiscordUserId: string;
     orderSessionId: string;
   }): string {
     const template =
       typeof input.template === 'string' && input.template.trim().length > 0
         ? input.template
         : DEFAULT_THANK_YOU_TEMPLATE;
+    const templateContainsMention = /\{referrer_mention\}/i.test(template);
 
     const values: Record<string, string> = {
       points: String(input.rewardPoints),
       amount_gbp: (input.rewardMinor / 100).toFixed(2),
       referred_email: input.referredEmail,
       referrer_email: input.referrerEmail,
+      referrer_mention: `<@${input.referrerDiscordUserId}>`,
       order_session_id: input.orderSessionId,
     };
 
-    return template.replace(/\{([a-z_]+)\}/gi, (token, key: string) => {
+    const rendered = template.replace(/\{([a-z_]+)\}/gi, (token, key: string) => {
       const normalizedKey = key.toLowerCase();
       return values[normalizedKey] ?? token;
     });
+
+    if (templateContainsMention) {
+      return rendered;
+    }
+
+    return `${values.referrer_mention} ${rendered}`.trim();
   }
 }

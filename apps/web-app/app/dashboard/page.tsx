@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Globe,
   Loader2,
+  Pencil,
   Plus,
   Settings2,
   Shield,
@@ -154,6 +155,8 @@ const DEFAULT_POINT_VALUE_MAJOR = '0.01';
 const DEFAULT_REFERRAL_REWARD_MAJOR = '0.00';
 const DEFAULT_REFERRAL_THANK_YOU_TEMPLATE =
   'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.';
+const DEFAULT_REFERRAL_SUBMISSION_TEMPLATE =
+  'Referral submitted successfully. We will reward points automatically after the first paid order.';
 
 const nativeSelectClass =
   'dark:bg-input/30 dark:border-input dark:hover:bg-input/40 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
@@ -395,6 +398,9 @@ export default function DashboardPage() {
   const [referralThankYouTemplate, setReferralThankYouTemplate] = useState(
     DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
   );
+  const [referralSubmissionTemplate, setReferralSubmissionTemplate] = useState(
+    DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
+  );
   const [referralRewardCategoryKeys, setReferralRewardCategoryKeys] = useState<string[]>([]);
   const [pointsEarnCategoryKeys, setPointsEarnCategoryKeys] = useState<string[]>([]);
   const [pointsRedeemCategoryKeys, setPointsRedeemCategoryKeys] = useState<string[]>([]);
@@ -432,6 +438,7 @@ export default function DashboardPage() {
   const [variantLabelInput, setVariantLabelInput] = useState('');
   const [variantPriceInput, setVariantPriceInput] = useState('');
   const [variantReferralRewardInput, setVariantReferralRewardInput] = useState(DEFAULT_REFERRAL_REWARD_MAJOR);
+  const [editingVariantIndex, setEditingVariantIndex] = useState<number | null>(null);
   const [variants, setVariants] = useState<PriceOptionDraft[]>([]);
 
   const [questionKeyInput, setQuestionKeyInput] = useState('');
@@ -732,6 +739,7 @@ export default function DashboardPage() {
           referralRewardCategoryKeys: string[];
           referralLogChannelId: string | null;
           referralThankYouTemplate: string;
+          referralSubmissionTemplate: string;
         };
       };
 
@@ -763,6 +771,9 @@ export default function DashboardPage() {
         setReferralThankYouTemplate(
           configPayload.config.referralThankYouTemplate || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
         );
+        setReferralSubmissionTemplate(
+          configPayload.config.referralSubmissionTemplate || DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
+        );
       }
     } catch {
       setPaidLogChannelId('');
@@ -777,6 +788,7 @@ export default function DashboardPage() {
       setReferralRewardCategoryKeys([]);
       setReferralLogChannelId('');
       setReferralThankYouTemplate(DEFAULT_REFERRAL_THANK_YOU_TEMPLATE);
+      setReferralSubmissionTemplate(DEFAULT_REFERRAL_SUBMISSION_TEMPLATE);
     }
 
     try {
@@ -877,6 +889,7 @@ export default function DashboardPage() {
     setReferralRewardCategoryKeys([]);
     setReferralLogChannelId('');
     setReferralThankYouTemplate(DEFAULT_REFERRAL_THANK_YOU_TEMPLATE);
+    setReferralSubmissionTemplate(DEFAULT_REFERRAL_SUBMISSION_TEMPLATE);
     setPointsEarnCategoryKeys([]);
     setPointsRedeemCategoryKeys([]);
     setPointsCustomers([]);
@@ -897,6 +910,7 @@ export default function DashboardPage() {
     setVariantLabelInput('');
     setVariantPriceInput('');
     setVariantReferralRewardInput(DEFAULT_REFERRAL_REWARD_MAJOR);
+    setEditingVariantIndex(null);
     setQuestionKeyInput('');
     setQuestionLabelInput('');
     setQuestionTypeInput('short_text');
@@ -958,15 +972,22 @@ export default function DashboardPage() {
       return;
     }
 
-    setVariants((current) => [
-      ...current,
-      {
-        label: variantLabelInput.trim(),
-        priceMajor: variantPriceInput.trim(),
-        referralRewardMajor: variantReferralRewardInput.trim(),
-        currency: DEFAULT_CURRENCY,
-      },
-    ]);
+    const draft: PriceOptionDraft = {
+      label: variantLabelInput.trim(),
+      priceMajor: variantPriceInput.trim(),
+      referralRewardMajor: variantReferralRewardInput.trim(),
+      currency: DEFAULT_CURRENCY,
+    };
+
+    if (editingVariantIndex !== null) {
+      setVariants((current) =>
+        current.map((entry, index) => (index === editingVariantIndex ? draft : entry)),
+      );
+    } else {
+      setVariants((current) => [...current, draft]);
+    }
+
+    setEditingVariantIndex(null);
     setVariantLabelInput('');
     setVariantPriceInput('');
     setVariantReferralRewardInput(referralRewardMajor);
@@ -974,6 +995,37 @@ export default function DashboardPage() {
 
   function removePriceOption(index: number) {
     setVariants((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    setEditingVariantIndex((current) => {
+      if (current === null) {
+        return null;
+      }
+      if (current === index) {
+        return null;
+      }
+      if (current > index) {
+        return current - 1;
+      }
+      return current;
+    });
+  }
+
+  function editPriceOption(index: number): void {
+    const variant = variants[index];
+    if (!variant) {
+      return;
+    }
+
+    setEditingVariantIndex(index);
+    setVariantLabelInput(variant.label);
+    setVariantPriceInput(variant.priceMajor);
+    setVariantReferralRewardInput(variant.referralRewardMajor);
+  }
+
+  function cancelPriceOptionEdit(): void {
+    setEditingVariantIndex(null);
+    setVariantLabelInput('');
+    setVariantPriceInput('');
+    setVariantReferralRewardInput(referralRewardMajor);
   }
 
   function addQuestion() {
@@ -1168,6 +1220,7 @@ export default function DashboardPage() {
     setVariantLabelInput('');
     setVariantPriceInput('');
     setVariantReferralRewardInput(referralRewardMajor);
+    setEditingVariantIndex(null);
   }
 
   function loadProductIntoBuilder(product: ProductRecord): void {
@@ -1188,6 +1241,7 @@ export default function DashboardPage() {
     setVariantLabelInput('');
     setVariantPriceInput('');
     setVariantReferralRewardInput(referralRewardMajor);
+    setEditingVariantIndex(null);
     setQuestionKeyInput('');
     setQuestionLabelInput('');
     setQuestionTypeInput('short_text');
@@ -1609,6 +1663,21 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="referral-submission-template">Referral Submission Reply Template</Label>
+                  <Textarea
+                    id="referral-submission-template"
+                    value={referralSubmissionTemplate}
+                    onChange={(event) => setReferralSubmissionTemplate(event.target.value)}
+                    placeholder={DEFAULT_REFERRAL_SUBMISSION_TEMPLATE}
+                    className="min-h-20"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Sent as an ephemeral reply after a successful `/refer` submission (private to submitter).
+                    Placeholders: {'{referrer_email}'}, {'{referred_email}'}, {'{submitter_mention}'}.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="referral-thank-you-template">Referral Thank-You Template</Label>
                   <Textarea
                     id="referral-thank-you-template"
@@ -1618,7 +1687,9 @@ export default function DashboardPage() {
                     className="min-h-24"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Placeholders: {'{points}'}, {'{amount_gbp}'}, {'{referred_email}'}, {'{referrer_email}'}, {'{order_session_id}'}.
+                    Sent as DM to referrer after payout. Placeholders: {'{points}'}, {'{amount_gbp}'},{' '}
+                    {'{referred_email}'}, {'{referrer_email}'}, {'{referrer_mention}'}, {'{order_session_id}'}.
+                    Referrer mention is automatically prefixed if you do not include {'{referrer_mention}'}.
                   </p>
                 </div>
 
@@ -1828,6 +1899,8 @@ export default function DashboardPage() {
                       referralLogChannelId: normalizeDiscordId(referralLogChannelId) || null,
                       referralThankYouTemplate:
                         referralThankYouTemplate.trim() || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+                      referralSubmissionTemplate:
+                        referralSubmissionTemplate.trim() || DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
                       ticketMetadataKey: 'isTicket',
                     });
                     await hydrateContextData();
@@ -2627,9 +2700,14 @@ export default function DashboardPage() {
                             {variant.label}: {variant.priceMajor} {variant.currency} (Referral: {variant.referralRewardMajor}{' '}
                             {variant.currency})
                           </p>
-                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
-                            <X className="size-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button type="button" variant="ghost" size="icon-sm" onClick={() => editPriceOption(index)}>
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
+                              <X className="size-4" />
+                            </Button>
+                          </div>
                         </div>
                       ))
                     )}
@@ -2666,8 +2744,13 @@ export default function DashboardPage() {
 
                   <Button type="button" variant="outline" onClick={addPriceOption}>
                     <Plus className="size-4" />
-                    Add Price Option
+                    {editingVariantIndex === null ? 'Add Price Option' : 'Save Price Option'}
                   </Button>
+                  {editingVariantIndex !== null ? (
+                    <Button type="button" variant="outline" onClick={cancelPriceOptionEdit}>
+                      Cancel Variant Edit
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 

@@ -7,6 +7,8 @@ import { jsonError, readJson, requireSession } from '@/lib/http';
 const tenantService = new TenantService();
 const DEFAULT_REFERRAL_THANK_YOU_TEMPLATE =
   'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.';
+const DEFAULT_REFERRAL_SUBMISSION_TEMPLATE =
+  'Referral submitted successfully. We will reward points automatically after the first paid order.';
 
 export async function GET(
   request: NextRequest,
@@ -63,6 +65,7 @@ export async function PATCH(
       referralRewardCategoryKeys?: string[];
       referralLogChannelId?: string | null;
       referralThankYouTemplate?: string;
+      referralSubmissionTemplate?: string;
       ticketMetadataKey?: string;
     }>(request);
 
@@ -83,6 +86,10 @@ export async function PATCH(
         typeof body.referralThankYouTemplate === 'string' && body.referralThankYouTemplate.trim().length > 0
           ? body.referralThankYouTemplate.trim()
           : DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+      referralSubmissionTemplate:
+        typeof body.referralSubmissionTemplate === 'string' && body.referralSubmissionTemplate.trim().length > 0
+          ? body.referralSubmissionTemplate.trim()
+          : DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
       ticketMetadataKey: body.ticketMetadataKey ?? 'isTicket',
     });
 

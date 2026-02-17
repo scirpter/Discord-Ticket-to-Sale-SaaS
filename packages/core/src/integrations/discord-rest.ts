@@ -4,6 +4,12 @@ export async function postMessageToDiscordChannel(input: {
   botToken: string;
   channelId: string;
   content: string;
+  allowedMentions?: {
+    parse?: Array<'roles' | 'users' | 'everyone'>;
+    users?: string[];
+    roles?: string[];
+    replied_user?: boolean;
+  };
 }): Promise<void> {
   const response = await fetch(`https://discord.com/api/v10/channels/${input.channelId}/messages`, {
     method: 'POST',
@@ -13,7 +19,7 @@ export async function postMessageToDiscordChannel(input: {
     },
     body: JSON.stringify({
       content: input.content,
-      allowed_mentions: {
+      allowed_mentions: input.allowedMentions ?? {
         parse: [],
       },
     }),
@@ -81,5 +87,9 @@ export async function sendDirectMessageToDiscordUser(input: {
     botToken: input.botToken,
     channelId: dmChannelId,
     content: input.content,
+    allowedMentions: {
+      parse: [],
+      users: [input.userId],
+    },
   });
 }

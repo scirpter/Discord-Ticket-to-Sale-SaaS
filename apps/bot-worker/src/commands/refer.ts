@@ -13,6 +13,8 @@ import { ReferralService, TenantRepository, getEnv, postMessageToDiscordChannel 
 const tenantRepository = new TenantRepository();
 const referralService = new ReferralService();
 const env = getEnv();
+const DEFAULT_REFERRAL_SUBMISSION_TEMPLATE =
+  'Referral submitted successfully. We will reward points automatically after the first paid order.';
 
 function buildReferModal(): ModalBuilder {
   const modal = new ModalBuilder().setCustomId('refer:modal:submit').setTitle('Referral Submission');
@@ -41,11 +43,40 @@ function buildReferModal(): ModalBuilder {
   return modal;
 }
 
+function renderSubmissionTemplate(input: {
+  template: string | null | undefined;
+  submitterDiscordId: string;
+  referrerEmail: string;
+  referredEmail: string;
+}): string {
+  const template =
+    typeof input.template === 'string' && input.template.trim().length > 0
+      ? input.template
+      : DEFAULT_REFERRAL_SUBMISSION_TEMPLATE;
+
+  const values: Record<string, string> = {
+    submitter_mention: `<@${input.submitterDiscordId}>`,
+    referrer_email: input.referrerEmail,
+    referred_email: input.referredEmail,
+  };
+
+  return template.replace(/\{([a-z_]+)\}/gi, (token, key: string) => values[key.toLowerCase()] ?? token);
+}
+
 function formatSubmissionOutcomeMessage(input: {
   status: 'accepted' | 'duplicate' | 'self_blocked';
+  successTemplate: string | null | undefined;
+  submitterDiscordId: string;
+  referrerEmail: string;
+  referredEmail: string;
 }): string {
   if (input.status === 'accepted') {
-    return 'Referral submitted successfully. We will reward points automatically after the first paid order.';
+    return renderSubmissionTemplate({
+      template: input.successTemplate,
+      submitterDiscordId: input.submitterDiscordId,
+      referrerEmail: input.referrerEmail,
+      referredEmail: input.referredEmail,
+    });
   }
 
   if (input.status === 'duplicate') {
@@ -181,6 +212,12 @@ export async function handleReferModal(interaction: ModalSubmitInteraction): Pro
   }
 
   await interaction.editReply({
-    content: formatSubmissionOutcomeMessage({ status: created.value.status }),
+    content: formatSubmissionOutcomeMessage({
+      status: created.value.status,
+      successTemplate: config?.referralSubmissionTemplate,
+      submitterDiscordId: interaction.user.id,
+      referrerEmail: referrerEmailRaw.trim(),
+      referredEmail: referredEmailRaw.trim(),
+    }),
   });
 }

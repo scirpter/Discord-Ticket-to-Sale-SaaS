@@ -1,0 +1,1 @@
+ALTER TABLE `guild_configs` ADD `referral_submission_template` text DEFAULT ('Referral submitted successfully. We will reward points automatically after the first paid order.') NOT NULL;

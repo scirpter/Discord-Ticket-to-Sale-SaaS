@@ -46,6 +46,7 @@ export type GuildConfigRecord = {
   referralRewardCategoryKeys: string[];
   referralLogChannelId: string | null;
   referralThankYouTemplate: string;
+  referralSubmissionTemplate: string;
   ticketMetadataKey: string;
 };
 
@@ -234,6 +235,8 @@ export class TenantRepository {
           referralLogChannelId: null,
           referralThankYouTemplate:
             'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.',
+          referralSubmissionTemplate:
+            'Referral submitted successfully. We will reward points automatically after the first paid order.',
           ticketMetadataKey: 'isTicket',
         });
       }
@@ -323,6 +326,7 @@ export class TenantRepository {
       referralRewardCategoryKeys: row.referralRewardCategoryKeys,
       referralLogChannelId: row.referralLogChannelId,
       referralThankYouTemplate: row.referralThankYouTemplate,
+      referralSubmissionTemplate: row.referralSubmissionTemplate,
       ticketMetadataKey: row.ticketMetadataKey,
     };
   }
@@ -341,6 +345,7 @@ export class TenantRepository {
     referralRewardCategoryKeys: string[];
     referralLogChannelId: string | null;
     referralThankYouTemplate: string;
+    referralSubmissionTemplate: string;
     ticketMetadataKey: string;
   }): Promise<GuildConfigRecord> {
     const existing = await this.db.query.guildConfigs.findFirst({
@@ -362,6 +367,7 @@ export class TenantRepository {
           referralRewardCategoryKeys: input.referralRewardCategoryKeys,
           referralLogChannelId: input.referralLogChannelId,
           referralThankYouTemplate: input.referralThankYouTemplate,
+          referralSubmissionTemplate: input.referralSubmissionTemplate,
           ticketMetadataKey: input.ticketMetadataKey,
           updatedAt: new Date(),
         })
@@ -382,6 +388,7 @@ export class TenantRepository {
         referralRewardCategoryKeys: input.referralRewardCategoryKeys,
         referralLogChannelId: input.referralLogChannelId,
         referralThankYouTemplate: input.referralThankYouTemplate,
+        referralSubmissionTemplate: input.referralSubmissionTemplate,
         ticketMetadataKey: input.ticketMetadataKey,
       };
     }
@@ -402,6 +409,7 @@ export class TenantRepository {
       referralRewardCategoryKeys: input.referralRewardCategoryKeys,
       referralLogChannelId: input.referralLogChannelId,
       referralThankYouTemplate: input.referralThankYouTemplate,
+      referralSubmissionTemplate: input.referralSubmissionTemplate,
       ticketMetadataKey: input.ticketMetadataKey,
     });
 
@@ -420,6 +428,7 @@ export class TenantRepository {
       referralRewardCategoryKeys: input.referralRewardCategoryKeys,
       referralLogChannelId: input.referralLogChannelId,
       referralThankYouTemplate: input.referralThankYouTemplate,
+      referralSubmissionTemplate: input.referralSubmissionTemplate,
       ticketMetadataKey: input.ticketMetadataKey,
     };
   }

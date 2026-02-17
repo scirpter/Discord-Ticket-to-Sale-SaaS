@@ -43,17 +43,19 @@ describe('referral service', () => {
 
     const rendered = service.renderThankYouTemplate({
       template:
-        'Congrats {referrer_email}! +{points} points (£{amount_gbp}) for {referred_email} on {order_session_id}.',
+        'Congrats {referrer_mention} {referrer_email}! +{points} points ({amount_gbp} GBP) for {referred_email} on {order_session_id}.',
       rewardPoints: 10,
       rewardMinor: 1000,
       referredEmail: 'new@example.com',
       referrerEmail: 'ref@example.com',
+      referrerDiscordUserId: '523456789012345678',
       orderSessionId: '01HKTESORDERSESSION0000000001',
     });
 
+    expect(rendered).toContain('<@523456789012345678>');
     expect(rendered).toContain('ref@example.com');
     expect(rendered).toContain('+10 points');
-    expect(rendered).toContain('£10.00');
+    expect(rendered).toContain('10.00 GBP');
     expect(rendered).toContain('new@example.com');
     expect(rendered).toContain('01HKTESORDERSESSION0000000001');
   });

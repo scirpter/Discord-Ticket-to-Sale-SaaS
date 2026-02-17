@@ -62,6 +62,7 @@ Copy `.env.example` to `.env` and fill values.
   - categories where points can be `redeemed`
   - categories eligible for `referral rewards`
   - `referral reward` GBP fallback amount (used only when eligible purchased variants have no per-variant referral reward)
+  - `referral submission reply template` (private `/refer` success response)
   - `referral log channel` (optional)
   - `referral thank-you template` for DM placeholders
 - Product variants now support per-variant referral reward amounts in the product builder.
@@ -107,6 +108,7 @@ Copy `.env.example` to `.env` and fill values.
   - your email
   - new customer email
 - First valid referral claim for a customer email wins.
+- Successful `/refer` reply is private (ephemeral) and customizable via server settings.
 - Owner/staff can monitor submission and payout outcomes via referral log channel.
 
 ## WordPress / WooCommerce Setup

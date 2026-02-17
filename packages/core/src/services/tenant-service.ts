@@ -212,6 +212,7 @@ export class TenantService {
       referralRewardCategoryKeys: string[];
       referralLogChannelId: string | null;
       referralThankYouTemplate: string;
+      referralSubmissionTemplate: string;
       ticketMetadataKey: string;
     },
   ): Promise<Result<{
@@ -226,6 +227,7 @@ export class TenantService {
     referralRewardCategoryKeys: string[];
     referralLogChannelId: string | null;
     referralThankYouTemplate: string;
+    referralSubmissionTemplate: string;
     ticketMetadataKey: string;
   }, AppError>> {
     try {
@@ -247,6 +249,7 @@ export class TenantService {
         referralRewardCategoryKeys: config.referralRewardCategoryKeys,
         referralLogChannelId: config.referralLogChannelId,
         referralThankYouTemplate: config.referralThankYouTemplate,
+        referralSubmissionTemplate: config.referralSubmissionTemplate,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {
@@ -271,6 +274,7 @@ export class TenantService {
         referralRewardCategoryKeys: string[];
         referralLogChannelId: string | null;
         referralThankYouTemplate: string;
+        referralSubmissionTemplate: string;
         ticketMetadataKey: string;
       },
       AppError
@@ -299,6 +303,7 @@ export class TenantService {
         referralRewardCategoryKeys: config.referralRewardCategoryKeys,
         referralLogChannelId: config.referralLogChannelId,
         referralThankYouTemplate: config.referralThankYouTemplate,
+        referralSubmissionTemplate: config.referralSubmissionTemplate,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {

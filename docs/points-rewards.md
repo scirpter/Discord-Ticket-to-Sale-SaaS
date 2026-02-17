@@ -48,7 +48,8 @@ Dashboard **Customer Points** supports:
 - `/refer`
   - Opens a modal asking for `your email` and `new customer email`.
   - First valid claim for a new customer email is locked (first-claim-wins).
-  - Reply is ephemeral.
+  - Success reply is ephemeral and customizable by merchant (`referral_submission_template`).
+  - Reply visibility is private to the submitter, even in public channels.
 
 ## Referral Rewards
 
@@ -56,6 +57,7 @@ Dashboard **Customer Points** supports:
 - Merchant sets:
   - categories eligible for referral rewards (`referral_reward_category_keys`)
   - `referral reward` fallback amount in GBP (`referral_reward_minor`)
+  - `/refer` success reply template (`referral_submission_template`)
   - `referral log channel` (optional)
   - `thank-you DM template` with placeholders
 - Product variants set `referral_reward_minor` per variant.
@@ -84,6 +86,7 @@ Dashboard **Customer Points** supports:
    - referrer receives points (if snapshot reward converts to >= 1 point)
 5. Claim is marked rewarded and ledger event `referral_reward_first_paid_order` is recorded.
 6. Referrer receives customizable thank-you DM (best effort; failures are logged and do not break payment finalization).
+7. Thank-you DM template supports mention placeholder `{referrer_mention}` and is delivered privately via DM.
 
 ## Post-Payment Message
 
