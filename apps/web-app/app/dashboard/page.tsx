@@ -210,6 +210,10 @@ function parsePriceToMinor(value: string): number {
 }
 
 function parsePointValueMajorToMinor(value: string): number {
+  if (!value.trim()) {
+    return 1;
+  }
+
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error('Point value must be greater than 0, for example 0.01');
@@ -396,18 +400,12 @@ export default function DashboardPage() {
   const [productDescription, setProductDescription] = useState('');
   const [productActive, setProductActive] = useState(true);
 
-  const [variantLabelInput, setVariantLabelInput] = useState('Basic');
-  const [variantPriceInput, setVariantPriceInput] = useState('9.99');
-  const [variants, setVariants] = useState<PriceOptionDraft[]>([
-    {
-      label: 'Basic',
-      priceMajor: '9.99',
-      currency: DEFAULT_CURRENCY,
-    },
-  ]);
+  const [variantLabelInput, setVariantLabelInput] = useState('');
+  const [variantPriceInput, setVariantPriceInput] = useState('');
+  const [variants, setVariants] = useState<PriceOptionDraft[]>([]);
 
-  const [questionKeyInput, setQuestionKeyInput] = useState('username');
-  const [questionLabelInput, setQuestionLabelInput] = useState('What is your username?');
+  const [questionKeyInput, setQuestionKeyInput] = useState('');
+  const [questionLabelInput, setQuestionLabelInput] = useState('');
   const [questionTypeInput, setQuestionTypeInput] = useState<FieldType>('short_text');
   const [questionRequiredInput, setQuestionRequiredInput] = useState(true);
   const [questionSensitiveInput, setQuestionSensitiveInput] = useState(false);
@@ -486,6 +484,12 @@ export default function DashboardPage() {
       ),
     [categoryBuilderName, existingCategories],
   );
+  const selectedExistingCategoryForBuilder = useMemo(() => {
+    const normalizedBuilder = normalizeCategoryKey(categoryBuilderName);
+    return (
+      existingCategories.find((category) => normalizeCategoryKey(category) === normalizedBuilder) ?? ''
+    );
+  }, [categoryBuilderName, existingCategories]);
   const pointsCategoryOptions = useMemo(
     () =>
       existingCategories
@@ -829,6 +833,13 @@ export default function DashboardPage() {
     setCategoryBuilderName('Accounts');
     setCategoryRenameTo('');
     setProductCategory('Accounts');
+    setVariantLabelInput('');
+    setVariantPriceInput('');
+    setQuestionKeyInput('');
+    setQuestionLabelInput('');
+    setQuestionTypeInput('short_text');
+    setQuestionRequiredInput(true);
+    setQuestionSensitiveInput(false);
     setQuestions(getDefaultQuestions());
     setVoodooMerchantWalletAddress('');
     setVoodooCheckoutDomain(DEFAULT_VOODOO_CHECKOUT_DOMAIN);
@@ -892,6 +903,8 @@ export default function DashboardPage() {
         currency: DEFAULT_CURRENCY,
       },
     ]);
+    setVariantLabelInput('');
+    setVariantPriceInput('');
   }
 
   function removePriceOption(index: number) {
@@ -921,6 +934,11 @@ export default function DashboardPage() {
         sortOrder: current.length,
       },
     ]);
+    setQuestionKeyInput('');
+    setQuestionLabelInput('');
+    setQuestionTypeInput('short_text');
+    setQuestionRequiredInput(true);
+    setQuestionSensitiveInput(false);
   }
 
   function removeQuestion(index: number) {
@@ -1081,13 +1099,9 @@ export default function DashboardPage() {
     setProductName('Starter Account');
     setProductDescription('');
     setProductActive(true);
-    setVariants([
-      {
-        label: 'Basic',
-        priceMajor: '9.99',
-        currency: DEFAULT_CURRENCY,
-      },
-    ]);
+    setVariants([]);
+    setVariantLabelInput('');
+    setVariantPriceInput('');
   }
 
   function loadProductIntoBuilder(product: ProductRecord): void {
@@ -1104,6 +1118,13 @@ export default function DashboardPage() {
         currency: variant.currency,
       })),
     );
+    setVariantLabelInput('');
+    setVariantPriceInput('');
+    setQuestionKeyInput('');
+    setQuestionLabelInput('');
+    setQuestionTypeInput('short_text');
+    setQuestionRequiredInput(true);
+    setQuestionSensitiveInput(false);
     setQuestions(toQuestionDrafts(product.formFields));
   }
 
@@ -1435,6 +1456,9 @@ export default function DashboardPage() {
 
               <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Rewards Settings</h3>
+                <p className="text-xs text-muted-foreground">
+                  Rewards are optional. Leave reward categories unselected to disable rewards for this server.
+                </p>
 
                 <div className="space-y-2">
                   <Label htmlFor="point-value">Value of 1 point ({defaultCurrency})</Label>
@@ -2036,19 +2060,33 @@ export default function DashboardPage() {
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="category-builder-name">Category Name</Label>
+                    <Label htmlFor="category-builder-existing">Pick Existing Category</Label>
+                    <select
+                      id="category-builder-existing"
+                      className={nativeSelectClass}
+                      value={selectedExistingCategoryForBuilder}
+                      onChange={(event) => {
+                        const nextCategory = event.target.value;
+                        setCategoryBuilderName(nextCategory);
+                        if (nextCategory) {
+                          setProductCategory(nextCategory);
+                        }
+                      }}
+                    >
+                      <option value="">Select category</option>
+                      {existingCategories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                    <Label htmlFor="category-builder-name">Or Type New Category</Label>
                     <Input
                       id="category-builder-name"
-                      list="category-builder-options"
                       value={categoryBuilderName}
                       onChange={(event) => setCategoryBuilderName(event.target.value)}
                       placeholder="Renew Subscription"
                     />
-                    <datalist id="category-builder-options">
-                      {existingCategories.map((category) => (
-                        <option key={category} value={category} />
-                      ))}
-                    </datalist>
                     <p className="text-xs text-muted-foreground">
                       Questions are shared by category. Add them once here, then reuse for all products in that category.
                     </p>
