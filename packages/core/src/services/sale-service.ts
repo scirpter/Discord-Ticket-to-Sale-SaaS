@@ -14,7 +14,11 @@ import type { SessionPayload } from '../security/session-token.js';
 import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
 import { AuthorizationService } from './authorization-service.js';
 import { IntegrationService } from './integration-service.js';
-import { calculatePointsOrderTotals } from './points-calculator.js';
+import {
+  calculatePointsOrderTotals,
+  normalizeCategoryKey,
+  normalizeCategoryKeyList,
+} from './points-calculator.js';
 import { PointsService } from './points-service.js';
 
 const answerSchema = z.record(z.string(), z.string().max(2000));
@@ -45,6 +49,7 @@ type ResolvedSaleItem = {
   category: string;
   variantId: string;
   variantLabel: string;
+  referralRewardMinor: number;
   priceMinor: number;
   currency: string;
 };
@@ -53,7 +58,43 @@ type ResolvedPointsConfig = {
   pointValueMinor: number;
   earnCategoryKeys: string[];
   redeemCategoryKeys: string[];
+  referralRewardMinor: number;
+  referralRewardCategoryKeys: string[];
 };
+
+export function calculateReferralRewardMinorSnapshot(input: {
+  items: Array<{
+    category: string;
+    variantReferralRewardMinor: number;
+  }>;
+  referralRewardCategoryKeys: string[];
+  fallbackReferralRewardMinor: number;
+}): number {
+  const referralCategoryKeys = normalizeCategoryKeyList(input.referralRewardCategoryKeys);
+  const enforceCategoryFilter = referralCategoryKeys.length > 0;
+  const referralCategoryKeySet = new Set(referralCategoryKeys);
+  const eligibleItems = input.items.filter((item) => {
+    if (!enforceCategoryFilter) {
+      return true;
+    }
+
+    return referralCategoryKeySet.has(normalizeCategoryKey(item.category));
+  });
+
+  if (eligibleItems.length === 0) {
+    return 0;
+  }
+
+  const variantSpecificRewardMinor = eligibleItems.reduce(
+    (sum, item) => sum + Math.max(0, Math.floor(item.variantReferralRewardMinor)),
+    0,
+  );
+  if (variantSpecificRewardMinor > 0) {
+    return variantSpecificRewardMinor;
+  }
+
+  return Math.max(0, Math.floor(input.fallbackReferralRewardMinor));
+}
 
 export class SaleService {
   private readonly env = getEnv();
@@ -368,6 +409,14 @@ export class SaleService {
       return err(pointsConfigResult.error);
     }
     const pointsConfig = pointsConfigResult.value;
+    const referralRewardMinorSnapshot = calculateReferralRewardMinorSnapshot({
+      items: resolvedItems.map((item) => ({
+        category: item.category,
+        variantReferralRewardMinor: item.referralRewardMinor,
+      })),
+      referralRewardCategoryKeys: pointsConfig.referralRewardCategoryKeys,
+      fallbackReferralRewardMinor: pointsConfig.referralRewardMinor,
+    });
 
     const customerEmailFromAnswers = this.findCustomerEmail(parsedAnswers.data);
     let normalizedCustomerEmail: { emailNormalized: string; emailDisplay: string } | null = null;
@@ -453,7 +502,15 @@ export class SaleService {
       customerDiscordId: input.customerDiscordUserId,
       productId: primaryItem.productId,
       variantId: primaryItem.variantId,
-      basketItems: resolvedItems,
+      basketItems: resolvedItems.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        category: item.category,
+        variantId: item.variantId,
+        variantLabel: item.variantLabel,
+        priceMinor: item.priceMinor,
+        currency: item.currency,
+      })),
       couponCode: normalizedCouponCode,
       couponDiscountMinor: calc.couponDiscountMinor,
       customerEmailNormalized: normalizedCustomerEmail?.emailNormalized ?? null,
@@ -465,6 +522,7 @@ export class SaleService {
         earnCategoryKeys: pointsConfig.earnCategoryKeys,
         redeemCategoryKeys: pointsConfig.redeemCategoryKeys,
       },
+      referralRewardMinorSnapshot,
       tipMinor: calc.tipMinor,
       subtotalMinor: calc.subtotalMinor,
       totalMinor: calc.totalMinor,
@@ -601,8 +659,10 @@ export class SaleService {
 
     return ok({
       pointValueMinor: Math.max(1, config.pointValueMinor),
-      earnCategoryKeys: config.pointsEarnCategoryKeys,
-      redeemCategoryKeys: config.pointsRedeemCategoryKeys,
+      earnCategoryKeys: normalizeCategoryKeyList(config.pointsEarnCategoryKeys),
+      redeemCategoryKeys: normalizeCategoryKeyList(config.pointsRedeemCategoryKeys),
+      referralRewardMinor: Math.max(0, config.referralRewardMinor),
+      referralRewardCategoryKeys: normalizeCategoryKeyList(config.referralRewardCategoryKeys),
     });
   }
 
@@ -802,6 +862,7 @@ export class SaleService {
         category: product.category,
         variantId: variant.id,
         variantLabel: variant.label,
+        referralRewardMinor: Math.max(0, variant.referralRewardMinor),
         priceMinor: variant.priceMinor,
         currency: variant.currency,
       });

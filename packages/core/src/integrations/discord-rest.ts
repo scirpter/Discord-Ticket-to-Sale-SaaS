@@ -29,3 +29,57 @@ export async function postMessageToDiscordChannel(input: {
     );
   }
 }
+
+async function createDmChannel(input: {
+  botToken: string;
+  userId: string;
+}): Promise<string> {
+  const response = await fetch('https://discord.com/api/v10/users/@me/channels', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bot ${input.botToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient_id: input.userId,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new AppError(
+      'DISCORD_DM_CHANNEL_CREATE_FAILED',
+      `Failed to create DM channel (${response.status})`,
+      502,
+      { body, discordStatus: response.status },
+    );
+  }
+
+  const payload = (await response.json()) as { id?: unknown };
+  if (typeof payload.id !== 'string' || payload.id.length === 0) {
+    throw new AppError(
+      'DISCORD_DM_CHANNEL_CREATE_FAILED',
+      'Discord returned an invalid DM channel payload',
+      502,
+    );
+  }
+
+  return payload.id;
+}
+
+export async function sendDirectMessageToDiscordUser(input: {
+  botToken: string;
+  userId: string;
+  content: string;
+}): Promise<void> {
+  const dmChannelId = await createDmChannel({
+    botToken: input.botToken,
+    userId: input.userId,
+  });
+
+  await postMessageToDiscordChannel({
+    botToken: input.botToken,
+    channelId: dmChannelId,
+    content: input.content,
+  });
+}

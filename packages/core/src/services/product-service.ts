@@ -11,6 +11,7 @@ import { AuthorizationService } from './authorization-service.js';
 const variantSchema = z.object({
   label: z.string().min(1).max(80),
   priceMinor: z.number().int().nonnegative(),
+  referralRewardMinor: z.number().int().nonnegative().optional().default(0),
   currency: z.string().length(3).transform((value) => value.toUpperCase()),
   wooProductId: z.string().max(64).optional(),
   wooCheckoutPath: z.string().max(255).optional(),
@@ -548,6 +549,14 @@ export class ProductService {
       pointsEarnCategoryKeys: nextEarn,
       pointsRedeemCategoryKeys: nextRedeem,
       pointValueMinor: config.pointValueMinor,
+      referralRewardMinor: config.referralRewardMinor,
+      referralRewardCategoryKeys: this.replaceCategoryKey(
+        config.referralRewardCategoryKeys,
+        input.sourceCategory,
+        input.targetCategory,
+      ),
+      referralLogChannelId: config.referralLogChannelId,
+      referralThankYouTemplate: config.referralThankYouTemplate,
       ticketMetadataKey: config.ticketMetadataKey,
     });
   }
@@ -578,6 +587,13 @@ export class ProductService {
       pointsEarnCategoryKeys: nextEarn,
       pointsRedeemCategoryKeys: nextRedeem,
       pointValueMinor: config.pointValueMinor,
+      referralRewardMinor: config.referralRewardMinor,
+      referralRewardCategoryKeys: this.removeCategoryKey(
+        config.referralRewardCategoryKeys,
+        input.deletedCategory,
+      ),
+      referralLogChannelId: config.referralLogChannelId,
+      referralThankYouTemplate: config.referralThankYouTemplate,
       ticketMetadataKey: config.ticketMetadataKey,
     });
   }

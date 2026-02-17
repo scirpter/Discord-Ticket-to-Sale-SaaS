@@ -43,6 +43,20 @@
       "when": 1771288591106,
       "tag": "0005_certain_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1771293505334,
+      "tag": "0006_cynical_blue_shield",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1771294849818,
+      "tag": "0007_rich_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

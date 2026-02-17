@@ -45,6 +45,45 @@ Dashboard **Customer Points** supports:
 - `/points email:<address>`
   - Returns balance for this store.
   - Reply is ephemeral in the channel where command was run.
+- `/refer`
+  - Opens a modal asking for `your email` and `new customer email`.
+  - First valid claim for a new customer email is locked (first-claim-wins).
+  - Reply is ephemeral.
+
+## Referral Rewards
+
+- Referral rewards are configured per server in dashboard settings.
+- Merchant sets:
+  - categories eligible for referral rewards (`referral_reward_category_keys`)
+  - `referral reward` fallback amount in GBP (`referral_reward_minor`)
+  - `referral log channel` (optional)
+  - `thank-you DM template` with placeholders
+- Product variants set `referral_reward_minor` per variant.
+- Reward conversion uses snapshots from checkout creation:
+  - `referral_reward_minor_snapshot`
+  - `point_value_minor_snapshot`
+- Points granted are:
+  - `floor(referral_reward_minor_snapshot / point_value_minor_snapshot)`
+
+### Referral Snapshot Rules
+
+- Reward is computed at checkout creation and saved as `referral_reward_minor_snapshot`.
+- If referral-eligible categories are configured, only purchased variants in those categories can contribute.
+- If no referral categories are configured, all categories are eligible.
+- Variant rewards are summed across eligible purchased variants.
+- If summed variant reward is `0`, fallback `referral_reward_minor` is used once for the order (if at least one eligible item exists).
+
+## Referral Lifecycle
+
+1. Member submits `/refer` with two emails.
+2. System validates email syntax and blocks self-referrals.
+3. Claim is stored if no existing claim for that referred email in the same server.
+4. On first successful paid order for that referred email:
+   - first-paid gate is inserted (idempotent)
+   - active claim is resolved (if any)
+   - referrer receives points (if snapshot reward converts to >= 1 point)
+5. Claim is marked rewarded and ledger event `referral_reward_first_paid_order` is recorded.
+6. Referrer receives customizable thank-you DM (best effort; failures are logged and do not break payment finalization).
 
 ## Post-Payment Message
 

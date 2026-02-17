@@ -32,6 +32,7 @@ export type ProductVariantInput = {
   label: string;
   priceMinor: number;
   currency: string;
+  referralRewardMinor?: number;
   wooProductId?: string;
   wooCheckoutPath?: string;
 };

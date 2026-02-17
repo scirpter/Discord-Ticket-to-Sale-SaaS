@@ -73,6 +73,7 @@ type ProductVariantRecord = {
   id: string;
   label: string;
   priceMinor: number;
+  referralRewardMinor: number;
   currency: string;
 };
 
@@ -125,6 +126,7 @@ type MeResponse = {
 type PriceOptionDraft = {
   label: string;
   priceMajor: string;
+  referralRewardMajor: string;
   currency: string;
 };
 
@@ -149,6 +151,9 @@ const DASHBOARD_CONTEXT_STORAGE_KEY = 'voodoo_dashboard_context_v1';
 const REQUIRED_EMAIL_QUESTION_KEY = 'email';
 const REQUIRED_EMAIL_QUESTION_LABEL = 'What is your email?';
 const DEFAULT_POINT_VALUE_MAJOR = '0.01';
+const DEFAULT_REFERRAL_REWARD_MAJOR = '0.00';
+const DEFAULT_REFERRAL_THANK_YOU_TEMPLATE =
+  'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.';
 
 const nativeSelectClass =
   'dark:bg-input/30 dark:border-input dark:hover:bg-input/40 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
@@ -235,6 +240,14 @@ function formatPointValueMinorToMajor(pointValueMinor: number): string {
   return (pointValueMinor / 100).toFixed(2);
 }
 
+function formatMinorToMajor(minor: number): string {
+  if (!Number.isFinite(minor) || minor < 0) {
+    return '0.00';
+  }
+
+  return (minor / 100).toFixed(2);
+}
+
 function parseWholePoints(value: string): number {
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) {
@@ -247,6 +260,16 @@ function parseWholePoints(value: string): number {
   }
 
   return parsed;
+}
+
+function previewReferralRewardPoints(referralRewardMajor: string, pointValueMajor: string): number {
+  try {
+    const rewardMinor = parsePriceToMinor(referralRewardMajor);
+    const pointValueMinor = parsePointValueMajorToMinor(pointValueMajor);
+    return Math.max(0, Math.floor(rewardMinor / Math.max(1, pointValueMinor)));
+  } catch {
+    return 0;
+  }
 }
 
 function normalizeDiscordId(value: unknown): string {
@@ -367,6 +390,12 @@ export default function DashboardPage() {
   const [defaultCurrency, setDefaultCurrency] = useState(DEFAULT_CURRENCY);
   const [tipEnabled, setTipEnabled] = useState(false);
   const [pointValueMajor, setPointValueMajor] = useState(DEFAULT_POINT_VALUE_MAJOR);
+  const [referralRewardMajor, setReferralRewardMajor] = useState(DEFAULT_REFERRAL_REWARD_MAJOR);
+  const [referralLogChannelId, setReferralLogChannelId] = useState('');
+  const [referralThankYouTemplate, setReferralThankYouTemplate] = useState(
+    DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+  );
+  const [referralRewardCategoryKeys, setReferralRewardCategoryKeys] = useState<string[]>([]);
   const [pointsEarnCategoryKeys, setPointsEarnCategoryKeys] = useState<string[]>([]);
   const [pointsRedeemCategoryKeys, setPointsRedeemCategoryKeys] = useState<string[]>([]);
   const [pointsCustomers, setPointsCustomers] = useState<PointsCustomerRecord[]>([]);
@@ -402,6 +431,7 @@ export default function DashboardPage() {
 
   const [variantLabelInput, setVariantLabelInput] = useState('');
   const [variantPriceInput, setVariantPriceInput] = useState('');
+  const [variantReferralRewardInput, setVariantReferralRewardInput] = useState(DEFAULT_REFERRAL_REWARD_MAJOR);
   const [variants, setVariants] = useState<PriceOptionDraft[]>([]);
 
   const [questionKeyInput, setQuestionKeyInput] = useState('');
@@ -429,6 +459,9 @@ export default function DashboardPage() {
       defaultCurrency,
       tipEnabled,
       pointValueMajor,
+      referralRewardMajor,
+      referralRewardCategoryKeys,
+      referralLogChannelId,
       pointsEarnCategoryKeys,
       pointsRedeemCategoryKeys,
     }),
@@ -438,6 +471,9 @@ export default function DashboardPage() {
       guildResources?.botInGuild,
       myTenants,
       pointValueMajor,
+      referralRewardMajor,
+      referralRewardCategoryKeys,
+      referralLogChannelId,
       pointsEarnCategoryKeys,
       pointsRedeemCategoryKeys,
       selectedDiscordGuild?.name,
@@ -692,6 +728,10 @@ export default function DashboardPage() {
           pointsEarnCategoryKeys: string[];
           pointsRedeemCategoryKeys: string[];
           pointValueMinor: number;
+          referralRewardMinor: number;
+          referralRewardCategoryKeys: string[];
+          referralLogChannelId: string | null;
+          referralThankYouTemplate: string;
         };
       };
 
@@ -711,6 +751,18 @@ export default function DashboardPage() {
             : [],
         );
         setPointValueMajor(formatPointValueMinorToMajor(configPayload.config.pointValueMinor));
+        const nextReferralRewardMajor = formatMinorToMajor(configPayload.config.referralRewardMinor);
+        setReferralRewardMajor(nextReferralRewardMajor);
+        setVariantReferralRewardInput(nextReferralRewardMajor);
+        setReferralRewardCategoryKeys(
+          Array.isArray(configPayload.config.referralRewardCategoryKeys)
+            ? configPayload.config.referralRewardCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+            : [],
+        );
+        setReferralLogChannelId(normalizeDiscordId(configPayload.config.referralLogChannelId));
+        setReferralThankYouTemplate(
+          configPayload.config.referralThankYouTemplate || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+        );
       }
     } catch {
       setPaidLogChannelId('');
@@ -720,6 +772,11 @@ export default function DashboardPage() {
       setPointsEarnCategoryKeys([]);
       setPointsRedeemCategoryKeys([]);
       setPointValueMajor(DEFAULT_POINT_VALUE_MAJOR);
+      setReferralRewardMajor(DEFAULT_REFERRAL_REWARD_MAJOR);
+      setVariantReferralRewardInput(DEFAULT_REFERRAL_REWARD_MAJOR);
+      setReferralRewardCategoryKeys([]);
+      setReferralLogChannelId('');
+      setReferralThankYouTemplate(DEFAULT_REFERRAL_THANK_YOU_TEMPLATE);
     }
 
     try {
@@ -816,6 +873,10 @@ export default function DashboardPage() {
     setDefaultCurrency(DEFAULT_CURRENCY);
     setTipEnabled(false);
     setPointValueMajor(DEFAULT_POINT_VALUE_MAJOR);
+    setReferralRewardMajor(DEFAULT_REFERRAL_REWARD_MAJOR);
+    setReferralRewardCategoryKeys([]);
+    setReferralLogChannelId('');
+    setReferralThankYouTemplate(DEFAULT_REFERRAL_THANK_YOU_TEMPLATE);
     setPointsEarnCategoryKeys([]);
     setPointsRedeemCategoryKeys([]);
     setPointsCustomers([]);
@@ -835,6 +896,7 @@ export default function DashboardPage() {
     setProductCategory('Accounts');
     setVariantLabelInput('');
     setVariantPriceInput('');
+    setVariantReferralRewardInput(DEFAULT_REFERRAL_REWARD_MAJOR);
     setQuestionKeyInput('');
     setQuestionLabelInput('');
     setQuestionTypeInput('short_text');
@@ -886,6 +948,7 @@ export default function DashboardPage() {
 
     try {
       parsePriceToMinor(variantPriceInput);
+      parsePriceToMinor(variantReferralRewardInput);
     } catch (error) {
       setState({
         loading: false,
@@ -900,11 +963,13 @@ export default function DashboardPage() {
       {
         label: variantLabelInput.trim(),
         priceMajor: variantPriceInput.trim(),
+        referralRewardMajor: variantReferralRewardInput.trim(),
         currency: DEFAULT_CURRENCY,
       },
     ]);
     setVariantLabelInput('');
     setVariantPriceInput('');
+    setVariantReferralRewardInput(referralRewardMajor);
   }
 
   function removePriceOption(index: number) {
@@ -1102,6 +1167,7 @@ export default function DashboardPage() {
     setVariants([]);
     setVariantLabelInput('');
     setVariantPriceInput('');
+    setVariantReferralRewardInput(referralRewardMajor);
   }
 
   function loadProductIntoBuilder(product: ProductRecord): void {
@@ -1115,11 +1181,13 @@ export default function DashboardPage() {
       product.variants.map((variant) => ({
         label: variant.label,
         priceMajor: (variant.priceMinor / 100).toFixed(2),
+        referralRewardMajor: (variant.referralRewardMinor / 100).toFixed(2),
         currency: variant.currency,
       })),
     );
     setVariantLabelInput('');
     setVariantPriceInput('');
+    setVariantReferralRewardInput(referralRewardMajor);
     setQuestionKeyInput('');
     setQuestionLabelInput('');
     setQuestionTypeInput('short_text');
@@ -1474,6 +1542,87 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="referral-reward">Referral Reward ({defaultCurrency})</Label>
+                  <Input
+                    id="referral-reward"
+                    value={referralRewardMajor}
+                    onChange={(event) => setReferralRewardMajor(event.target.value)}
+                    placeholder="10.00"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Fallback reward used only when eligible purchased variants do not define their own referral reward.
+                    Set to 0.00 to disable fallback. Fallback points:
+                    {' '}
+                    {previewReferralRewardPoints(referralRewardMajor, pointValueMajor)}.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Categories eligible for referral rewards</Label>
+                  {pointsCategoryOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Create product categories first, then select referral-eligible categories.
+                    </p>
+                  ) : (
+                    <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                      {pointsCategoryOptions.map((category) => (
+                        <label
+                          key={`referral-${category.key}`}
+                          className="flex items-center gap-2 text-sm text-muted-foreground"
+                        >
+                          <Checkbox
+                            checked={referralRewardCategoryKeys.includes(category.key)}
+                            onCheckedChange={() => togglePointsCategory(category.label, setReferralRewardCategoryKeys)}
+                          />
+                          <span>{category.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    If no category is selected, all categories are eligible.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="referral-log-channel">Referral Log Channel</Label>
+                  <select
+                    id="referral-log-channel"
+                    className={nativeSelectClass}
+                    value={referralLogChannelId}
+                    onChange={(event) => setReferralLogChannelId(event.target.value)}
+                    disabled={!serverReady || !guildResources || guildResources.channels.length === 0}
+                  >
+                    <option value="">
+                      {!serverReady
+                        ? 'Add bot to server first'
+                        : guildResources?.channels.length
+                          ? 'Select referral log channel'
+                          : 'No text channels available'}
+                    </option>
+                    {guildResources?.channels.map((channel) => (
+                      <option key={`referral-${channel.id}`} value={channel.id}>
+                        #{channel.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="referral-thank-you-template">Referral Thank-You Template</Label>
+                  <Textarea
+                    id="referral-thank-you-template"
+                    value={referralThankYouTemplate}
+                    onChange={(event) => setReferralThankYouTemplate(event.target.value)}
+                    placeholder={DEFAULT_REFERRAL_THANK_YOU_TEMPLATE}
+                    className="min-h-24"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Placeholders: {'{points}'}, {'{amount_gbp}'}, {'{referred_email}'}, {'{referrer_email}'}, {'{order_session_id}'}.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label>Categories that earn points</Label>
                   {pointsCategoryOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
@@ -1655,9 +1804,13 @@ export default function DashboardPage() {
                     const context = requireWorkspaceAndServer({ requireBot: true });
                     await ensureGuildLinked(context.workspaceId, context.discordServerId);
                     const pointValueMinor = parsePointValueMajorToMinor(pointValueMajor);
+                    const referralRewardMinor = parsePriceToMinor(referralRewardMajor);
                     const normalizedEarnCategoryKeys = [...new Set(pointsEarnCategoryKeys.map(normalizeCategoryKey).filter(Boolean))];
                     const normalizedRedeemCategoryKeys = [
                       ...new Set(pointsRedeemCategoryKeys.map(normalizeCategoryKey).filter(Boolean)),
+                    ];
+                    const normalizedReferralCategoryKeys = [
+                      ...new Set(referralRewardCategoryKeys.map(normalizeCategoryKey).filter(Boolean)),
                     ];
                     const normalizedStaffRoleIds = normalizeDiscordIdList(selectedStaffRoleIds);
 
@@ -1670,6 +1823,11 @@ export default function DashboardPage() {
                       pointsEarnCategoryKeys: normalizedEarnCategoryKeys,
                       pointsRedeemCategoryKeys: normalizedRedeemCategoryKeys,
                       pointValueMinor,
+                      referralRewardMinor,
+                      referralRewardCategoryKeys: normalizedReferralCategoryKeys,
+                      referralLogChannelId: normalizeDiscordId(referralLogChannelId) || null,
+                      referralThankYouTemplate:
+                        referralThankYouTemplate.trim() || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
                       ticketMetadataKey: 'isTicket',
                     });
                     await hydrateContextData();
@@ -2466,7 +2624,8 @@ export default function DashboardPage() {
                           className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
                         >
                           <p className="text-sm">
-                            {variant.label}: {variant.priceMajor} {variant.currency}
+                            {variant.label}: {variant.priceMajor} {variant.currency} (Referral: {variant.referralRewardMajor}{' '}
+                            {variant.currency})
                           </p>
                           <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
                             <X className="size-4" />
@@ -2476,7 +2635,7 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-2">
                       <Label htmlFor="variant-label">Price Label</Label>
                       <Input
@@ -2492,6 +2651,15 @@ export default function DashboardPage() {
                         value={variantPriceInput}
                         onChange={(event) => setVariantPriceInput(event.target.value)}
                         placeholder="9.99"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="variant-referral-reward">Referral Reward (major unit)</Label>
+                      <Input
+                        id="variant-referral-reward"
+                        value={variantReferralRewardInput}
+                        onChange={(event) => setVariantReferralRewardInput(event.target.value)}
+                        placeholder="10.00"
                       />
                     </div>
                   </div>
@@ -2549,6 +2717,7 @@ export default function DashboardPage() {
                       const preparedVariants = variants.map((variant) => ({
                         label: variant.label.trim(),
                         priceMinor: parsePriceToMinor(variant.priceMajor),
+                        referralRewardMinor: parsePriceToMinor(variant.referralRewardMajor),
                         currency: DEFAULT_CURRENCY,
                       }));
 

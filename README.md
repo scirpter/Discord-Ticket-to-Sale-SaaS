@@ -60,6 +60,11 @@ Copy `.env.example` to `.env` and fill values.
   - `point value` (minor currency based)
   - categories that `earn` points
   - categories where points can be `redeemed`
+  - categories eligible for `referral rewards`
+  - `referral reward` GBP fallback amount (used only when eligible purchased variants have no per-variant referral reward)
+  - `referral log channel` (optional)
+  - `referral thank-you template` for DM placeholders
+- Product variants now support per-variant referral reward amounts in the product builder.
 - Dashboard now includes customer points management (list balances, manual add/remove, search).
 - Workspace deletion is available from dashboard for owner/super-admin cleanup.
 - Coupons can be created, edited, and deleted per server from dashboard (`code`, fixed discount amount, active flag).
@@ -76,8 +81,10 @@ Copy `.env.example` to `.env` and fill values.
 - Optional tip prompt (yes/no) can be enabled per server; yes-path collects custom GBP tip amount.
 - Email is now a mandatory system question (always first, always required) for all category form sets.
 - Before checkout creation, bot checks customer points by email and prompts to use points when redeemable points are available.
+- Members can submit referrals via `/refer` (referrer email + new customer email).
 - Points are reserved at checkout creation and only deducted after successful payment confirmation.
 - Paid confirmation message now includes updated points balance.
+- Referral rewards are auto-granted on first paid order for claimed customer emails, using category eligibility + purchased variant reward snapshots.
 - Bot creates `order_session` and sends a direct checkout hyperlink message in the ticket (`Click here to pay`).
 - Checkout amount now reflects basket total minus coupon plus tip.
 - If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
@@ -93,6 +100,14 @@ Copy `.env.example` to `.env` and fill values.
 - `/points email:<address>` returns store-scoped points balance for that email.
 - Response is ephemeral so only the requester can see it, even in public channels.
 - Points are scoped to the connected workspace + Discord server (no cross-merchant sharing).
+
+## Referral Command
+
+- `/refer` opens an ephemeral modal for:
+  - your email
+  - new customer email
+- First valid referral claim for a customer email wins.
+- Owner/staff can monitor submission and payout outcomes via referral log channel.
 
 ## WordPress / WooCommerce Setup
 

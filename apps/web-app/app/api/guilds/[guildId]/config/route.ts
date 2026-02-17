@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server';
 import { jsonError, readJson, requireSession } from '@/lib/http';
 
 const tenantService = new TenantService();
+const DEFAULT_REFERRAL_THANK_YOU_TEMPLATE =
+  'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.';
 
 export async function GET(
   request: NextRequest,
@@ -57,6 +59,10 @@ export async function PATCH(
       pointsEarnCategoryKeys?: string[];
       pointsRedeemCategoryKeys?: string[];
       pointValueMinor?: number;
+      referralRewardMinor?: number;
+      referralRewardCategoryKeys?: string[];
+      referralLogChannelId?: string | null;
+      referralThankYouTemplate?: string;
       ticketMetadataKey?: string;
     }>(request);
 
@@ -70,6 +76,13 @@ export async function PATCH(
       pointsEarnCategoryKeys: body.pointsEarnCategoryKeys ?? [],
       pointsRedeemCategoryKeys: body.pointsRedeemCategoryKeys ?? [],
       pointValueMinor: Math.max(1, body.pointValueMinor ?? 1),
+      referralRewardMinor: Math.max(0, body.referralRewardMinor ?? 0),
+      referralRewardCategoryKeys: body.referralRewardCategoryKeys ?? [],
+      referralLogChannelId: body.referralLogChannelId ?? null,
+      referralThankYouTemplate:
+        typeof body.referralThankYouTemplate === 'string' && body.referralThankYouTemplate.trim().length > 0
+          ? body.referralThankYouTemplate.trim()
+          : DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
       ticketMetadataKey: body.ticketMetadataKey ?? 'isTicket',
     });
 

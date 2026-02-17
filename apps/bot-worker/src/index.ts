@@ -3,6 +3,7 @@ import { getEnv, logger } from '@voodoo/core';
 
 import { saleCommand } from './commands/sale.js';
 import { pointsCommand } from './commands/points.js';
+import { handleReferModal, referCommand } from './commands/refer.js';
 import {
   handleSaleAction,
   handleSaleBack,
@@ -26,6 +27,7 @@ const client = new Client({
 const commands = new Collection<string, Command>();
 commands.set(saleCommand.data.name, saleCommand as unknown as Command);
 commands.set(pointsCommand.data.name, pointsCommand as unknown as Command);
+commands.set(referCommand.data.name, referCommand as unknown as Command);
 
 client.once(Events.ClientReady, () => {
   logger.info({ botUser: client.user?.tag }, 'bot-worker ready');
@@ -54,6 +56,11 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('sale:modal:')) {
       await handleSaleModal(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('refer:modal:')) {
+      await handleReferModal(interaction);
       return;
     }
 

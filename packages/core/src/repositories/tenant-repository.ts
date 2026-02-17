@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { getDb } from '../infra/db/client.js';
 import {
   auditLogs,
+  customerFirstPaidOrders,
   discountCoupons,
   guildConfigs,
   orderNotesCache,
@@ -12,6 +13,7 @@ import {
   productFormFields,
   products,
   productVariants,
+  referralClaims,
   tenantGuilds,
   tenantIntegrationsVoodooPay,
   tenantIntegrationsWoo,
@@ -40,6 +42,10 @@ export type GuildConfigRecord = {
   pointsEarnCategoryKeys: string[];
   pointsRedeemCategoryKeys: string[];
   pointValueMinor: number;
+  referralRewardMinor: number;
+  referralRewardCategoryKeys: string[];
+  referralLogChannelId: string | null;
+  referralThankYouTemplate: string;
   ticketMetadataKey: string;
 };
 
@@ -223,6 +229,11 @@ export class TenantRepository {
           pointsEarnCategoryKeys: [],
           pointsRedeemCategoryKeys: [],
           pointValueMinor: 1,
+          referralRewardMinor: 0,
+          referralRewardCategoryKeys: [],
+          referralLogChannelId: null,
+          referralThankYouTemplate:
+            'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.',
           ticketMetadataKey: 'isTicket',
         });
       }
@@ -308,6 +319,10 @@ export class TenantRepository {
       pointsEarnCategoryKeys: row.pointsEarnCategoryKeys,
       pointsRedeemCategoryKeys: row.pointsRedeemCategoryKeys,
       pointValueMinor: row.pointValueMinor,
+      referralRewardMinor: row.referralRewardMinor,
+      referralRewardCategoryKeys: row.referralRewardCategoryKeys,
+      referralLogChannelId: row.referralLogChannelId,
+      referralThankYouTemplate: row.referralThankYouTemplate,
       ticketMetadataKey: row.ticketMetadataKey,
     };
   }
@@ -322,6 +337,10 @@ export class TenantRepository {
     pointsEarnCategoryKeys: string[];
     pointsRedeemCategoryKeys: string[];
     pointValueMinor: number;
+    referralRewardMinor: number;
+    referralRewardCategoryKeys: string[];
+    referralLogChannelId: string | null;
+    referralThankYouTemplate: string;
     ticketMetadataKey: string;
   }): Promise<GuildConfigRecord> {
     const existing = await this.db.query.guildConfigs.findFirst({
@@ -339,6 +358,10 @@ export class TenantRepository {
           pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
           pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
           pointValueMinor: input.pointValueMinor,
+          referralRewardMinor: input.referralRewardMinor,
+          referralRewardCategoryKeys: input.referralRewardCategoryKeys,
+          referralLogChannelId: input.referralLogChannelId,
+          referralThankYouTemplate: input.referralThankYouTemplate,
           ticketMetadataKey: input.ticketMetadataKey,
           updatedAt: new Date(),
         })
@@ -355,6 +378,10 @@ export class TenantRepository {
         pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
         pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
         pointValueMinor: input.pointValueMinor,
+        referralRewardMinor: input.referralRewardMinor,
+        referralRewardCategoryKeys: input.referralRewardCategoryKeys,
+        referralLogChannelId: input.referralLogChannelId,
+        referralThankYouTemplate: input.referralThankYouTemplate,
         ticketMetadataKey: input.ticketMetadataKey,
       };
     }
@@ -371,6 +398,10 @@ export class TenantRepository {
       pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
       pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
       pointValueMinor: input.pointValueMinor,
+      referralRewardMinor: input.referralRewardMinor,
+      referralRewardCategoryKeys: input.referralRewardCategoryKeys,
+      referralLogChannelId: input.referralLogChannelId,
+      referralThankYouTemplate: input.referralThankYouTemplate,
       ticketMetadataKey: input.ticketMetadataKey,
     });
 
@@ -385,12 +416,18 @@ export class TenantRepository {
       pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
       pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
       pointValueMinor: input.pointValueMinor,
+      referralRewardMinor: input.referralRewardMinor,
+      referralRewardCategoryKeys: input.referralRewardCategoryKeys,
+      referralLogChannelId: input.referralLogChannelId,
+      referralThankYouTemplate: input.referralThankYouTemplate,
       ticketMetadataKey: input.ticketMetadataKey,
     };
   }
 
   public async deleteTenantCascade(input: { tenantId: string }): Promise<void> {
     await this.db.transaction(async (tx) => {
+      await tx.delete(customerFirstPaidOrders).where(eq(customerFirstPaidOrders.tenantId, input.tenantId));
+      await tx.delete(referralClaims).where(eq(referralClaims.tenantId, input.tenantId));
       await tx.delete(orderNotesCache).where(eq(orderNotesCache.tenantId, input.tenantId));
       await tx.delete(ordersPaid).where(eq(ordersPaid.tenantId, input.tenantId));
       await tx.delete(webhookEvents).where(eq(webhookEvents.tenantId, input.tenantId));

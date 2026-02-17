@@ -24,6 +24,7 @@ export type ProductAggregate = {
     id: string;
     label: string;
     priceMinor: number;
+    referralRewardMinor: number;
     currency: string;
     wooProductId: string | null;
     wooCheckoutPath: string | null;
@@ -103,6 +104,7 @@ export class ProductRepository {
           id: variant.id,
           label: variant.label,
           priceMinor: variant.priceMinor,
+          referralRewardMinor: variant.referralRewardMinor,
           currency: variant.currency,
           wooProductId: variant.wooProductId,
           wooCheckoutPath: variant.wooCheckoutPath,
@@ -164,6 +166,7 @@ export class ProductRepository {
         id: variant.id,
         label: variant.label,
         priceMinor: variant.priceMinor,
+        referralRewardMinor: variant.referralRewardMinor,
         currency: variant.currency,
         wooProductId: variant.wooProductId,
         wooCheckoutPath: variant.wooCheckoutPath,
@@ -211,6 +214,7 @@ export class ProductRepository {
             productId,
             label: variant.label,
             priceMinor: variant.priceMinor,
+            referralRewardMinor: variant.referralRewardMinor ?? 0,
             currency: variant.currency,
             wooProductId: variant.wooProductId ?? null,
             wooCheckoutPath: variant.wooCheckoutPath ?? null,
@@ -285,6 +289,7 @@ export class ProductRepository {
             productId: input.productId,
             label: variant.label,
             priceMinor: variant.priceMinor,
+            referralRewardMinor: variant.referralRewardMinor ?? 0,
             currency: variant.currency,
             wooProductId: variant.wooProductId ?? null,
             wooCheckoutPath: variant.wooCheckoutPath ?? null,

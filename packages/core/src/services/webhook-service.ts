@@ -7,7 +7,7 @@ import { getEnv } from '../config/env.js';
 import { AppError, fromUnknownError } from '../domain/errors.js';
 import type { WooOrderNote, WooOrderPayload } from '../domain/types.js';
 import { logger } from '../infra/logger.js';
-import { postMessageToDiscordChannel } from '../integrations/discord-rest.js';
+import { postMessageToDiscordChannel, sendDirectMessageToDiscordUser } from '../integrations/discord-rest.js';
 import { OrderRepository, type OrderSessionRecord } from '../repositories/order-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
@@ -19,6 +19,7 @@ import { AdminService } from './admin-service.js';
 import { IntegrationService } from './integration-service.js';
 import { calculateEarnFromAppliedDiscounts } from './points-calculator.js';
 import { PointsService } from './points-service.js';
+import { type ReferralRewardResult, ReferralService } from './referral-service.js';
 
 function extractWooOrder(rawPayload: Record<string, unknown>): WooOrderPayload | null {
   const maybeOrder = (rawPayload.order ?? rawPayload) as Partial<WooOrderPayload>;
@@ -299,6 +300,7 @@ export class WebhookService {
   private readonly tenantRepository = new TenantRepository();
   private readonly adminService = new AdminService();
   private readonly pointsService = new PointsService();
+  private readonly referralService = new ReferralService();
 
   private async checkVoodooPaymentStatus(
     ipnToken: string | null,
@@ -803,11 +805,18 @@ export class WebhookService {
       orderSessionId: orderSession.id,
     });
 
-    const updatedPointsBalance = await this.finalizePointsForPaidOrder({
+    const config = await this.tenantRepository.getGuildConfig({
+      tenantId: orderSession.tenantId,
+      guildId: orderSession.guildId,
+    });
+
+    const finalized = await this.finalizePointsForPaidOrder({
       provider: 'woocommerce',
       webhookEventId: input.webhookEventId,
       orderSession,
+      referralThankYouTemplate: config?.referralThankYouTemplate ?? null,
     });
+    const updatedPointsBalance = finalized.updatedPointsBalance;
 
     const notes = await this.fetchWooNotes({
       wpBaseUrl: input.integration.wpBaseUrl,
@@ -823,11 +832,6 @@ export class WebhookService {
       wooOrderId: String(order.id),
       latestInternalNote: truncate(notes.latestInternal),
       latestCustomerNote: truncate(notes.latestCustomer),
-    });
-
-    const config = await this.tenantRepository.getGuildConfig({
-      tenantId: orderSession.tenantId,
-      guildId: orderSession.guildId,
     });
 
     const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
@@ -862,6 +866,9 @@ export class WebhookService {
       '**Order Notes**',
       `Internal: ${truncate(notes.latestInternal, 240) ?? '(none)'}`,
       `Customer: ${truncate(notes.latestCustomer, 240) ?? '(none)'}`,
+      '',
+      '**Referral**',
+      this.describeReferralOutcome(finalized.referralResult),
     ].join('\n');
 
     await this.postPaidLogMessage({
@@ -880,6 +887,13 @@ export class WebhookService {
       currency: paidCurrency,
       priceMinor: totalMinor,
       updatedPointsBalance,
+    });
+    await this.postReferralOutcome({
+      provider: 'woocommerce',
+      botTokens: botTokensResult.value,
+      referralLogChannelId: config?.referralLogChannelId ?? null,
+      referralResult: finalized.referralResult,
+      orderSessionId: orderSession.id,
     });
 
     logger.info(
@@ -1028,16 +1042,18 @@ export class WebhookService {
       orderSessionId: orderSession.id,
     });
 
-    const updatedPointsBalance = await this.finalizePointsForPaidOrder({
-      provider: 'voodoopay',
-      webhookEventId: input.webhookEventId,
-      orderSession,
-    });
-
     const config = await this.tenantRepository.getGuildConfig({
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
     });
+
+    const finalized = await this.finalizePointsForPaidOrder({
+      provider: 'voodoopay',
+      webhookEventId: input.webhookEventId,
+      orderSession,
+      referralThankYouTemplate: config?.referralThankYouTemplate ?? null,
+    });
+    const updatedPointsBalance = finalized.updatedPointsBalance;
 
     const sensitiveKeys = await this.productRepository.getSensitiveFieldKeys(orderSession.productId);
     const maskedAnswers = maskAnswers(orderSession.answers, sensitiveKeys);
@@ -1070,6 +1086,9 @@ export class WebhookService {
       '',
       '**Answers**',
       answersContent || '- (none)',
+      '',
+      '**Referral**',
+      this.describeReferralOutcome(finalized.referralResult),
     ].join('\n');
 
     await this.postPaidLogMessage({
@@ -1088,6 +1107,13 @@ export class WebhookService {
       currency: paidCurrency,
       priceMinor: totalMinor,
       updatedPointsBalance,
+    });
+    await this.postReferralOutcome({
+      provider: 'voodoopay',
+      botTokens: botTokensResult.value,
+      referralLogChannelId: config?.referralLogChannelId ?? null,
+      referralResult: finalized.referralResult,
+      orderSessionId: orderSession.id,
     });
 
     logger.info(
@@ -1110,7 +1136,8 @@ export class WebhookService {
     provider: 'woocommerce' | 'voodoopay';
     webhookEventId: string;
     orderSession: OrderSessionRecord;
-  }): Promise<number | null> {
+    referralThankYouTemplate: string | null;
+  }): Promise<{ updatedPointsBalance: number | null; referralResult: ReferralRewardResult }> {
     if (
       input.orderSession.pointsReservationState === 'released_expired' &&
       input.orderSession.pointsReserved > 0
@@ -1158,26 +1185,151 @@ export class WebhookService {
       throw new AbortError(addEarn.error.message);
     }
 
-    if (!input.orderSession.customerEmailNormalized) {
-      return null;
+    let updatedPointsBalance: number | null = null;
+
+    if (input.orderSession.customerEmailNormalized) {
+      if (addEarn.value) {
+        updatedPointsBalance = addEarn.value.balancePoints;
+      } else {
+        const balance = await this.pointsService.getBalanceByNormalizedEmail({
+          tenantId: input.orderSession.tenantId,
+          guildId: input.orderSession.guildId,
+          emailNormalized: input.orderSession.customerEmailNormalized,
+          emailDisplay: input.orderSession.customerEmailNormalized,
+          releaseExpiredReservations: false,
+        });
+        if (balance.isErr()) {
+          throw new AbortError(balance.error.message);
+        }
+
+        updatedPointsBalance = balance.value.balancePoints;
+      }
     }
 
-    if (addEarn.value) {
-      return addEarn.value.balancePoints;
-    }
-
-    const balance = await this.pointsService.getBalanceByNormalizedEmail({
-      tenantId: input.orderSession.tenantId,
-      guildId: input.orderSession.guildId,
-      emailNormalized: input.orderSession.customerEmailNormalized,
-      emailDisplay: input.orderSession.customerEmailNormalized,
-      releaseExpiredReservations: false,
+    const referralResult = await this.referralService.processPaidOrderReward({
+      orderSession: input.orderSession,
+      referralThankYouTemplate: input.referralThankYouTemplate,
     });
-    if (balance.isErr()) {
-      throw new AbortError(balance.error.message);
+    if (referralResult.isErr()) {
+      throw new AbortError(referralResult.error.message);
     }
 
-    return balance.value.balancePoints;
+    return {
+      updatedPointsBalance,
+      referralResult: referralResult.value,
+    };
+  }
+
+  private describeReferralOutcome(result: ReferralRewardResult): string {
+    if (result.status === 'rewarded') {
+      return `Rewarded ${result.rewardPoints} point(s) to referrer for ${result.referredEmailNormalized}.`;
+    }
+
+    const reasonMap: Record<NonNullable<Extract<ReferralRewardResult, { status: 'not_applicable' }>['reason']>, string> = {
+      no_customer_email: 'No customer email captured on this order session.',
+      not_first_paid: 'Not first paid order for this customer; referral reward skipped.',
+      no_claim: 'No referral claim exists for this customer email.',
+      self_blocked: 'Referral claim was blocked because referrer and referred emails match.',
+      reward_disabled: 'Referral reward is disabled for this server.',
+      reward_zero_points: 'Referral reward converts to 0 points with current snapshots.',
+    };
+
+    return reasonMap[result.reason];
+  }
+
+  private async postReferralOutcome(input: {
+    provider: 'woocommerce' | 'voodoopay';
+    botTokens: string[];
+    referralLogChannelId: string | null;
+    referralResult: ReferralRewardResult;
+    orderSessionId: string;
+  }): Promise<void> {
+    let dmStatusLine = 'Thank-you DM: not sent';
+
+    if (input.referralResult.status === 'rewarded') {
+      const dm = await this.sendReferralThankYouDm({
+        botTokens: input.botTokens,
+        userId: input.referralResult.referrerDiscordUserId,
+        content: input.referralResult.thankYouMessage,
+      });
+      dmStatusLine = dm.sent
+        ? `Thank-you DM: sent to <@${input.referralResult.referrerDiscordUserId}>`
+        : `Thank-you DM: failed (${dm.errorMessage ?? 'unknown'})`;
+    }
+
+    if (!input.referralLogChannelId) {
+      if (input.referralResult.status === 'rewarded' && dmStatusLine.includes('failed')) {
+        logger.warn(
+          {
+            provider: input.provider,
+            orderSessionId: input.orderSessionId,
+            referralClaimId: input.referralResult.claimId,
+          },
+          dmStatusLine,
+        );
+      }
+      return;
+    }
+
+    const message = [
+      '**Referral Event**',
+      `Provider: ${input.provider}`,
+      `Order Session: \`${input.orderSessionId}\``,
+      `Outcome: ${this.describeReferralOutcome(input.referralResult)}`,
+      dmStatusLine,
+    ].join('\n');
+
+    try {
+      await this.postPaidLogMessage({
+        botTokens: input.botTokens,
+        preferredChannelId: input.referralLogChannelId,
+        fallbackChannelId: input.referralLogChannelId,
+        content: message,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          provider: input.provider,
+          orderSessionId: input.orderSessionId,
+          referralLogChannelId: input.referralLogChannelId,
+          errorMessage: error instanceof Error ? error.message : 'unknown',
+        },
+        'failed to post referral outcome log message',
+      );
+    }
+  }
+
+  private async sendReferralThankYouDm(input: {
+    botTokens: string[];
+    userId: string;
+    content: string;
+  }): Promise<{ sent: boolean; errorMessage: string | null }> {
+    const uniqueTokens = [...new Set(input.botTokens.map((token) => token.trim()).filter(Boolean))];
+    if (uniqueTokens.length === 0) {
+      return { sent: false, errorMessage: 'no bot token available' };
+    }
+
+    let lastError: unknown = null;
+    for (const botToken of uniqueTokens) {
+      try {
+        await sendDirectMessageToDiscordUser({
+          botToken,
+          userId: input.userId,
+          content: fitDiscordMessage(input.content),
+        });
+        return { sent: true, errorMessage: null };
+      } catch (error) {
+        lastError = error;
+        if (this.isDiscordUnauthorized(error)) {
+          continue;
+        }
+      }
+    }
+
+    return {
+      sent: false,
+      errorMessage: lastError instanceof Error ? lastError.message : 'dm send failed',
+    };
   }
 
   private async getBotTokenCandidates(): Promise<Result<string[], AppError>> {
@@ -1197,10 +1349,6 @@ export class WebhookService {
 
   private isDiscordUnauthorized(error: unknown): boolean {
     if (!(error instanceof AppError)) {
-      return false;
-    }
-
-    if (error.code !== 'DISCORD_LOG_POST_FAILED') {
       return false;
     }
 

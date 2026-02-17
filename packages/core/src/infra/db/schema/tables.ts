@@ -103,6 +103,14 @@ export const guildConfigs = mysqlTable(
     pointsEarnCategoryKeys: json('points_earn_category_keys').$type<string[]>().notNull().default([]),
     pointsRedeemCategoryKeys: json('points_redeem_category_keys').$type<string[]>().notNull().default([]),
     pointValueMinor: int('point_value_minor').notNull().default(1),
+    referralRewardMinor: int('referral_reward_minor').notNull().default(0),
+    referralRewardCategoryKeys: json('referral_reward_category_keys').$type<string[]>().notNull().default([]),
+    referralLogChannelId: varchar('referral_log_channel_id', { length: 32 }),
+    referralThankYouTemplate: text('referral_thank_you_template')
+      .notNull()
+      .default(
+        'Thanks for your referral. You earned {points} point(s) ({amount_gbp} GBP) after {referred_email} paid.',
+      ),
     ticketMetadataKey: varchar('ticket_metadata_key', { length: 64 }).notNull().default('isTicket'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
@@ -165,6 +173,7 @@ export const productVariants = mysqlTable(
     productId: varchar('product_id', { length: 26 }).notNull(),
     label: varchar('label', { length: 80 }).notNull(),
     priceMinor: int('price_minor').notNull(),
+    referralRewardMinor: int('referral_reward_minor').notNull().default(0),
     currency: varchar('currency', { length: 3 }).notNull(),
     wooProductId: varchar('woo_product_id', { length: 64 }),
     wooCheckoutPath: varchar('woo_checkout_path', { length: 255 }),
@@ -317,6 +326,7 @@ export const orderSessions = mysqlTable(
         earnCategoryKeys: [],
         redeemCategoryKeys: [],
       }),
+    referralRewardMinorSnapshot: int('referral_reward_minor_snapshot').notNull().default(0),
     tipMinor: int('tip_minor').notNull().default(0),
     subtotalMinor: int('subtotal_minor').notNull().default(0),
     totalMinor: int('total_minor').notNull().default(0),
@@ -330,6 +340,62 @@ export const orderSessions = mysqlTable(
     tenantGuildIdx: index('order_sessions_tenant_guild_idx').on(table.tenantId, table.guildId),
     ticketChannelIdx: index('order_sessions_ticket_channel_idx').on(table.ticketChannelId),
     tenantCreatedIdx: index('order_sessions_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const referralClaims = mysqlTable(
+  'referral_claims',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    referrerDiscordUserId: varchar('referrer_discord_user_id', { length: 32 }).notNull(),
+    referrerEmailNormalized: varchar('referrer_email_normalized', { length: 320 }).notNull(),
+    referrerEmailDisplay: varchar('referrer_email_display', { length: 320 }).notNull(),
+    referredEmailNormalized: varchar('referred_email_normalized', { length: 320 }).notNull(),
+    referredEmailDisplay: varchar('referred_email_display', { length: 320 }).notNull(),
+    status: mysqlEnum('status', ['active', 'rewarded']).notNull().default('active'),
+    rewardOrderSessionId: varchar('reward_order_session_id', { length: 26 }),
+    rewardPoints: int('reward_points').notNull().default(0),
+    rewardedAt: timestamp('rewarded_at', { mode: 'date' }),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildReferredUnique: uniqueIndex('referral_claims_tenant_guild_referred_email_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.referredEmailNormalized,
+    ),
+    tenantGuildIdx: index('referral_claims_tenant_guild_idx').on(table.tenantId, table.guildId),
+    tenantCreatedIdx: index('referral_claims_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const customerFirstPaidOrders = mysqlTable(
+  'customer_first_paid_orders',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    referredEmailNormalized: varchar('referred_email_normalized', { length: 320 }).notNull(),
+    firstOrderSessionId: varchar('first_order_session_id', { length: 26 }).notNull(),
+    firstPaidAt: timestamp('first_paid_at', { mode: 'date' }).defaultNow().notNull(),
+    claimId: varchar('claim_id', { length: 26 }),
+    rewardApplied: boolean('reward_applied').notNull().default(false),
+    rewardPoints: int('reward_points').notNull().default(0),
+    referralRewardMinorSnapshot: int('referral_reward_minor_snapshot').notNull().default(0),
+    pointValueMinorSnapshot: int('point_value_minor_snapshot').notNull().default(1),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildReferredUnique: uniqueIndex('first_paid_orders_tenant_guild_referred_email_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.referredEmailNormalized,
+    ),
+    tenantGuildIdx: index('first_paid_orders_tenant_guild_idx').on(table.tenantId, table.guildId),
+    tenantCreatedIdx: index('first_paid_orders_tenant_created_idx').on(table.tenantId, table.createdAt),
   }),
 );
 

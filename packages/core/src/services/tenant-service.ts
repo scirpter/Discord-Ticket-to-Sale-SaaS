@@ -208,6 +208,10 @@ export class TenantService {
       pointsEarnCategoryKeys: string[];
       pointsRedeemCategoryKeys: string[];
       pointValueMinor: number;
+      referralRewardMinor: number;
+      referralRewardCategoryKeys: string[];
+      referralLogChannelId: string | null;
+      referralThankYouTemplate: string;
       ticketMetadataKey: string;
     },
   ): Promise<Result<{
@@ -218,6 +222,10 @@ export class TenantService {
     pointsEarnCategoryKeys: string[];
     pointsRedeemCategoryKeys: string[];
     pointValueMinor: number;
+    referralRewardMinor: number;
+    referralRewardCategoryKeys: string[];
+    referralLogChannelId: string | null;
+    referralThankYouTemplate: string;
     ticketMetadataKey: string;
   }, AppError>> {
     try {
@@ -235,6 +243,10 @@ export class TenantService {
         pointsEarnCategoryKeys: config.pointsEarnCategoryKeys,
         pointsRedeemCategoryKeys: config.pointsRedeemCategoryKeys,
         pointValueMinor: config.pointValueMinor,
+        referralRewardMinor: config.referralRewardMinor,
+        referralRewardCategoryKeys: config.referralRewardCategoryKeys,
+        referralLogChannelId: config.referralLogChannelId,
+        referralThankYouTemplate: config.referralThankYouTemplate,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {
@@ -255,6 +267,10 @@ export class TenantService {
         pointsEarnCategoryKeys: string[];
         pointsRedeemCategoryKeys: string[];
         pointValueMinor: number;
+        referralRewardMinor: number;
+        referralRewardCategoryKeys: string[];
+        referralLogChannelId: string | null;
+        referralThankYouTemplate: string;
         ticketMetadataKey: string;
       },
       AppError
@@ -279,6 +295,10 @@ export class TenantService {
         pointsEarnCategoryKeys: config.pointsEarnCategoryKeys,
         pointsRedeemCategoryKeys: config.pointsRedeemCategoryKeys,
         pointValueMinor: config.pointValueMinor,
+        referralRewardMinor: config.referralRewardMinor,
+        referralRewardCategoryKeys: config.referralRewardCategoryKeys,
+        referralLogChannelId: config.referralLogChannelId,
+        referralThankYouTemplate: config.referralThankYouTemplate,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {

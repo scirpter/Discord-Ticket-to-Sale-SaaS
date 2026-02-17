@@ -44,6 +44,7 @@ export type OrderSessionRecord = {
   pointsDiscountMinor: number;
   pointsReservationState: OrderSessionPointsReservationState;
   pointsConfigSnapshot: OrderSessionPointsConfigSnapshot;
+  referralRewardMinorSnapshot: number;
   tipMinor: number;
   subtotalMinor: number;
   totalMinor: number;
@@ -71,6 +72,7 @@ function mapOrderSessionRow(row: typeof orderSessions.$inferSelect): OrderSessio
     pointsDiscountMinor: row.pointsDiscountMinor,
     pointsReservationState: row.pointsReservationState,
     pointsConfigSnapshot: row.pointsConfigSnapshot,
+    referralRewardMinorSnapshot: row.referralRewardMinorSnapshot,
     tipMinor: row.tipMinor,
     subtotalMinor: row.subtotalMinor,
     totalMinor: row.totalMinor,
@@ -100,6 +102,7 @@ export class OrderRepository {
     pointsDiscountMinor: number;
     pointsReservationState: OrderSessionPointsReservationState;
     pointsConfigSnapshot: OrderSessionPointsConfigSnapshot;
+    referralRewardMinorSnapshot: number;
     tipMinor: number;
     subtotalMinor: number;
     totalMinor: number;
@@ -126,6 +129,7 @@ export class OrderRepository {
       pointsDiscountMinor: input.pointsDiscountMinor,
       pointsReservationState: input.pointsReservationState,
       pointsConfigSnapshot: input.pointsConfigSnapshot,
+      referralRewardMinorSnapshot: input.referralRewardMinorSnapshot,
       tipMinor: input.tipMinor,
       subtotalMinor: input.subtotalMinor,
       totalMinor: input.totalMinor,
@@ -151,6 +155,7 @@ export class OrderRepository {
       pointsDiscountMinor: input.pointsDiscountMinor,
       pointsReservationState: input.pointsReservationState,
       pointsConfigSnapshot: input.pointsConfigSnapshot,
+      referralRewardMinorSnapshot: input.referralRewardMinorSnapshot,
       tipMinor: input.tipMinor,
       subtotalMinor: input.subtotalMinor,
       totalMinor: input.totalMinor,
