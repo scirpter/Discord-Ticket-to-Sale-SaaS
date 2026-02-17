@@ -1,13 +1,8 @@
-﻿import { and, eq } from 'drizzle-orm';
+import { and, eq, lt } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
-import {
-  orderNotesCache,
-  orderSessions,
-  ordersPaid,
-  webhookEvents,
-} from '../infra/db/schema/index.js';
+import { orderNotesCache, orderSessions, ordersPaid, webhookEvents } from '../infra/db/schema/index.js';
 
 export type OrderSessionBasketItem = {
   productId: string;
@@ -17,6 +12,19 @@ export type OrderSessionBasketItem = {
   variantLabel: string;
   priceMinor: number;
   currency: string;
+};
+
+export type OrderSessionPointsReservationState =
+  | 'none'
+  | 'reserved'
+  | 'released_expired'
+  | 'released_cancelled'
+  | 'consumed';
+
+export type OrderSessionPointsConfigSnapshot = {
+  pointValueMinor: number;
+  earnCategoryKeys: string[];
+  redeemCategoryKeys: string[];
 };
 
 export type OrderSessionRecord = {
@@ -31,6 +39,11 @@ export type OrderSessionRecord = {
   basketItems: OrderSessionBasketItem[];
   couponCode: string | null;
   couponDiscountMinor: number;
+  customerEmailNormalized: string | null;
+  pointsReserved: number;
+  pointsDiscountMinor: number;
+  pointsReservationState: OrderSessionPointsReservationState;
+  pointsConfigSnapshot: OrderSessionPointsConfigSnapshot;
   tipMinor: number;
   subtotalMinor: number;
   totalMinor: number;
@@ -39,6 +52,34 @@ export type OrderSessionRecord = {
   checkoutUrl: string | null;
   checkoutTokenExpiresAt: Date;
 };
+
+function mapOrderSessionRow(row: typeof orderSessions.$inferSelect): OrderSessionRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    guildId: row.guildId,
+    ticketChannelId: row.ticketChannelId,
+    staffUserId: row.staffUserId,
+    customerDiscordId: row.customerDiscordId,
+    productId: row.productId,
+    variantId: row.variantId,
+    basketItems: row.basketItems,
+    couponCode: row.couponCode,
+    couponDiscountMinor: row.couponDiscountMinor,
+    customerEmailNormalized: row.customerEmailNormalized,
+    pointsReserved: row.pointsReserved,
+    pointsDiscountMinor: row.pointsDiscountMinor,
+    pointsReservationState: row.pointsReservationState,
+    pointsConfigSnapshot: row.pointsConfigSnapshot,
+    tipMinor: row.tipMinor,
+    subtotalMinor: row.subtotalMinor,
+    totalMinor: row.totalMinor,
+    status: row.status,
+    answers: row.answers,
+    checkoutUrl: row.checkoutUrl,
+    checkoutTokenExpiresAt: row.checkoutTokenExpiresAt,
+  };
+}
 
 export class OrderRepository {
   private readonly db = getDb();
@@ -54,13 +95,19 @@ export class OrderRepository {
     basketItems: OrderSessionBasketItem[];
     couponCode: string | null;
     couponDiscountMinor: number;
+    customerEmailNormalized: string | null;
+    pointsReserved: number;
+    pointsDiscountMinor: number;
+    pointsReservationState: OrderSessionPointsReservationState;
+    pointsConfigSnapshot: OrderSessionPointsConfigSnapshot;
     tipMinor: number;
     subtotalMinor: number;
     totalMinor: number;
     answers: Record<string, string>;
     checkoutTokenExpiresAt: Date;
+    id?: string;
   }): Promise<OrderSessionRecord> {
-    const id = ulid();
+    const id = input.id ?? ulid();
 
     await this.db.insert(orderSessions).values({
       id,
@@ -74,6 +121,11 @@ export class OrderRepository {
       basketItems: input.basketItems,
       couponCode: input.couponCode,
       couponDiscountMinor: input.couponDiscountMinor,
+      customerEmailNormalized: input.customerEmailNormalized,
+      pointsReserved: input.pointsReserved,
+      pointsDiscountMinor: input.pointsDiscountMinor,
+      pointsReservationState: input.pointsReservationState,
+      pointsConfigSnapshot: input.pointsConfigSnapshot,
       tipMinor: input.tipMinor,
       subtotalMinor: input.subtotalMinor,
       totalMinor: input.totalMinor,
@@ -94,6 +146,11 @@ export class OrderRepository {
       basketItems: input.basketItems,
       couponCode: input.couponCode,
       couponDiscountMinor: input.couponDiscountMinor,
+      customerEmailNormalized: input.customerEmailNormalized,
+      pointsReserved: input.pointsReserved,
+      pointsDiscountMinor: input.pointsDiscountMinor,
+      pointsReservationState: input.pointsReservationState,
+      pointsConfigSnapshot: input.pointsConfigSnapshot,
       tipMinor: input.tipMinor,
       subtotalMinor: input.subtotalMinor,
       totalMinor: input.totalMinor,
@@ -116,26 +173,7 @@ export class OrderRepository {
       return null;
     }
 
-    return {
-      id: row.id,
-      tenantId: row.tenantId,
-      guildId: row.guildId,
-      ticketChannelId: row.ticketChannelId,
-      staffUserId: row.staffUserId,
-      customerDiscordId: row.customerDiscordId,
-      productId: row.productId,
-      variantId: row.variantId,
-      basketItems: row.basketItems,
-      couponCode: row.couponCode,
-      couponDiscountMinor: row.couponDiscountMinor,
-      tipMinor: row.tipMinor,
-      subtotalMinor: row.subtotalMinor,
-      totalMinor: row.totalMinor,
-      status: row.status,
-      answers: row.answers,
-      checkoutUrl: row.checkoutUrl,
-      checkoutTokenExpiresAt: row.checkoutTokenExpiresAt,
-    };
+    return mapOrderSessionRow(row);
   }
 
   public async getOrderSessionById(orderSessionId: string): Promise<OrderSessionRecord | null> {
@@ -147,26 +185,7 @@ export class OrderRepository {
       return null;
     }
 
-    return {
-      id: row.id,
-      tenantId: row.tenantId,
-      guildId: row.guildId,
-      ticketChannelId: row.ticketChannelId,
-      staffUserId: row.staffUserId,
-      customerDiscordId: row.customerDiscordId,
-      productId: row.productId,
-      variantId: row.variantId,
-      basketItems: row.basketItems,
-      couponCode: row.couponCode,
-      couponDiscountMinor: row.couponDiscountMinor,
-      tipMinor: row.tipMinor,
-      subtotalMinor: row.subtotalMinor,
-      totalMinor: row.totalMinor,
-      status: row.status,
-      answers: row.answers,
-      checkoutUrl: row.checkoutUrl,
-      checkoutTokenExpiresAt: row.checkoutTokenExpiresAt,
-    };
+    return mapOrderSessionRow(row);
   }
 
   public async getLatestPendingSessionByChannel(input: {
@@ -191,26 +210,7 @@ export class OrderRepository {
       return null;
     }
 
-    return {
-      id: pending.id,
-      tenantId: pending.tenantId,
-      guildId: pending.guildId,
-      ticketChannelId: pending.ticketChannelId,
-      staffUserId: pending.staffUserId,
-      customerDiscordId: pending.customerDiscordId,
-      productId: pending.productId,
-      variantId: pending.variantId,
-      basketItems: pending.basketItems,
-      couponCode: pending.couponCode,
-      couponDiscountMinor: pending.couponDiscountMinor,
-      tipMinor: pending.tipMinor,
-      subtotalMinor: pending.subtotalMinor,
-      totalMinor: pending.totalMinor,
-      status: pending.status,
-      answers: pending.answers,
-      checkoutUrl: pending.checkoutUrl,
-      checkoutTokenExpiresAt: pending.checkoutTokenExpiresAt,
-    };
+    return mapOrderSessionRow(pending);
   }
 
   public async setCheckoutUrl(input: {
@@ -253,6 +253,35 @@ export class OrderRepository {
       .update(orderSessions)
       .set({ status: 'paid', updatedAt: new Date() })
       .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
+  }
+
+  public async setOrderSessionPointsReservationState(input: {
+    tenantId: string;
+    orderSessionId: string;
+    state: OrderSessionPointsReservationState;
+  }): Promise<void> {
+    await this.db
+      .update(orderSessions)
+      .set({ pointsReservationState: input.state, updatedAt: new Date() })
+      .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
+  }
+
+  public async listExpiredReservedSessions(input: {
+    tenantId: string;
+    guildId: string;
+  }): Promise<OrderSessionRecord[]> {
+    const rows = await this.db.query.orderSessions.findMany({
+      where: and(
+        eq(orderSessions.tenantId, input.tenantId),
+        eq(orderSessions.guildId, input.guildId),
+        eq(orderSessions.status, 'pending_payment'),
+        eq(orderSessions.pointsReservationState, 'reserved'),
+        lt(orderSessions.checkoutTokenExpiresAt, new Date()),
+      ),
+      limit: 500,
+    });
+
+    return rows.map(mapOrderSessionRow);
   }
 
   public async createPaidOrder(input: {

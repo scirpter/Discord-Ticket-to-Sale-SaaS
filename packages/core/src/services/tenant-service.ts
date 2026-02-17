@@ -46,6 +46,27 @@ export class TenantService {
     });
   }
 
+  public async getLinkedTenantForGuild(
+    actor: ActorContext,
+    input: { guildId: string },
+  ): Promise<Result<{ tenantId: string; guildId: string } | null, AppError>> {
+    try {
+      const linked = await this.tenantRepository.getTenantByGuildId(input.guildId);
+      if (!linked) {
+        return ok(null);
+      }
+
+      const access = await this.assertTenantAccess(actor, linked.tenantId, 'member');
+      if (access.isErr()) {
+        return ok(null);
+      }
+
+      return ok(linked);
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
   public async listTenantGuilds(
     actor: ActorContext,
     input: { tenantId: string },
@@ -184,6 +205,9 @@ export class TenantService {
       staffRoleIds: string[];
       defaultCurrency: string;
       tipEnabled: boolean;
+      pointsEarnCategoryKeys: string[];
+      pointsRedeemCategoryKeys: string[];
+      pointValueMinor: number;
       ticketMetadataKey: string;
     },
   ): Promise<Result<{
@@ -191,6 +215,9 @@ export class TenantService {
     staffRoleIds: string[];
     defaultCurrency: string;
     tipEnabled: boolean;
+    pointsEarnCategoryKeys: string[];
+    pointsRedeemCategoryKeys: string[];
+    pointValueMinor: number;
     ticketMetadataKey: string;
   }, AppError>> {
     try {
@@ -205,6 +232,9 @@ export class TenantService {
         staffRoleIds: config.staffRoleIds,
         defaultCurrency: config.defaultCurrency,
         tipEnabled: config.tipEnabled,
+        pointsEarnCategoryKeys: config.pointsEarnCategoryKeys,
+        pointsRedeemCategoryKeys: config.pointsRedeemCategoryKeys,
+        pointValueMinor: config.pointValueMinor,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {
@@ -222,6 +252,9 @@ export class TenantService {
         staffRoleIds: string[];
         defaultCurrency: string;
         tipEnabled: boolean;
+        pointsEarnCategoryKeys: string[];
+        pointsRedeemCategoryKeys: string[];
+        pointValueMinor: number;
         ticketMetadataKey: string;
       },
       AppError
@@ -243,6 +276,9 @@ export class TenantService {
         staffRoleIds: config.staffRoleIds,
         defaultCurrency: config.defaultCurrency,
         tipEnabled: config.tipEnabled,
+        pointsEarnCategoryKeys: config.pointsEarnCategoryKeys,
+        pointsRedeemCategoryKeys: config.pointsRedeemCategoryKeys,
+        pointValueMinor: config.pointValueMinor,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {

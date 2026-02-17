@@ -1,18 +1,21 @@
 import { err, ok, type Result } from 'neverthrow';
+import { ulid } from 'ulid';
 import { z } from 'zod';
 
 import { getEnv } from '../config/env.js';
 import { AppError, fromUnknownError, validationError } from '../domain/errors.js';
-import type { SessionPayload } from '../security/session-token.js';
-import { signCheckoutToken } from '../security/checkout-token.js';
-import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
-import { CouponRepository } from '../repositories/coupon-repository.js';
 import { OrderRepository } from '../repositories/order-repository.js';
+import { CouponRepository } from '../repositories/coupon-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
 import { TicketMetadataRepository } from '../repositories/ticket-metadata-repository.js';
+import { signCheckoutToken } from '../security/checkout-token.js';
+import type { SessionPayload } from '../security/session-token.js';
+import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
 import { AuthorizationService } from './authorization-service.js';
 import { IntegrationService } from './integration-service.js';
+import { calculatePointsOrderTotals } from './points-calculator.js';
+import { PointsService } from './points-service.js';
 
 const answerSchema = z.record(z.string(), z.string().max(2000));
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -32,6 +35,7 @@ type SaleSessionInput = {
   }>;
   couponCode?: string | null;
   tipMinor?: number;
+  usePoints?: boolean;
   answers: Record<string, string>;
 };
 
@@ -45,6 +49,12 @@ type ResolvedSaleItem = {
   currency: string;
 };
 
+type ResolvedPointsConfig = {
+  pointValueMinor: number;
+  earnCategoryKeys: string[];
+  redeemCategoryKeys: string[];
+};
+
 export class SaleService {
   private readonly env = getEnv();
   private readonly couponRepository = new CouponRepository();
@@ -54,6 +64,7 @@ export class SaleService {
   private readonly integrationService = new IntegrationService();
   private readonly ticketMetadataRepository = new TicketMetadataRepository();
   private readonly authorizationService = new AuthorizationService();
+  private readonly pointsService = new PointsService();
 
   public async getSaleOptions(input: {
     tenantId: string;
@@ -92,6 +103,124 @@ export class SaleService {
             })),
           })),
       );
+    } catch (error) {
+      return err(fromUnknownError(error));
+    }
+  }
+
+  public async previewPointsForDraft(input: {
+    tenantId: string;
+    guildId: string;
+    basketItems: Array<{
+      category: string;
+      priceMinor: number;
+    }>;
+    couponCode?: string | null;
+    tipMinor?: number;
+    answers: Record<string, string>;
+  }): Promise<
+    Result<
+      {
+        canRedeem: boolean;
+        emailNormalized: string | null;
+        availablePoints: number;
+        pointValueMinor: number;
+        maxRedeemablePointsByAmount: number;
+        pointsReservedIfUsed: number;
+        pointsDiscountMinorIfUsed: number;
+      },
+      AppError
+    >
+  > {
+    try {
+      const parsedAnswers = answerSchema.safeParse(input.answers);
+      if (!parsedAnswers.success) {
+        return err(validationError(parsedAnswers.error.issues));
+      }
+
+      const pointsConfig = await this.resolvePointsConfig({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+      if (pointsConfig.isErr()) {
+        return err(pointsConfig.error);
+      }
+
+      const couponDiscountMinorResult = await this.resolveCouponDiscountMinor({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        couponCode: input.couponCode,
+        subtotalMinor: input.basketItems.reduce((sum, item) => sum + Math.max(0, item.priceMinor), 0),
+      });
+      if (couponDiscountMinorResult.isErr()) {
+        return err(couponDiscountMinorResult.error);
+      }
+
+      const customerEmail = this.findCustomerEmail(parsedAnswers.data);
+      if (!customerEmail) {
+        return ok({
+          canRedeem: false,
+          emailNormalized: null,
+          availablePoints: 0,
+          pointValueMinor: pointsConfig.value.pointValueMinor,
+          maxRedeemablePointsByAmount: 0,
+          pointsReservedIfUsed: 0,
+          pointsDiscountMinorIfUsed: 0,
+        });
+      }
+
+      const normalizedEmail = this.pointsService.normalizeEmail(customerEmail);
+      if (normalizedEmail.isErr()) {
+        return ok({
+          canRedeem: false,
+          emailNormalized: null,
+          availablePoints: 0,
+          pointValueMinor: pointsConfig.value.pointValueMinor,
+          maxRedeemablePointsByAmount: 0,
+          pointsReservedIfUsed: 0,
+          pointsDiscountMinorIfUsed: 0,
+        });
+      }
+
+      const released = await this.pointsService.releaseExpiredReservations({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+      if (released.isErr()) {
+        return err(released.error);
+      }
+
+      const balance = await this.pointsService.getBalanceByNormalizedEmail({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        emailNormalized: normalizedEmail.value.emailNormalized,
+        emailDisplay: normalizedEmail.value.emailDisplay,
+        releaseExpiredReservations: false,
+      });
+      if (balance.isErr()) {
+        return err(balance.error);
+      }
+
+      const calc = calculatePointsOrderTotals({
+        lines: input.basketItems,
+        couponDiscountMinor: couponDiscountMinorResult.value,
+        tipMinor: Math.max(0, input.tipMinor ?? 0),
+        pointValueMinor: pointsConfig.value.pointValueMinor,
+        earnCategoryKeys: pointsConfig.value.earnCategoryKeys,
+        redeemCategoryKeys: pointsConfig.value.redeemCategoryKeys,
+        availablePoints: balance.value.availablePoints,
+        usePoints: true,
+      });
+
+      return ok({
+        canRedeem: calc.pointsReserved > 0,
+        emailNormalized: normalizedEmail.value.emailNormalized,
+        availablePoints: balance.value.availablePoints,
+        pointValueMinor: pointsConfig.value.pointValueMinor,
+        maxRedeemablePointsByAmount: calc.maxRedeemablePointsByAmount,
+        pointsReservedIfUsed: calc.pointsReserved,
+        pointsDiscountMinorIfUsed: calc.pointsDiscountMinor,
+      });
     } catch (error) {
       return err(fromUnknownError(error));
     }
@@ -214,27 +343,85 @@ export class SaleService {
     }
 
     const subtotalMinor = resolvedItems.reduce((sum, item) => sum + item.priceMinor, 0);
-    const normalizedCouponCode = input.couponCode?.trim().toUpperCase() ?? null;
-    let couponDiscountMinor = 0;
-    if (normalizedCouponCode) {
-      const coupon = await this.couponRepository.getByCode({
-        tenantId: input.tenantId,
-        guildId: input.guildId,
-        code: normalizedCouponCode,
-      });
-      if (!coupon || !coupon.active) {
-        return err(new AppError('COUPON_NOT_FOUND', 'Coupon code is invalid or inactive', 404));
-      }
-
-      couponDiscountMinor = Math.min(subtotalMinor, coupon.discountMinor);
+    const couponDiscountMinorResult = await this.resolveCouponDiscountMinor({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      couponCode: input.couponCode,
+      subtotalMinor,
+    });
+    if (couponDiscountMinorResult.isErr()) {
+      return err(couponDiscountMinorResult.error);
     }
+    const couponDiscountMinor = couponDiscountMinorResult.value;
+    const normalizedCouponCode = input.couponCode?.trim().toUpperCase() ?? null;
 
     const tipMinorRaw = input.tipMinor ?? 0;
     if (!Number.isInteger(tipMinorRaw) || tipMinorRaw < 0) {
       return err(new AppError('TIP_INVALID', 'Tip amount must be a non-negative integer minor amount', 400));
     }
 
-    const totalMinor = Math.max(0, subtotalMinor - couponDiscountMinor + tipMinorRaw);
+    const pointsConfigResult = await this.resolvePointsConfig({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+    });
+    if (pointsConfigResult.isErr()) {
+      return err(pointsConfigResult.error);
+    }
+    const pointsConfig = pointsConfigResult.value;
+
+    const customerEmailFromAnswers = this.findCustomerEmail(parsedAnswers.data);
+    let normalizedCustomerEmail: { emailNormalized: string; emailDisplay: string } | null = null;
+    if (customerEmailFromAnswers) {
+      const normalized = this.pointsService.normalizeEmail(customerEmailFromAnswers);
+      if (normalized.isErr()) {
+        return err(new AppError('CUSTOMER_EMAIL_INVALID', 'Customer email is invalid', 400));
+      }
+      normalizedCustomerEmail = normalized.value;
+    }
+
+    let availablePoints = 0;
+    if (normalizedCustomerEmail) {
+      const release = await this.pointsService.releaseExpiredReservations({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+      if (release.isErr()) {
+        return err(release.error);
+      }
+
+      const balance = await this.pointsService.getBalanceByNormalizedEmail({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        emailNormalized: normalizedCustomerEmail.emailNormalized,
+        emailDisplay: normalizedCustomerEmail.emailDisplay,
+        releaseExpiredReservations: false,
+      });
+      if (balance.isErr()) {
+        return err(balance.error);
+      }
+      availablePoints = balance.value.availablePoints;
+    }
+
+    const calc = calculatePointsOrderTotals({
+      lines: resolvedItems.map((item) => ({ category: item.category, priceMinor: item.priceMinor })),
+      couponDiscountMinor,
+      tipMinor: tipMinorRaw,
+      pointValueMinor: pointsConfig.pointValueMinor,
+      earnCategoryKeys: pointsConfig.earnCategoryKeys,
+      redeemCategoryKeys: pointsConfig.redeemCategoryKeys,
+      availablePoints,
+      usePoints: Boolean(input.usePoints) && Boolean(normalizedCustomerEmail),
+    });
+
+    if (input.usePoints && calc.pointsReserved <= 0) {
+      return err(
+        new AppError(
+          'POINTS_INSUFFICIENT',
+          'No redeemable points are available for this checkout right now.',
+          409,
+        ),
+      );
+    }
 
     const voodooIntegration = await this.integrationService.getResolvedVoodooPayIntegrationByGuild({
       tenantId: input.tenantId,
@@ -256,7 +443,9 @@ export class SaleService {
     }
 
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const orderSessionId = ulid();
     const orderSession = await this.orderRepository.createOrderSession({
+      id: orderSessionId,
       tenantId: input.tenantId,
       guildId: input.guildId,
       ticketChannelId: input.ticketChannelId,
@@ -266,13 +455,41 @@ export class SaleService {
       variantId: primaryItem.variantId,
       basketItems: resolvedItems,
       couponCode: normalizedCouponCode,
-      couponDiscountMinor,
-      tipMinor: tipMinorRaw,
-      subtotalMinor,
-      totalMinor,
+      couponDiscountMinor: calc.couponDiscountMinor,
+      customerEmailNormalized: normalizedCustomerEmail?.emailNormalized ?? null,
+      pointsReserved: calc.pointsReserved,
+      pointsDiscountMinor: calc.pointsDiscountMinor,
+      pointsReservationState: calc.pointsReserved > 0 ? 'reserved' : 'none',
+      pointsConfigSnapshot: {
+        pointValueMinor: pointsConfig.pointValueMinor,
+        earnCategoryKeys: pointsConfig.earnCategoryKeys,
+        redeemCategoryKeys: pointsConfig.redeemCategoryKeys,
+      },
+      tipMinor: calc.tipMinor,
+      subtotalMinor: calc.subtotalMinor,
+      totalMinor: calc.totalMinor,
       answers: parsedAnswers.data,
       checkoutTokenExpiresAt: expiresAt,
     });
+
+    if (calc.pointsReserved > 0 && normalizedCustomerEmail) {
+      const reserveResult = await this.pointsService.reservePointsForOrder({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        emailNormalized: normalizedCustomerEmail.emailNormalized,
+        emailDisplay: normalizedCustomerEmail.emailDisplay,
+        points: calc.pointsReserved,
+        orderSessionId: orderSession.id,
+      });
+
+      if (reserveResult.isErr()) {
+        await this.tryCancelPendingOrderSession({
+          tenantId: input.tenantId,
+          orderSessionId: orderSession.id,
+        });
+        return err(reserveResult.error);
+      }
+    }
 
     const token = signCheckoutToken(
       {
@@ -288,7 +505,7 @@ export class SaleService {
         guildId: input.guildId,
         orderSessionId: orderSession.id,
         customerDiscordUserId: input.customerDiscordUserId,
-        totalMinor,
+        totalMinor: calc.totalMinor,
         currency: primaryItem.currency,
         answers: parsedAnswers.data,
         integration: voodooIntegration.value,
@@ -347,6 +564,45 @@ export class SaleService {
       orderSessionId: orderSession.id,
       checkoutUrl: providerCheckoutUrl,
       expiresAt: expiresAt.toISOString(),
+    });
+  }
+
+  private async resolveCouponDiscountMinor(input: {
+    tenantId: string;
+    guildId: string;
+    couponCode?: string | null;
+    subtotalMinor: number;
+  }): Promise<Result<number, AppError>> {
+    const normalizedCouponCode = input.couponCode?.trim().toUpperCase() ?? null;
+    if (!normalizedCouponCode) {
+      return ok(0);
+    }
+
+    const coupon = await this.couponRepository.getByCode({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      code: normalizedCouponCode,
+    });
+    if (!coupon || !coupon.active) {
+      return err(new AppError('COUPON_NOT_FOUND', 'Coupon code is invalid or inactive', 404));
+    }
+
+    return ok(Math.min(Math.max(0, input.subtotalMinor), coupon.discountMinor));
+  }
+
+  private async resolvePointsConfig(input: {
+    tenantId: string;
+    guildId: string;
+  }): Promise<Result<ResolvedPointsConfig, AppError>> {
+    const config = await this.tenantRepository.getGuildConfig(input);
+    if (!config) {
+      return err(new AppError('GUILD_CONFIG_NOT_FOUND', 'Guild config not found', 404));
+    }
+
+    return ok({
+      pointValueMinor: Math.max(1, config.pointValueMinor),
+      earnCategoryKeys: config.pointsEarnCategoryKeys,
+      redeemCategoryKeys: config.pointsRedeemCategoryKeys,
     });
   }
 
@@ -483,7 +739,24 @@ export class SaleService {
     orderSessionId: string;
   }): Promise<void> {
     try {
-      await this.orderRepository.cancelOrderSession(input);
+      const existing = await this.orderRepository.getOrderSession({
+        tenantId: input.tenantId,
+        orderSessionId: input.orderSessionId,
+      });
+      if (!existing) {
+        return;
+      }
+
+      const cancelled = await this.orderRepository.cancelOrderSession(input);
+      if (cancelled) {
+        const released = await this.pointsService.releaseReservationForOrderSession({
+          orderSession: existing,
+          reason: 'cancelled',
+        });
+        if (released.isErr()) {
+          // ignore release errors to preserve original response path.
+        }
+      }
     } catch {
       // ignore cancellation errors and preserve original failure response.
     }
@@ -557,6 +830,14 @@ export class SaleService {
         return err(new AppError('ORDER_SESSION_NOT_CANCELABLE', 'Order session cannot be cancelled', 409));
       }
 
+      const released = await this.pointsService.releaseReservationForOrderSession({
+        orderSession: existing,
+        reason: 'cancelled',
+      });
+      if (released.isErr()) {
+        return err(released.error);
+      }
+
       return ok({ orderSessionId: existing.id });
     } catch (error) {
       return err(fromUnknownError(error));
@@ -573,6 +854,9 @@ export class SaleService {
         staffRoleIds: string[];
         defaultCurrency: string;
         tipEnabled: boolean;
+        pointsEarnCategoryKeys: string[];
+        pointsRedeemCategoryKeys: string[];
+        pointValueMinor: number;
         ticketMetadataKey: string;
       },
       AppError
@@ -589,6 +873,9 @@ export class SaleService {
         staffRoleIds: config.staffRoleIds,
         defaultCurrency: config.defaultCurrency,
         tipEnabled: config.tipEnabled,
+        pointsEarnCategoryKeys: config.pointsEarnCategoryKeys,
+        pointsRedeemCategoryKeys: config.pointsRedeemCategoryKeys,
+        pointValueMinor: config.pointValueMinor,
         ticketMetadataKey: config.ticketMetadataKey,
       });
     } catch (error) {

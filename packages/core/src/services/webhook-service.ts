@@ -8,7 +8,7 @@ import { AppError, fromUnknownError } from '../domain/errors.js';
 import type { WooOrderNote, WooOrderPayload } from '../domain/types.js';
 import { logger } from '../infra/logger.js';
 import { postMessageToDiscordChannel } from '../integrations/discord-rest.js';
-import { OrderRepository } from '../repositories/order-repository.js';
+import { OrderRepository, type OrderSessionRecord } from '../repositories/order-repository.js';
 import { ProductRepository } from '../repositories/product-repository.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
 import { verifyVoodooCallbackToken } from '../security/voodoo-callback-token.js';
@@ -17,6 +17,8 @@ import { maskAnswers } from '../utils/mask.js';
 import { enqueueWebhookTask } from '../workers/webhook-queue.js';
 import { AdminService } from './admin-service.js';
 import { IntegrationService } from './integration-service.js';
+import { calculateEarnFromAppliedDiscounts } from './points-calculator.js';
+import { PointsService } from './points-service.js';
 
 function extractWooOrder(rawPayload: Record<string, unknown>): WooOrderPayload | null {
   const maybeOrder = (rawPayload.order ?? rawPayload) as Partial<WooOrderPayload>;
@@ -296,6 +298,7 @@ export class WebhookService {
   private readonly productRepository = new ProductRepository();
   private readonly tenantRepository = new TenantRepository();
   private readonly adminService = new AdminService();
+  private readonly pointsService = new PointsService();
 
   private async checkVoodooPaymentStatus(
     ipnToken: string | null,
@@ -800,6 +803,12 @@ export class WebhookService {
       orderSessionId: orderSession.id,
     });
 
+    const updatedPointsBalance = await this.finalizePointsForPaidOrder({
+      provider: 'woocommerce',
+      webhookEventId: input.webhookEventId,
+      orderSession,
+    });
+
     const notes = await this.fetchWooNotes({
       wpBaseUrl: input.integration.wpBaseUrl,
       consumerKey: input.integration.consumerKey,
@@ -870,6 +879,7 @@ export class WebhookService {
       variantLabel: variant.label,
       currency: paidCurrency,
       priceMinor: totalMinor,
+      updatedPointsBalance,
     });
 
     logger.info(
@@ -1018,6 +1028,12 @@ export class WebhookService {
       orderSessionId: orderSession.id,
     });
 
+    const updatedPointsBalance = await this.finalizePointsForPaidOrder({
+      provider: 'voodoopay',
+      webhookEventId: input.webhookEventId,
+      orderSession,
+    });
+
     const config = await this.tenantRepository.getGuildConfig({
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
@@ -1071,6 +1087,7 @@ export class WebhookService {
       variantLabel: variant.label,
       currency: paidCurrency,
       priceMinor: totalMinor,
+      updatedPointsBalance,
     });
 
     logger.info(
@@ -1087,6 +1104,80 @@ export class WebhookService {
     );
 
     await this.orderRepository.markWebhookProcessed(input.webhookEventId);
+  }
+
+  private async finalizePointsForPaidOrder(input: {
+    provider: 'woocommerce' | 'voodoopay';
+    webhookEventId: string;
+    orderSession: OrderSessionRecord;
+  }): Promise<number | null> {
+    if (
+      input.orderSession.pointsReservationState === 'released_expired' &&
+      input.orderSession.pointsReserved > 0
+    ) {
+      logger.warn(
+        {
+          provider: input.provider,
+          webhookEventId: input.webhookEventId,
+          orderSessionId: input.orderSession.id,
+          pointsReserved: input.orderSession.pointsReserved,
+        },
+        'payment confirmed after points reservation was released on expiry; skipping re-deduction',
+      );
+    }
+
+    const consume = await this.pointsService.consumeReservationForPaidOrder({
+      orderSession: input.orderSession,
+    });
+    if (consume.isErr()) {
+      throw new AbortError(consume.error.message);
+    }
+
+    const snapshot = input.orderSession.pointsConfigSnapshot ?? {
+      pointValueMinor: 1,
+      earnCategoryKeys: [],
+      redeemCategoryKeys: [],
+    };
+    const earned = calculateEarnFromAppliedDiscounts({
+      lines: input.orderSession.basketItems.map((item) => ({
+        category: item.category,
+        priceMinor: item.priceMinor,
+      })),
+      couponDiscountMinor: input.orderSession.couponDiscountMinor,
+      pointsDiscountMinor: input.orderSession.pointsDiscountMinor,
+      pointValueMinor: snapshot.pointValueMinor,
+      earnCategoryKeys: snapshot.earnCategoryKeys,
+      redeemCategoryKeys: snapshot.redeemCategoryKeys,
+    });
+
+    const addEarn = await this.pointsService.addEarnedPointsForPaidOrder({
+      orderSession: input.orderSession,
+      points: earned.pointsEarned,
+    });
+    if (addEarn.isErr()) {
+      throw new AbortError(addEarn.error.message);
+    }
+
+    if (!input.orderSession.customerEmailNormalized) {
+      return null;
+    }
+
+    if (addEarn.value) {
+      return addEarn.value.balancePoints;
+    }
+
+    const balance = await this.pointsService.getBalanceByNormalizedEmail({
+      tenantId: input.orderSession.tenantId,
+      guildId: input.orderSession.guildId,
+      emailNormalized: input.orderSession.customerEmailNormalized,
+      emailDisplay: input.orderSession.customerEmailNormalized,
+      releaseExpiredReservations: false,
+    });
+    if (balance.isErr()) {
+      throw new AbortError(balance.error.message);
+    }
+
+    return balance.value.balancePoints;
   }
 
   private async getBotTokenCandidates(): Promise<Result<string[], AppError>> {
@@ -1196,6 +1287,7 @@ export class WebhookService {
     variantLabel: string;
     currency: string;
     priceMinor: number;
+    updatedPointsBalance: number | null;
   }): Promise<void> {
     const message = [
       `Payment received for <@${input.customerDiscordId}>. Thank you.`,
@@ -1203,6 +1295,9 @@ export class WebhookService {
       `Product: ${input.productName}`,
       `Variant: ${input.variantLabel}`,
       `Amount: ${(input.priceMinor / 100).toFixed(2)} ${input.currency}`,
+      input.updatedPointsBalance === null
+        ? 'Updated Points Balance: unavailable'
+        : `Updated Points Balance: ${input.updatedPointsBalance} point(s)`,
     ].join('\n');
 
     const uniqueTokens = [...new Set(input.botTokens.map((token) => token.trim()).filter(Boolean))];

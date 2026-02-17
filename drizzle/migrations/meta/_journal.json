@@ -36,6 +36,13 @@
       "when": 1771282415129,
       "tag": "0004_equal_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1771288591106,
+      "tag": "0005_certain_proudstar",
+      "breakpoints": true
     }
   ]
 }

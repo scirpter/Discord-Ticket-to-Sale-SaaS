@@ -5,6 +5,7 @@ import { AppError, fromUnknownError, validationError } from '../domain/errors.js
 import type { ProductFormFieldInput } from '../domain/types.js';
 import type { SessionPayload } from '../security/session-token.js';
 import { ProductRepository } from '../repositories/product-repository.js';
+import { TenantRepository } from '../repositories/tenant-repository.js';
 import { AuthorizationService } from './authorization-service.js';
 
 const variantSchema = z.object({
@@ -50,6 +51,7 @@ const REQUIRED_EMAIL_FIELD_LABEL = 'What is your email?';
 
 export class ProductService {
   private readonly productRepository = new ProductRepository();
+  private readonly tenantRepository = new TenantRepository();
   private readonly authorizationService = new AuthorizationService();
 
   public async listProducts(
@@ -350,6 +352,13 @@ export class ProductService {
         newCategory: targetCategory,
       });
 
+      await this.syncPointsCategoryRename({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        sourceCategory: sourceResolved,
+        targetCategory,
+      });
+
       return ok({
         updatedProducts,
         category: sourceResolved,
@@ -414,6 +423,12 @@ export class ProductService {
         category: sourceResolved,
       });
 
+      await this.syncPointsCategoryDelete({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        deletedCategory: sourceResolved,
+      });
+
       return ok({
         deletedProducts,
         category: sourceResolved,
@@ -449,6 +464,122 @@ export class ProductService {
       ...field,
       sortOrder: index,
     }));
+  }
+
+  private normalizeCategoryKey(category: string): string {
+    return category.trim().toLowerCase();
+  }
+
+  private replaceCategoryKey(
+    categories: string[],
+    sourceCategory: string,
+    targetCategory: string,
+  ): string[] {
+    const sourceKey = this.normalizeCategoryKey(sourceCategory);
+    const targetKey = this.normalizeCategoryKey(targetCategory);
+    const output: string[] = [];
+    const seen = new Set<string>();
+
+    for (const category of categories) {
+      const normalized = this.normalizeCategoryKey(category);
+      const nextCategory = normalized === sourceKey ? targetCategory : category;
+      const nextNormalized = this.normalizeCategoryKey(nextCategory);
+      if (!nextNormalized || seen.has(nextNormalized)) {
+        continue;
+      }
+
+      seen.add(nextNormalized);
+      output.push(nextNormalized === targetKey ? targetCategory : nextCategory);
+    }
+
+    return output;
+  }
+
+  private removeCategoryKey(categories: string[], deletedCategory: string): string[] {
+    const deletedKey = this.normalizeCategoryKey(deletedCategory);
+    const output: string[] = [];
+    const seen = new Set<string>();
+
+    for (const category of categories) {
+      const normalized = this.normalizeCategoryKey(category);
+      if (!normalized || normalized === deletedKey || seen.has(normalized)) {
+        continue;
+      }
+
+      seen.add(normalized);
+      output.push(category);
+    }
+
+    return output;
+  }
+
+  private async syncPointsCategoryRename(input: {
+    tenantId: string;
+    guildId: string;
+    sourceCategory: string;
+    targetCategory: string;
+  }): Promise<void> {
+    const config = await this.tenantRepository.getGuildConfig({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+    });
+    if (!config) {
+      return;
+    }
+
+    const nextEarn = this.replaceCategoryKey(
+      config.pointsEarnCategoryKeys,
+      input.sourceCategory,
+      input.targetCategory,
+    );
+    const nextRedeem = this.replaceCategoryKey(
+      config.pointsRedeemCategoryKeys,
+      input.sourceCategory,
+      input.targetCategory,
+    );
+
+    await this.tenantRepository.upsertGuildConfig({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      paidLogChannelId: config.paidLogChannelId,
+      staffRoleIds: config.staffRoleIds,
+      defaultCurrency: config.defaultCurrency,
+      tipEnabled: config.tipEnabled,
+      pointsEarnCategoryKeys: nextEarn,
+      pointsRedeemCategoryKeys: nextRedeem,
+      pointValueMinor: config.pointValueMinor,
+      ticketMetadataKey: config.ticketMetadataKey,
+    });
+  }
+
+  private async syncPointsCategoryDelete(input: {
+    tenantId: string;
+    guildId: string;
+    deletedCategory: string;
+  }): Promise<void> {
+    const config = await this.tenantRepository.getGuildConfig({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+    });
+    if (!config) {
+      return;
+    }
+
+    const nextEarn = this.removeCategoryKey(config.pointsEarnCategoryKeys, input.deletedCategory);
+    const nextRedeem = this.removeCategoryKey(config.pointsRedeemCategoryKeys, input.deletedCategory);
+
+    await this.tenantRepository.upsertGuildConfig({
+      tenantId: input.tenantId,
+      guildId: input.guildId,
+      paidLogChannelId: config.paidLogChannelId,
+      staffRoleIds: config.staffRoleIds,
+      defaultCurrency: config.defaultCurrency,
+      tipEnabled: config.tipEnabled,
+      pointsEarnCategoryKeys: nextEarn,
+      pointsRedeemCategoryKeys: nextRedeem,
+      pointValueMinor: config.pointValueMinor,
+      ticketMetadataKey: config.ticketMetadataKey,
+    });
   }
 }
 

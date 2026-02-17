@@ -1,5 +1,5 @@
 ﻿import { TenantService } from '@voodoo/core';
-import type { NextRequest} from 'next/server';
+import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 import { jsonError, readJson, requireSession } from '@/lib/http';
@@ -54,6 +54,9 @@ export async function PATCH(
       staffRoleIds: string[];
       defaultCurrency: string;
       tipEnabled?: boolean;
+      pointsEarnCategoryKeys?: string[];
+      pointsRedeemCategoryKeys?: string[];
+      pointValueMinor?: number;
       ticketMetadataKey?: string;
     }>(request);
 
@@ -64,6 +67,9 @@ export async function PATCH(
       staffRoleIds: body.staffRoleIds,
       defaultCurrency: body.defaultCurrency,
       tipEnabled: body.tipEnabled ?? false,
+      pointsEarnCategoryKeys: body.pointsEarnCategoryKeys ?? [],
+      pointsRedeemCategoryKeys: body.pointsRedeemCategoryKeys ?? [],
+      pointValueMinor: Math.max(1, body.pointValueMinor ?? 1),
       ticketMetadataKey: body.ticketMetadataKey ?? 'isTicket',
     });
 

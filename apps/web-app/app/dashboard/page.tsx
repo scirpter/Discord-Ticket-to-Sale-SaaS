@@ -103,6 +103,14 @@ type CouponRecord = {
   active: boolean;
 };
 
+type PointsCustomerRecord = {
+  emailNormalized: string;
+  emailDisplay: string;
+  balancePoints: number;
+  reservedPoints: number;
+  availablePoints: number;
+};
+
 type MeResponse = {
   me: {
     userId: string;
@@ -140,6 +148,7 @@ const DEFAULT_VOODOO_CHECKOUT_DOMAIN = 'checkout.voodoo-pay.uk';
 const DASHBOARD_CONTEXT_STORAGE_KEY = 'voodoo_dashboard_context_v1';
 const REQUIRED_EMAIL_QUESTION_KEY = 'email';
 const REQUIRED_EMAIL_QUESTION_LABEL = 'What is your email?';
+const DEFAULT_POINT_VALUE_MAJOR = '0.01';
 
 const nativeSelectClass =
   'dark:bg-input/30 dark:border-input dark:hover:bg-input/40 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
@@ -198,6 +207,83 @@ function parsePriceToMinor(value: string): number {
   }
 
   return Math.round(parsed * 100);
+}
+
+function parsePointValueMajorToMinor(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('Point value must be greater than 0, for example 0.01');
+  }
+
+  const minor = Math.round(parsed * 100);
+  if (minor < 1) {
+    throw new Error('Point value is too small. Minimum is 0.01.');
+  }
+
+  return minor;
+}
+
+function formatPointValueMinorToMajor(pointValueMinor: number): string {
+  if (!Number.isFinite(pointValueMinor) || pointValueMinor <= 0) {
+    return DEFAULT_POINT_VALUE_MAJOR;
+  }
+
+  return (pointValueMinor / 100).toFixed(2);
+}
+
+function parseWholePoints(value: string): number {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error('Points must be a positive whole number.');
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('Points must be a positive whole number.');
+  }
+
+  return parsed;
+}
+
+function normalizeDiscordId(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    return String(value);
+  }
+
+  return '';
+}
+
+function normalizeDiscordIdList(value: unknown): string[] {
+  const normalizeArray = (items: unknown[]): string[] =>
+    [...new Set(items.map((item) => normalizeDiscordId(item)).filter(Boolean))];
+
+  if (Array.isArray(value)) {
+    return normalizeArray(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const parsed = safeJsonParse(trimmed);
+    if (Array.isArray(parsed)) {
+      return normalizeArray(parsed);
+    }
+
+    if (trimmed.includes(',')) {
+      return normalizeArray(trimmed.split(','));
+    }
+
+    return normalizeArray([trimmed]);
+  }
+
+  return [];
 }
 
 function normalizeCategoryKey(value: string): string {
@@ -276,6 +362,14 @@ export default function DashboardPage() {
   const [selectedStaffRoleIds, setSelectedStaffRoleIds] = useState<string[]>([]);
   const [defaultCurrency, setDefaultCurrency] = useState(DEFAULT_CURRENCY);
   const [tipEnabled, setTipEnabled] = useState(false);
+  const [pointValueMajor, setPointValueMajor] = useState(DEFAULT_POINT_VALUE_MAJOR);
+  const [pointsEarnCategoryKeys, setPointsEarnCategoryKeys] = useState<string[]>([]);
+  const [pointsRedeemCategoryKeys, setPointsRedeemCategoryKeys] = useState<string[]>([]);
+  const [pointsCustomers, setPointsCustomers] = useState<PointsCustomerRecord[]>([]);
+  const [pointsCustomersLoading, setPointsCustomersLoading] = useState(false);
+  const [pointsSearchInput, setPointsSearchInput] = useState('');
+  const [pointsAdjustEmail, setPointsAdjustEmail] = useState('');
+  const [pointsAdjustValueInput, setPointsAdjustValueInput] = useState('1');
 
   const [botToken, setBotToken] = useState('');
 
@@ -336,12 +430,18 @@ export default function DashboardPage() {
       botInstalled: Boolean(guildResources?.botInGuild),
       defaultCurrency,
       tipEnabled,
+      pointValueMajor,
+      pointsEarnCategoryKeys,
+      pointsRedeemCategoryKeys,
     }),
     [
       defaultCurrency,
       guildId,
       guildResources?.botInGuild,
       myTenants,
+      pointValueMajor,
+      pointsEarnCategoryKeys,
+      pointsRedeemCategoryKeys,
       selectedDiscordGuild?.name,
       tenantId,
       tipEnabled,
@@ -385,6 +485,17 @@ export default function DashboardPage() {
         (a, b) => a.localeCompare(b),
       ),
     [categoryBuilderName, existingCategories],
+  );
+  const pointsCategoryOptions = useMemo(
+    () =>
+      existingCategories
+        .map((category) => ({
+          label: category,
+          key: normalizeCategoryKey(category),
+        }))
+        .filter((category) => Boolean(category.key))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [existingCategories],
   );
 
   const runAction = useCallback(async (action: () => Promise<unknown>) => {
@@ -540,6 +651,26 @@ export default function DashboardPage() {
     }
 
     try {
+      const linkedTenantPayload = (await apiCall(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/linked-tenant`,
+      )) as { tenantId?: string | null } | null;
+      const linkedTenantId =
+        linkedTenantPayload &&
+        typeof linkedTenantPayload === 'object' &&
+        'tenantId' in linkedTenantPayload &&
+        typeof linkedTenantPayload.tenantId === 'string'
+          ? linkedTenantPayload.tenantId
+          : '';
+
+      if (linkedTenantId && linkedTenantId !== selectedTenantId && myTenants.some((tenant) => tenant.id === linkedTenantId)) {
+        setTenantId(linkedTenantId);
+        return;
+      }
+    } catch {
+      // Fallback to currently selected workspace if link resolution is unavailable.
+    }
+
+    try {
       await ensureGuildLinked(selectedTenantId, selectedGuildId);
     } catch {
       // Continue loading context data even if linking cannot be confirmed yet.
@@ -554,20 +685,37 @@ export default function DashboardPage() {
           staffRoleIds: string[];
           defaultCurrency: string;
           tipEnabled: boolean;
+          pointsEarnCategoryKeys: string[];
+          pointsRedeemCategoryKeys: string[];
+          pointValueMinor: number;
         };
       };
 
       if (configPayload.config) {
-        setPaidLogChannelId(configPayload.config.paidLogChannelId ?? '');
-        setSelectedStaffRoleIds(Array.isArray(configPayload.config.staffRoleIds) ? configPayload.config.staffRoleIds : []);
+        setPaidLogChannelId(normalizeDiscordId(configPayload.config.paidLogChannelId));
+        setSelectedStaffRoleIds(normalizeDiscordIdList(configPayload.config.staffRoleIds));
         setDefaultCurrency(configPayload.config.defaultCurrency || DEFAULT_CURRENCY);
         setTipEnabled(Boolean(configPayload.config.tipEnabled));
+        setPointsEarnCategoryKeys(
+          Array.isArray(configPayload.config.pointsEarnCategoryKeys)
+            ? configPayload.config.pointsEarnCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+            : [],
+        );
+        setPointsRedeemCategoryKeys(
+          Array.isArray(configPayload.config.pointsRedeemCategoryKeys)
+            ? configPayload.config.pointsRedeemCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+            : [],
+        );
+        setPointValueMajor(formatPointValueMinorToMajor(configPayload.config.pointValueMinor));
       }
     } catch {
       setPaidLogChannelId('');
       setSelectedStaffRoleIds([]);
       setDefaultCurrency(DEFAULT_CURRENCY);
       setTipEnabled(false);
+      setPointsEarnCategoryKeys([]);
+      setPointsRedeemCategoryKeys([]);
+      setPointValueMajor(DEFAULT_POINT_VALUE_MAJOR);
     }
 
     try {
@@ -622,7 +770,19 @@ export default function DashboardPage() {
     } catch {
       setCoupons([]);
     }
-  }, [ensureGuildLinked, guildId, tenantId]);
+
+    setPointsCustomersLoading(true);
+    try {
+      const pointsPayload = (await apiCall(
+        `/api/guilds/${encodeURIComponent(selectedGuildId)}/points/customers?tenantId=${encodeURIComponent(selectedTenantId)}`,
+      )) as { customers?: PointsCustomerRecord[] };
+      setPointsCustomers(Array.isArray(pointsPayload.customers) ? pointsPayload.customers : []);
+    } catch {
+      setPointsCustomers([]);
+    } finally {
+      setPointsCustomersLoading(false);
+    }
+  }, [ensureGuildLinked, guildId, myTenants, tenantId]);
 
   useEffect(() => {
     void loadSession();
@@ -651,6 +811,14 @@ export default function DashboardPage() {
     setSelectedStaffRoleIds([]);
     setDefaultCurrency(DEFAULT_CURRENCY);
     setTipEnabled(false);
+    setPointValueMajor(DEFAULT_POINT_VALUE_MAJOR);
+    setPointsEarnCategoryKeys([]);
+    setPointsRedeemCategoryKeys([]);
+    setPointsCustomers([]);
+    setPointsCustomersLoading(false);
+    setPointsSearchInput('');
+    setPointsAdjustEmail('');
+    setPointsAdjustValueInput('1');
     setProducts([]);
     setEditingProductId(null);
     setCoupons([]);
@@ -846,6 +1014,51 @@ export default function DashboardPage() {
     const nextCoupons = Array.isArray(payload.coupons) ? payload.coupons : [];
     setCoupons(nextCoupons);
     return nextCoupons;
+  }
+
+  async function refreshPointsCustomers(search = pointsSearchInput): Promise<PointsCustomerRecord[]> {
+    const context = requireWorkspaceAndServer({ requireBot: true });
+    await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+    setPointsCustomersLoading(true);
+    try {
+      const query = new URLSearchParams({
+        tenantId: context.workspaceId,
+      });
+
+      if (search.trim()) {
+        query.set('search', search.trim());
+      }
+
+      const payload = (await apiCall(
+        `/api/guilds/${encodeURIComponent(context.discordServerId)}/points/customers?${query.toString()}`,
+      )) as {
+        customers?: PointsCustomerRecord[];
+      };
+      const customers = Array.isArray(payload.customers) ? payload.customers : [];
+      setPointsCustomers(customers);
+      return customers;
+    } finally {
+      setPointsCustomersLoading(false);
+    }
+  }
+
+  function togglePointsCategory(
+    category: string,
+    setter: (updater: (current: string[]) => string[]) => void,
+  ): void {
+    const key = normalizeCategoryKey(category);
+    if (!key) {
+      return;
+    }
+
+    setter((current) => {
+      if (current.includes(key)) {
+        return current.filter((entry) => entry !== key);
+      }
+
+      return [...current, key];
+    });
   }
 
   function resetCouponBuilder(): void {
@@ -1218,6 +1431,195 @@ export default function DashboardPage() {
                 </Label>
               </div>
 
+              <Separator />
+
+              <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Rewards Settings</h3>
+
+                <div className="space-y-2">
+                  <Label htmlFor="point-value">Value of 1 point ({defaultCurrency})</Label>
+                  <Input
+                    id="point-value"
+                    value={pointValueMajor}
+                    onChange={(event) => setPointValueMajor(event.target.value)}
+                    placeholder="0.01"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Example: 0.01 means 1 point = 0.01 {defaultCurrency}.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Categories that earn points</Label>
+                  {pointsCategoryOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Create product categories first, then select reward categories.
+                    </p>
+                  ) : (
+                    <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                      {pointsCategoryOptions.map((category) => (
+                        <label key={`earn-${category.key}`} className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Checkbox
+                            checked={pointsEarnCategoryKeys.includes(category.key)}
+                            onCheckedChange={() => togglePointsCategory(category.label, setPointsEarnCategoryKeys)}
+                          />
+                          <span>{category.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Categories where points can be redeemed</Label>
+                  {pointsCategoryOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Create product categories first, then select redeem categories.
+                    </p>
+                  ) : (
+                    <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                      {pointsCategoryOptions.map((category) => (
+                        <label
+                          key={`redeem-${category.key}`}
+                          className="flex items-center gap-2 text-sm text-muted-foreground"
+                        >
+                          <Checkbox
+                            checked={pointsRedeemCategoryKeys.includes(category.key)}
+                            onCheckedChange={() => togglePointsCategory(category.label, setPointsRedeemCategoryKeys)}
+                          />
+                          <span>{category.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Customer Points</h3>
+
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={pointsSearchInput}
+                    onChange={(event) => setPointsSearchInput(event.target.value)}
+                    placeholder="Search email..."
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={state.loading || !serverReady || pointsCustomersLoading}
+                    onClick={() =>
+                      runAction(async () => {
+                        const customers = await refreshPointsCustomers(pointsSearchInput);
+                        return { customers: customers.length, search: pointsSearchInput.trim() || null };
+                      })
+                    }
+                  >
+                    {pointsCustomersLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Refresh Customers
+                  </Button>
+                </div>
+
+                <div className="max-h-56 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                  {pointsCustomers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No customer points accounts found for this server.</p>
+                  ) : (
+                    pointsCustomers.map((customer) => (
+                      <div
+                        key={customer.emailNormalized}
+                        className="rounded-md border border-border/50 bg-card/70 px-3 py-2 text-xs"
+                      >
+                        <p className="font-medium">{customer.emailDisplay}</p>
+                        <p className="text-muted-foreground">
+                          Balance: {customer.balancePoints} | Reserved: {customer.reservedPoints} | Available:{' '}
+                          {customer.availablePoints}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="points-adjust-email">Customer Email</Label>
+                    <Input
+                      id="points-adjust-email"
+                      value={pointsAdjustEmail}
+                      onChange={(event) => setPointsAdjustEmail(event.target.value)}
+                      placeholder="customer@example.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="points-adjust-value">Points</Label>
+                    <Input
+                      id="points-adjust-value"
+                      value={pointsAdjustValueInput}
+                      onChange={(event) => setPointsAdjustValueInput(event.target.value)}
+                      placeholder="10"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={state.loading || !serverReady}
+                    onClick={() =>
+                      runAction(async () => {
+                        const context = requireWorkspaceAndServer({ requireBot: true });
+                        await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                        const points = parseWholePoints(pointsAdjustValueInput);
+
+                        if (!pointsAdjustEmail.trim()) {
+                          throw new Error('Customer email is required.');
+                        }
+
+                        const result = await apiCall(`/api/guilds/${context.discordServerId}/points/adjust`, 'POST', {
+                          tenantId: context.workspaceId,
+                          email: pointsAdjustEmail.trim(),
+                          action: 'add',
+                          points,
+                        });
+                        await refreshPointsCustomers(pointsSearchInput);
+                        return result;
+                      })
+                    }
+                  >
+                    Add Points
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={state.loading || !serverReady}
+                    onClick={() =>
+                      runAction(async () => {
+                        const context = requireWorkspaceAndServer({ requireBot: true });
+                        await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                        const points = parseWholePoints(pointsAdjustValueInput);
+
+                        if (!pointsAdjustEmail.trim()) {
+                          throw new Error('Customer email is required.');
+                        }
+
+                        const result = await apiCall(`/api/guilds/${context.discordServerId}/points/adjust`, 'POST', {
+                          tenantId: context.workspaceId,
+                          email: pointsAdjustEmail.trim(),
+                          action: 'remove',
+                          points,
+                        });
+                        await refreshPointsCustomers(pointsSearchInput);
+                        return result;
+                      })
+                    }
+                  >
+                    Remove Points
+                  </Button>
+                </div>
+              </div>
+
               <Button
                 type="button"
                 disabled={state.loading || !serverReady}
@@ -1225,13 +1627,22 @@ export default function DashboardPage() {
                   runAction(async () => {
                     const context = requireWorkspaceAndServer({ requireBot: true });
                     await ensureGuildLinked(context.workspaceId, context.discordServerId);
+                    const pointValueMinor = parsePointValueMajorToMinor(pointValueMajor);
+                    const normalizedEarnCategoryKeys = [...new Set(pointsEarnCategoryKeys.map(normalizeCategoryKey).filter(Boolean))];
+                    const normalizedRedeemCategoryKeys = [
+                      ...new Set(pointsRedeemCategoryKeys.map(normalizeCategoryKey).filter(Boolean)),
+                    ];
+                    const normalizedStaffRoleIds = normalizeDiscordIdList(selectedStaffRoleIds);
 
                     const result = await apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
                       tenantId: context.workspaceId,
-                      paidLogChannelId: paidLogChannelId || null,
-                      staffRoleIds: selectedStaffRoleIds,
+                      paidLogChannelId: normalizeDiscordId(paidLogChannelId) || null,
+                      staffRoleIds: normalizedStaffRoleIds,
                       defaultCurrency: DEFAULT_CURRENCY,
                       tipEnabled,
+                      pointsEarnCategoryKeys: normalizedEarnCategoryKeys,
+                      pointsRedeemCategoryKeys: normalizedRedeemCategoryKeys,
+                      pointValueMinor,
                       ticketMetadataKey: 'isTicket',
                     });
                     await hydrateContextData();

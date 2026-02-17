@@ -45,6 +45,14 @@ export type SaleDraft = {
   defaultCurrency: string;
   formFields: SaleDraftFormField[];
   answers: Record<string, string>;
+  customerEmailNormalized: string | null;
+  pointsPromptShown: boolean;
+  usePoints: boolean;
+  pointsAvailable: number;
+  pointsMaxRedeemableByAmount: number;
+  pointsReservedIfUsed: number;
+  pointsDiscountMinorIfUsed: number;
+  pointValueMinor: number;
   expiresAt: number;
 };
 
@@ -81,6 +89,14 @@ export function createSaleDraft(input: {
     defaultCurrency: input.defaultCurrency ?? 'GBP',
     formFields: [],
     answers: {},
+    customerEmailNormalized: null,
+    pointsPromptShown: false,
+    usePoints: false,
+    pointsAvailable: 0,
+    pointsMaxRedeemableByAmount: 0,
+    pointsReservedIfUsed: 0,
+    pointsDiscountMinorIfUsed: 0,
+    pointValueMinor: 1,
     expiresAt: Date.now() + DRAFT_TTL_MS,
   };
 

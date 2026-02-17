@@ -100,6 +100,9 @@ export const guildConfigs = mysqlTable(
     staffRoleIds: json('staff_role_ids').$type<string[]>().notNull().default([]),
     defaultCurrency: varchar('default_currency', { length: 3 }).notNull().default('USD'),
     tipEnabled: boolean('tip_enabled').notNull().default(false),
+    pointsEarnCategoryKeys: json('points_earn_category_keys').$type<string[]>().notNull().default([]),
+    pointsRedeemCategoryKeys: json('points_redeem_category_keys').$type<string[]>().notNull().default([]),
+    pointValueMinor: int('point_value_minor').notNull().default(1),
     ticketMetadataKey: varchar('ticket_metadata_key', { length: 64 }).notNull().default('isTicket'),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
@@ -290,6 +293,30 @@ export const orderSessions = mysqlTable(
       .default([]),
     couponCode: varchar('coupon_code', { length: 40 }),
     couponDiscountMinor: int('coupon_discount_minor').notNull().default(0),
+    customerEmailNormalized: varchar('customer_email_normalized', { length: 320 }),
+    pointsReserved: int('points_reserved').notNull().default(0),
+    pointsDiscountMinor: int('points_discount_minor').notNull().default(0),
+    pointsReservationState: mysqlEnum('points_reservation_state', [
+      'none',
+      'reserved',
+      'released_expired',
+      'released_cancelled',
+      'consumed',
+    ])
+      .notNull()
+      .default('none'),
+    pointsConfigSnapshot: json('points_config_snapshot')
+      .$type<{
+        pointValueMinor: number;
+        earnCategoryKeys: string[];
+        redeemCategoryKeys: string[];
+      }>()
+      .notNull()
+      .default({
+        pointValueMinor: 1,
+        earnCategoryKeys: [],
+        redeemCategoryKeys: [],
+      }),
     tipMinor: int('tip_minor').notNull().default(0),
     subtotalMinor: int('subtotal_minor').notNull().default(0),
     totalMinor: int('total_minor').notNull().default(0),
@@ -303,6 +330,51 @@ export const orderSessions = mysqlTable(
     tenantGuildIdx: index('order_sessions_tenant_guild_idx').on(table.tenantId, table.guildId),
     ticketChannelIdx: index('order_sessions_ticket_channel_idx').on(table.ticketChannelId),
     tenantCreatedIdx: index('order_sessions_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const customerPointsAccounts = mysqlTable(
+  'customer_points_accounts',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    emailNormalized: varchar('email_normalized', { length: 320 }).notNull(),
+    emailDisplay: varchar('email_display', { length: 320 }).notNull(),
+    balancePoints: int('balance_points').notNull().default(0),
+    reservedPoints: int('reserved_points').notNull().default(0),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildEmailUnique: uniqueIndex('customer_points_accounts_tenant_guild_email_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.emailNormalized,
+    ),
+    tenantGuildIdx: index('customer_points_accounts_tenant_guild_idx').on(table.tenantId, table.guildId),
+    tenantCreatedIdx: index('customer_points_accounts_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const customerPointsLedger = mysqlTable(
+  'customer_points_ledger',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    emailNormalized: varchar('email_normalized', { length: 320 }).notNull(),
+    deltaPoints: int('delta_points').notNull(),
+    eventType: varchar('event_type', { length: 48 }).notNull(),
+    orderSessionId: varchar('order_session_id', { length: 26 }),
+    actorUserId: varchar('actor_user_id', { length: 26 }),
+    metadata: json('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildIdx: index('customer_points_ledger_tenant_guild_idx').on(table.tenantId, table.guildId),
+    orderSessionIdx: index('customer_points_ledger_order_session_idx').on(table.orderSessionId),
+    tenantCreatedIdx: index('customer_points_ledger_tenant_created_idx').on(table.tenantId, table.createdAt),
   }),
 );
 

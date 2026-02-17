@@ -78,6 +78,11 @@ type StepButton = {
   label: string;
   style: ButtonStyle;
 };
+type DraftFinalizeInteraction = {
+  channel: ModalSubmitInteraction['channel'] | StringSelectMenuInteraction['channel'] | ButtonInteraction['channel'];
+  editReply: (payload: { content: string; components?: any[] }) => Promise<unknown>;
+  inGuild: () => boolean;
+};
 
 function formatMinorCurrency(minor: number, currency: string): string {
   const major = (minor / 100).toFixed(2);
@@ -97,6 +102,17 @@ function getBasketTotalMinor(draft: SaleDraft): number {
   const subtotal = getBasketSubtotalMinor(draft);
   const couponDiscountMinor = getCouponDiscountMinor(draft);
   return Math.max(0, subtotal - couponDiscountMinor + draft.tipMinor);
+}
+
+function resetPointsSelection(draft: SaleDraft): void {
+  draft.customerEmailNormalized = null;
+  draft.pointsPromptShown = false;
+  draft.usePoints = false;
+  draft.pointsAvailable = 0;
+  draft.pointsMaxRedeemableByAmount = 0;
+  draft.pointsReservedIfUsed = 0;
+  draft.pointsDiscountMinorIfUsed = 0;
+  draft.pointValueMinor = 1;
 }
 
 function buildBasketSummaryLines(draft: SaleDraft): string[] {
@@ -316,11 +332,7 @@ async function rebuildFormFieldsFromBasket(draft: SaleDraft): Promise<SaleDraftF
 async function finalizeDraft(input: {
   draftId: string;
   draft: SaleDraft;
-  interaction: {
-    channel: ModalSubmitInteraction['channel'] | StringSelectMenuInteraction['channel'] | ButtonInteraction['channel'];
-    editReply: (payload: { content: string; components?: any[] }) => Promise<unknown>;
-    inGuild: () => boolean;
-  };
+  interaction: DraftFinalizeInteraction;
 }): Promise<void> {
   if (!input.interaction.inGuild() || !input.interaction.channel || input.draft.basketItems.length === 0) {
     await input.interaction.editReply({
@@ -353,6 +365,7 @@ async function finalizeDraft(input: {
     })),
     couponCode: input.draft.couponCode,
     tipMinor: input.draft.tipMinor,
+    usePoints: input.draft.usePoints,
     answers: input.draft.answers,
   });
 
@@ -384,6 +397,91 @@ async function finalizeDraft(input: {
   await input.interaction.editReply({
     content: `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
     components: [],
+  });
+}
+
+async function maybePromptPointsBeforeFinalize(input: {
+  draftId: string;
+  draft: SaleDraft;
+  interaction: DraftFinalizeInteraction;
+}): Promise<void> {
+  const preview = await saleService.previewPointsForDraft({
+    tenantId: input.draft.tenantId,
+    guildId: input.draft.guildId,
+    basketItems: input.draft.basketItems.map((item) => ({
+      category: item.category,
+      priceMinor: item.priceMinor,
+    })),
+    couponCode: input.draft.couponCode,
+    tipMinor: input.draft.tipMinor,
+    answers: input.draft.answers,
+  });
+
+  if (preview.isErr()) {
+    await input.interaction.editReply({
+      content: preview.error.message,
+      components: [],
+    });
+    return;
+  }
+
+  const points = preview.value;
+  if (
+    !points.canRedeem ||
+    points.availablePoints <= 0 ||
+    points.pointsReservedIfUsed <= 0 ||
+    points.pointsDiscountMinorIfUsed <= 0
+  ) {
+    resetPointsSelection(input.draft);
+    input.draft.customerEmailNormalized = points.emailNormalized;
+    input.draft.pointValueMinor = points.pointValueMinor;
+    input.draft.pointsAvailable = points.availablePoints;
+    updateSaleDraft(input.draft);
+
+    await input.interaction.editReply({
+      content: 'Creating checkout link...',
+      components: [],
+    });
+
+    await finalizeDraft(input);
+    return;
+  }
+
+  const currency = input.draft.basketItems[0]?.currency ?? input.draft.defaultCurrency;
+  input.draft.customerEmailNormalized = points.emailNormalized;
+  input.draft.pointsPromptShown = true;
+  input.draft.usePoints = false;
+  input.draft.pointsAvailable = points.availablePoints;
+  input.draft.pointsMaxRedeemableByAmount = points.maxRedeemablePointsByAmount;
+  input.draft.pointsReservedIfUsed = points.pointsReservedIfUsed;
+  input.draft.pointsDiscountMinorIfUsed = points.pointsDiscountMinorIfUsed;
+  input.draft.pointValueMinor = points.pointValueMinor;
+  updateSaleDraft(input.draft);
+
+  await input.interaction.editReply({
+    content: [
+      'Step 8/8: Use Points?',
+      ...buildBasketSummaryLines(input.draft),
+      `Available points: ${points.availablePoints}`,
+      `Point value: 1 point = ${formatMinorCurrency(points.pointValueMinor, currency)}`,
+      `Redeemable now: ${points.pointsReservedIfUsed} point(s)`,
+      `Discount if used: -${formatMinorCurrency(points.pointsDiscountMinorIfUsed, currency)}`,
+      'Would the customer like to apply points to this checkout?',
+    ].join('\n'),
+    components: [
+      buildButtonRow([
+        {
+          customId: `sale:action:${input.draft.id}:points_use`,
+          label: 'Use Points',
+          style: ButtonStyle.Primary,
+        },
+        {
+          customId: `sale:action:${input.draft.id}:points_skip`,
+          label: 'Continue Without Points',
+          style: ButtonStyle.Secondary,
+        },
+      ]),
+    ],
   });
 }
 
@@ -438,6 +536,7 @@ async function renderCategorySelectionStep(
   draft.productId = null;
   draft.variantId = null;
   draft.variantOptions = [];
+  resetPointsSelection(draft);
   updateSaleDraft(draft);
 
   const row = buildSelectRow({
@@ -693,7 +792,7 @@ async function renderAnswerCollectionStep(
       components: [],
     });
 
-    await finalizeDraft({
+    await maybePromptPointsBeforeFinalize({
       draftId: draft.id,
       draft,
       interaction: {
@@ -891,6 +990,7 @@ async function handleVariantSelection(
     priceMinor: variant.priceMinor,
     currency: variant.currency,
   });
+  resetPointsSelection(draft);
   updateSaleDraft(draft);
 
   await renderBasketDecisionStep(interaction, draft);
@@ -1051,6 +1151,7 @@ export async function handleSaleAction(interaction: Interaction): Promise<void> 
     }
 
     draft.formFields = await rebuildFormFieldsFromBasket(draft);
+    resetPointsSelection(draft);
     updateSaleDraft(draft);
     await renderVariantSelectionStep(interaction, draft);
     return;
@@ -1077,12 +1178,15 @@ export async function handleSaleAction(interaction: Interaction): Promise<void> 
   if (action === 'coupon_skip') {
     draft.couponCode = null;
     draft.couponDiscountMinor = 0;
+    resetPointsSelection(draft);
     updateSaleDraft(draft);
     await renderAnswerCollectionStep(interaction, draft);
     return;
   }
 
   if (action === 'coupon_continue') {
+    resetPointsSelection(draft);
+    updateSaleDraft(draft);
     await renderAnswerCollectionStep(interaction, draft);
     return;
   }
@@ -1113,6 +1217,49 @@ export async function handleSaleAction(interaction: Interaction): Promise<void> 
 
   if (action === 'tip_skip') {
     draft.tipMinor = 0;
+    resetPointsSelection(draft);
+    updateSaleDraft(draft);
+
+    await interaction.update({
+      content: 'Checking points...',
+      components: [],
+    });
+
+    await maybePromptPointsBeforeFinalize({
+      draftId: draft.id,
+      draft,
+      interaction: {
+        channel: interaction.channel,
+        editReply: async (payload) => interaction.editReply(payload),
+        inGuild: () => interaction.inGuild(),
+      },
+    });
+    return;
+  }
+
+  if (action === 'points_use') {
+    draft.usePoints = true;
+    updateSaleDraft(draft);
+
+    await interaction.update({
+      content: 'Creating checkout link...',
+      components: [],
+    });
+
+    await finalizeDraft({
+      draftId: draft.id,
+      draft,
+      interaction: {
+        channel: interaction.channel,
+        editReply: async (payload) => interaction.editReply(payload),
+        inGuild: () => interaction.inGuild(),
+      },
+    });
+    return;
+  }
+
+  if (action === 'points_skip') {
+    draft.usePoints = false;
     updateSaleDraft(draft);
 
     await interaction.update({
@@ -1163,6 +1310,7 @@ async function handleAnswersModal(interaction: ModalSubmitInteraction, draft: Sa
     draft.answers[field.fieldKey] = normalizedValue;
   }
 
+  resetPointsSelection(draft);
   updateSaleDraft(draft);
 
   if (draft.tipEnabled) {
@@ -1190,7 +1338,12 @@ async function handleAnswersModal(interaction: ModalSubmitInteraction, draft: Sa
     return;
   }
 
-  await finalizeDraft({
+  await interaction.editReply({
+    content: 'Checking points...',
+    components: [],
+  });
+
+  await maybePromptPointsBeforeFinalize({
     draftId: draft.id,
     draft,
     interaction: {
@@ -1257,6 +1410,7 @@ async function handleCouponModal(interaction: ModalSubmitInteraction, draft: Sal
 
   draft.couponCode = coupon.code;
   draft.couponDiscountMinor = effectiveCouponDiscountMinor;
+  resetPointsSelection(draft);
   updateSaleDraft(draft);
 
   await interaction.editReply({
@@ -1305,9 +1459,15 @@ async function handleTipModal(interaction: ModalSubmitInteraction, draft: SaleDr
   }
 
   draft.tipMinor = tipMinor;
+  resetPointsSelection(draft);
   updateSaleDraft(draft);
 
-  await finalizeDraft({
+  await interaction.editReply({
+    content: 'Checking points...',
+    components: [],
+  });
+
+  await maybePromptPointsBeforeFinalize({
     draftId: draft.id,
     draft,
     interaction: {

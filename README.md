@@ -13,7 +13,7 @@ Multi-tenant Discord bot + web dashboard for ticket-based sales with WooCommerce
 ## Workspace Layout
 
 - `apps/web-app`: Next.js dashboard + REST/webhook API routes.
-- `apps/bot-worker`: Discord interaction worker with `/sale` + component/modal flow.
+- `apps/bot-worker`: Discord interaction worker with `/sale`, `/points`, and component/modal flows.
 - `packages/core`: shared domain/config/security/services/repositories.
 - `drizzle/migrations`: SQL migrations.
 
@@ -56,8 +56,14 @@ Copy `.env.example` to `.env` and fill values.
 - A Discord server is now bound to exactly one workspace at a time; reconnecting a server moves it to the current workspace mapping.
 - Server settings now use Discord channel/role selectors instead of manual ID fields.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
+- Server settings now include rewards configuration:
+  - `point value` (minor currency based)
+  - categories that `earn` points
+  - categories where points can be `redeemed`
+- Dashboard now includes customer points management (list balances, manual add/remove, search).
 - Workspace deletion is available from dashboard for owner/super-admin cleanup.
 - Coupons can be created, edited, and deleted per server from dashboard (`code`, fixed discount amount, active flag).
+- Dashboard resolves the linked workspace for a selected Discord server before loading server settings.
 
 ## Ticket Sale Flow
 
@@ -69,6 +75,9 @@ Copy `.env.example` to `.env` and fill values.
 - Bot gathers custom form answers through modals.
 - Optional tip prompt (yes/no) can be enabled per server; yes-path collects custom GBP tip amount.
 - Email is now a mandatory system question (always first, always required) for all category form sets.
+- Before checkout creation, bot checks customer points by email and prompts to use points when redeemable points are available.
+- Points are reserved at checkout creation and only deducted after successful payment confirmation.
+- Paid confirmation message now includes updated points balance.
 - Bot creates `order_session` and sends a direct checkout hyperlink message in the ticket (`Click here to pay`).
 - Checkout amount now reflects basket total minus coupon plus tip.
 - If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
@@ -79,6 +88,12 @@ Copy `.env.example` to `.env` and fill values.
 - API verifies signature, dedupes, retries on failure, fetches Woo order notes.
 - Bot posts paid-order details to configured paid-log channel (sensitive fields masked).
 
+## Points Command
+
+- `/points email:<address>` returns store-scoped points balance for that email.
+- Response is ephemeral so only the requester can see it, even in public channels.
+- Points are scoped to the connected workspace + Discord server (no cross-merchant sharing).
+
 ## WordPress / WooCommerce Setup
 
 See `docs/wordpress-setup.md` and `docs/wordpress-snippet.php`.
@@ -86,6 +101,10 @@ See `docs/wordpress-setup.md` and `docs/wordpress-snippet.php`.
 ## Basket / Coupon / Tip Behavior
 
 See `docs/coupons-basket-tip.md`.
+
+## Points / Rewards Behavior
+
+See `docs/points-rewards.md`.
 
 ## Production Deployment Guide
 

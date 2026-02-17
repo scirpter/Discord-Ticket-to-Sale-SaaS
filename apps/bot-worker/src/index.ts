@@ -2,6 +2,7 @@
 import { getEnv, logger } from '@voodoo/core';
 
 import { saleCommand } from './commands/sale.js';
+import { pointsCommand } from './commands/points.js';
 import {
   handleSaleAction,
   handleSaleBack,
@@ -24,6 +25,7 @@ const client = new Client({
 
 const commands = new Collection<string, Command>();
 commands.set(saleCommand.data.name, saleCommand as unknown as Command);
+commands.set(pointsCommand.data.name, pointsCommand as unknown as Command);
 
 client.once(Events.ClientReady, () => {
   logger.info({ botUser: client.user?.tag }, 'bot-worker ready');

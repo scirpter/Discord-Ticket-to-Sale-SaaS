@@ -37,6 +37,9 @@ export type GuildConfigRecord = {
   staffRoleIds: string[];
   defaultCurrency: string;
   tipEnabled: boolean;
+  pointsEarnCategoryKeys: string[];
+  pointsRedeemCategoryKeys: string[];
+  pointValueMinor: number;
   ticketMetadataKey: string;
 };
 
@@ -217,6 +220,9 @@ export class TenantRepository {
           staffRoleIds: [],
           defaultCurrency: 'GBP',
           tipEnabled: false,
+          pointsEarnCategoryKeys: [],
+          pointsRedeemCategoryKeys: [],
+          pointValueMinor: 1,
           ticketMetadataKey: 'isTicket',
         });
       }
@@ -299,6 +305,9 @@ export class TenantRepository {
       staffRoleIds: row.staffRoleIds,
       defaultCurrency: row.defaultCurrency,
       tipEnabled: row.tipEnabled,
+      pointsEarnCategoryKeys: row.pointsEarnCategoryKeys,
+      pointsRedeemCategoryKeys: row.pointsRedeemCategoryKeys,
+      pointValueMinor: row.pointValueMinor,
       ticketMetadataKey: row.ticketMetadataKey,
     };
   }
@@ -310,6 +319,9 @@ export class TenantRepository {
     staffRoleIds: string[];
     defaultCurrency: string;
     tipEnabled: boolean;
+    pointsEarnCategoryKeys: string[];
+    pointsRedeemCategoryKeys: string[];
+    pointValueMinor: number;
     ticketMetadataKey: string;
   }): Promise<GuildConfigRecord> {
     const existing = await this.db.query.guildConfigs.findFirst({
@@ -324,6 +336,9 @@ export class TenantRepository {
           staffRoleIds: input.staffRoleIds,
           defaultCurrency: input.defaultCurrency,
           tipEnabled: input.tipEnabled,
+          pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
+          pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
+          pointValueMinor: input.pointValueMinor,
           ticketMetadataKey: input.ticketMetadataKey,
           updatedAt: new Date(),
         })
@@ -337,6 +352,9 @@ export class TenantRepository {
         staffRoleIds: input.staffRoleIds,
         defaultCurrency: input.defaultCurrency,
         tipEnabled: input.tipEnabled,
+        pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
+        pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
+        pointValueMinor: input.pointValueMinor,
         ticketMetadataKey: input.ticketMetadataKey,
       };
     }
@@ -350,6 +368,9 @@ export class TenantRepository {
       staffRoleIds: input.staffRoleIds,
       defaultCurrency: input.defaultCurrency,
       tipEnabled: input.tipEnabled,
+      pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
+      pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
+      pointValueMinor: input.pointValueMinor,
       ticketMetadataKey: input.ticketMetadataKey,
     });
 
@@ -361,6 +382,9 @@ export class TenantRepository {
       staffRoleIds: input.staffRoleIds,
       defaultCurrency: input.defaultCurrency,
       tipEnabled: input.tipEnabled,
+      pointsEarnCategoryKeys: input.pointsEarnCategoryKeys,
+      pointsRedeemCategoryKeys: input.pointsRedeemCategoryKeys,
+      pointValueMinor: input.pointValueMinor,
       ticketMetadataKey: input.ticketMetadataKey,
     };
   }
