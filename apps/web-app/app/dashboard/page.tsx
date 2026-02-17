@@ -1521,12 +1521,15 @@ export default function DashboardPage() {
 
               <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Customer Points</h3>
+                <p className="text-xs text-muted-foreground">
+                  Leave search empty to show the 3 most recently updated customers.
+                </p>
 
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
                     value={pointsSearchInput}
                     onChange={(event) => setPointsSearchInput(event.target.value)}
-                    placeholder="Search email..."
+                    placeholder="Search customer email..."
                   />
                   <Button
                     type="button"

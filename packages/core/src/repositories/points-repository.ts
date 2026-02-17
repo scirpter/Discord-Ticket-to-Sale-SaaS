@@ -1,4 +1,4 @@
-import { and, asc, eq, like, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, like, or, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
@@ -86,7 +86,7 @@ export class PointsRepository {
         eq(customerPointsAccounts.guildId, input.guildId),
         searchFilter ?? undefined,
       ),
-      orderBy: [asc(customerPointsAccounts.emailNormalized)],
+      orderBy: [desc(customerPointsAccounts.updatedAt), asc(customerPointsAccounts.emailNormalized)],
       limit: input.limit,
     });
 

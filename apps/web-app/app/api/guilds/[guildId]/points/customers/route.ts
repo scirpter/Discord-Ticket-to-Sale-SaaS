@@ -22,12 +22,15 @@ export async function GET(
     }
 
     const search = request.nextUrl.searchParams.get('search');
+    const normalizedSearch = search?.trim() ?? '';
+    const limit = normalizedSearch.length > 0 ? 100 : 3;
     const { guildId } = await context.params;
 
     const result = await pointsService.listCustomers(auth.session, {
       tenantId,
       guildId,
-      search,
+      search: normalizedSearch || null,
+      limit,
     });
     if (result.isErr()) {
       return NextResponse.json({ error: result.error.message, code: result.error.code }, { status: result.error.statusCode });
