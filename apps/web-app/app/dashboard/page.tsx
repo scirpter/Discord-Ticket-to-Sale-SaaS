@@ -781,19 +781,7 @@ export default function DashboardPage() {
         );
       }
     } catch {
-      setPaidLogChannelId('');
-      setSelectedStaffRoleIds([]);
-      setDefaultCurrency(DEFAULT_CURRENCY);
-      setTipEnabled(false);
-      setPointsEarnCategoryKeys([]);
-      setPointsRedeemCategoryKeys([]);
-      setPointValueMajor(DEFAULT_POINT_VALUE_MAJOR);
-      setReferralRewardMajor(DEFAULT_REFERRAL_REWARD_MAJOR);
-      setVariantReferralRewardInput(DEFAULT_REFERRAL_REWARD_MAJOR);
-      setReferralRewardCategoryKeys([]);
-      setReferralLogChannelId('');
-      setReferralThankYouTemplate(DEFAULT_REFERRAL_THANK_YOU_TEMPLATE);
-      setReferralSubmissionTemplate(DEFAULT_REFERRAL_SUBMISSION_TEMPLATE);
+      // Keep current values on transient fetch failures to avoid clearing the form after save.
     }
 
     try {
@@ -1934,7 +1922,7 @@ export default function DashboardPage() {
                     ];
                     const normalizedStaffRoleIds = normalizeDiscordIdList(selectedStaffRoleIds);
 
-                    const result = await apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
+                    const result = (await apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
                       tenantId: context.workspaceId,
                       paidLogChannelId: normalizeDiscordId(paidLogChannelId) || null,
                       staffRoleIds: normalizedStaffRoleIds,
@@ -1951,8 +1939,53 @@ export default function DashboardPage() {
                       referralSubmissionTemplate:
                         referralSubmissionTemplate.trim() || DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
                       ticketMetadataKey: 'isTicket',
-                    });
-                    await hydrateContextData();
+                    })) as {
+                      config?: {
+                        paidLogChannelId: string | null;
+                        staffRoleIds: string[];
+                        defaultCurrency: string;
+                        tipEnabled: boolean;
+                        pointsEarnCategoryKeys: string[];
+                        pointsRedeemCategoryKeys: string[];
+                        pointValueMinor: number;
+                        referralRewardMinor: number;
+                        referralRewardCategoryKeys: string[];
+                        referralLogChannelId: string | null;
+                        referralThankYouTemplate: string;
+                        referralSubmissionTemplate: string;
+                      };
+                    };
+                    if (result.config) {
+                      setPaidLogChannelId(normalizeDiscordId(result.config.paidLogChannelId));
+                      setSelectedStaffRoleIds(normalizeDiscordIdList(result.config.staffRoleIds));
+                      setDefaultCurrency(result.config.defaultCurrency || DEFAULT_CURRENCY);
+                      setTipEnabled(Boolean(result.config.tipEnabled));
+                      setPointsEarnCategoryKeys(
+                        Array.isArray(result.config.pointsEarnCategoryKeys)
+                          ? result.config.pointsEarnCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+                          : [],
+                      );
+                      setPointsRedeemCategoryKeys(
+                        Array.isArray(result.config.pointsRedeemCategoryKeys)
+                          ? result.config.pointsRedeemCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+                          : [],
+                      );
+                      setPointValueMajor(formatPointValueMinorToMajor(result.config.pointValueMinor));
+                      const nextReferralRewardMajor = formatMinorToMajor(result.config.referralRewardMinor);
+                      setReferralRewardMajor(nextReferralRewardMajor);
+                      setReferralRewardCategoryKeys(
+                        Array.isArray(result.config.referralRewardCategoryKeys)
+                          ? result.config.referralRewardCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+                          : [],
+                      );
+                      setReferralLogChannelId(normalizeDiscordId(result.config.referralLogChannelId));
+                      setReferralThankYouTemplate(
+                        result.config.referralThankYouTemplate || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+                      );
+                      setReferralSubmissionTemplate(
+                        result.config.referralSubmissionTemplate || DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
+                      );
+                    }
                     return result;
                   })
                 }
