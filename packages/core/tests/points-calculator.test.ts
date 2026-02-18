@@ -89,4 +89,20 @@ describe('points calculator', () => {
     expect(result.pointsEarned).toBe(5);
     expect(result.totalMinor).toBe(500);
   });
+
+  it('earns one point per major currency unit regardless of point value', () => {
+    const result = calculatePointsOrderTotals({
+      lines: [{ category: 'earn', priceMinor: 10_500 }],
+      couponDiscountMinor: 0,
+      tipMinor: 0,
+      pointValueMinor: 10,
+      earnCategoryKeys: ['earn'],
+      redeemCategoryKeys: ['earn'],
+      availablePoints: 0,
+      usePoints: false,
+    });
+
+    expect(result.earnPoolMinor).toBe(10_500);
+    expect(result.pointsEarned).toBe(105);
+  });
 });

@@ -48,7 +48,7 @@
 5. If customer opts in, reserved points = `min(availablePoints, maxRedeemablePoints)`.
 6. Points discount is allocated proportionally across redeemable lines only.
 7. Earn pool is calculated from net line amounts in earn-enabled categories only.
-8. Earned points = `floor(earnPoolMinor / pointValueMinor)`.
+8. Earned points = `floor(earnPoolMinor / 100)` (1 point per 1.00 in store currency).
 9. Final total = `subtotal - coupon - points + tip`.
 
 Rules:

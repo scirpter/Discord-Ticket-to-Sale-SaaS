@@ -58,12 +58,13 @@ Copy `.env.example` to `.env` and fill values.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Server settings now include rewards configuration:
   - `point value` (minor currency based)
+  - earn rate is fixed at `1 point per 1.00` spent (earn-enabled categories)
   - categories that `earn` points
   - categories where points can be `redeemed`
   - categories eligible for `referral rewards`
   - `referral reward` GBP fallback amount (used only when eligible purchased variants have no per-variant referral reward)
   - `referral submission reply template` (private `/refer` success response)
-  - `referral log channel` (optional)
+  - `referral log channel` (optional, payout events only)
   - `referral thank-you template` for DM placeholders
 - Product variants now support per-variant referral reward amounts in the product builder.
 - Dashboard now includes customer points management (list balances, manual add/remove, search).

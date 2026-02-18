@@ -11,6 +11,7 @@
 In dashboard **Server Sales Settings**:
 
 - Set `Value of 1 point` (major currency input, stored as minor integer).
+  - This controls redemption value (discount per point), not how many points are earned per 1.00 spent.
 - Select categories that `earn` points.
 - Select categories where points can be `redeemed`.
 - Save settings.
@@ -31,6 +32,7 @@ Dashboard **Customer Points** supports:
 3. If eligible and available, customer gets a `Use Points` choice.
 4. If chosen, points are reserved and checkout total is reduced.
 5. Payment confirmation consumes reservation and then applies earned points.
+6. Earned points are based on spend: `1 point per 1.00` in store currency on earn-eligible net lines.
 
 ## Reservation Lifecycle
 
@@ -58,7 +60,7 @@ Dashboard **Customer Points** supports:
   - categories eligible for referral rewards (`referral_reward_category_keys`)
   - `referral reward` fallback amount in GBP (`referral_reward_minor`)
   - `/refer` success reply template (`referral_submission_template`)
-  - `referral log channel` (optional)
+  - `referral log channel` (optional, rewarded referral payouts only)
   - `thank-you DM template` with placeholders
 - Product variants set `referral_reward_minor` per variant.
 - Reward conversion uses snapshots from checkout creation:

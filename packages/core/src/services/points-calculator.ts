@@ -26,12 +26,18 @@ export type PointsOrderCalculation = {
   lineBreakdown: PointsCalcLineBreakdown[];
 };
 
+const MINOR_PER_MAJOR = 100;
+
 function toNonNegativeInt(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
 
   return Math.max(0, Math.floor(value));
+}
+
+function calculateEarnedPointsFromMinor(earnPoolMinor: number): number {
+  return Math.floor(toNonNegativeInt(earnPoolMinor) / MINOR_PER_MAJOR);
 }
 
 export function normalizeCategoryKey(value: string): string {
@@ -240,7 +246,7 @@ export function calculatePointsOrderTotals(input: {
     redeemCategoryKeys: input.redeemCategoryKeys,
   });
   const earnPoolMinor = calculateEarnPoolMinor(withPoints.lineBreakdown, input.earnCategoryKeys);
-  const pointsEarned = Math.floor(earnPoolMinor / pointValueMinor);
+  const pointsEarned = calculateEarnedPointsFromMinor(earnPoolMinor);
   const totalMinor = Math.max(
     0,
     withPoints.subtotalMinor - withPoints.couponDiscountMinor - withPoints.pointsDiscountMinor + tipMinor,
@@ -265,7 +271,6 @@ export function calculateEarnFromAppliedDiscounts(input: {
   lines: PointsCalcLineInput[];
   couponDiscountMinor: number;
   pointsDiscountMinor: number;
-  pointValueMinor: number;
   earnCategoryKeys: string[];
   redeemCategoryKeys: string[];
 }): {
@@ -273,7 +278,6 @@ export function calculateEarnFromAppliedDiscounts(input: {
   pointsEarned: number;
   lineBreakdown: PointsCalcLineBreakdown[];
 } {
-  const pointValueMinor = Math.max(1, toNonNegativeInt(input.pointValueMinor));
   const result = buildLineBreakdown({
     lines: input.lines,
     couponDiscountMinor: input.couponDiscountMinor,
@@ -284,7 +288,7 @@ export function calculateEarnFromAppliedDiscounts(input: {
 
   return {
     earnPoolMinor,
-    pointsEarned: Math.floor(earnPoolMinor / pointValueMinor),
+    pointsEarned: calculateEarnedPointsFromMinor(earnPoolMinor),
     lineBreakdown: result.lineBreakdown,
   };
 }

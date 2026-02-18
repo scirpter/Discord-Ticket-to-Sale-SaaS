@@ -1619,7 +1619,9 @@ export default function DashboardPage() {
                     placeholder="0.01"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Example: 0.01 means 1 point = 0.01 {defaultCurrency}.
+                    Example: 0.01 means 1 point = 0.01 {defaultCurrency}. Earn rate is fixed at 1 point per 1.00
+                    {' '}
+                    {defaultCurrency} spent on earn-eligible items.
                   </p>
                 </div>
 

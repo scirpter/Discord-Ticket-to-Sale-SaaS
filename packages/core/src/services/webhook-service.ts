@@ -1172,7 +1172,6 @@ export class WebhookService {
       })),
       couponDiscountMinor: input.orderSession.couponDiscountMinor,
       pointsDiscountMinor: input.orderSession.pointsDiscountMinor,
-      pointValueMinor: snapshot.pointValueMinor,
       earnCategoryKeys: snapshot.earnCategoryKeys,
       redeemCategoryKeys: snapshot.redeemCategoryKeys,
     });
@@ -1244,21 +1243,24 @@ export class WebhookService {
     referralResult: ReferralRewardResult;
     orderSessionId: string;
   }): Promise<void> {
-    let dmStatusLine = 'Thank-you DM: not sent';
-
-    if (input.referralResult.status === 'rewarded') {
-      const dm = await this.sendReferralThankYouDm({
-        botTokens: input.botTokens,
-        userId: input.referralResult.referrerDiscordUserId,
-        content: input.referralResult.thankYouMessage,
-      });
-      dmStatusLine = dm.sent
-        ? `Thank-you DM: sent to <@${input.referralResult.referrerDiscordUserId}>`
-        : `Thank-you DM: failed (${dm.errorMessage ?? 'unknown'})`;
+    // Referral log channel should contain actual referral payouts only.
+    // Non-reward outcomes are already included in the paid-order log message.
+    if (input.referralResult.status !== 'rewarded') {
+      return;
     }
 
+    let dmStatusLine = 'Thank-you DM: not sent';
+    const dm = await this.sendReferralThankYouDm({
+      botTokens: input.botTokens,
+      userId: input.referralResult.referrerDiscordUserId,
+      content: input.referralResult.thankYouMessage,
+    });
+    dmStatusLine = dm.sent
+      ? `Thank-you DM: sent to <@${input.referralResult.referrerDiscordUserId}>`
+      : `Thank-you DM: failed (${dm.errorMessage ?? 'unknown'})`;
+
     if (!input.referralLogChannelId) {
-      if (input.referralResult.status === 'rewarded' && dmStatusLine.includes('failed')) {
+      if (dmStatusLine.includes('failed')) {
         logger.warn(
           {
             provider: input.provider,
