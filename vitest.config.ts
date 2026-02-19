@@ -2,7 +2,7 @@
 
 export default defineConfig({
   test: {
-    include: ['packages/core/tests/**/*.test.ts'],
+    include: ['packages/core/tests/**/*.test.ts', 'apps/web-app/**/*.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',

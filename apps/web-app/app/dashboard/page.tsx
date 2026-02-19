@@ -1,5 +1,8 @@
 'use client';
 
+import 'driver.js/dist/driver.css';
+
+import { driver } from 'driver.js';
 import {
   Activity,
   AlertCircle,
@@ -15,8 +18,9 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { TutorialLaunchModal } from '@/components/dashboard/tutorial-launch-modal';
 import { ModeToggle } from '@/components/mode-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,6 +30,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  DASHBOARD_TUTORIAL_STORAGE_KEY,
+  buildDashboardTutorialCookie,
+  buildDashboardTutorialSteps,
+  hasDashboardTutorialMarker,
+} from '@/lib/dashboard-tutorial';
 import { cn } from '@/lib/utils';
 
 type FieldType = 'short_text' | 'long_text' | 'email' | 'number';
@@ -385,6 +395,8 @@ export default function DashboardPage() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [sessionError, setSessionError] = useState('');
+  const [isTutorialPromptOpen, setIsTutorialPromptOpen] = useState(false);
+  const tutorialDriverRef = useRef<ReturnType<typeof driver> | null>(null);
 
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [createTenantName, setCreateTenantName] = useState('');
@@ -584,6 +596,62 @@ export default function DashboardPage() {
       });
     }
   }, []);
+
+  const markTutorialSeen = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(DASHBOARD_TUTORIAL_STORAGE_KEY, '1');
+    document.cookie = buildDashboardTutorialCookie({
+      secure: window.location.protocol === 'https:',
+    });
+  }, []);
+
+  const runDashboardTutorial = useCallback(
+    (options?: { markSeen?: boolean }) => {
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      if (options?.markSeen !== false) {
+        markTutorialSeen();
+      }
+
+      setIsTutorialPromptOpen(false);
+      tutorialDriverRef.current?.destroy();
+
+      const steps = buildDashboardTutorialSteps({ isSuperAdmin }).map((step) => {
+        if (typeof step.element === 'string' && !document.querySelector(step.element)) {
+          const { element: _missingElement, ...stepWithoutElement } = step;
+          return stepWithoutElement;
+        }
+
+        return step;
+      });
+
+      const tutorialDriver = driver({
+        animate: true,
+        smoothScroll: true,
+        showProgress: true,
+        showButtons: ['previous', 'next', 'close'],
+        prevBtnText: 'Back',
+        nextBtnText: 'Next',
+        doneBtnText: 'Finish Tutorial',
+        steps,
+        onPopoverRender: (popover) => {
+          popover.closeButton.textContent = 'Skip Tutorial';
+        },
+        onDestroyed: () => {
+          tutorialDriverRef.current = null;
+        },
+      });
+
+      tutorialDriverRef.current = tutorialDriver;
+      tutorialDriver.drive();
+    },
+    [isSuperAdmin, markTutorialSeen],
+  );
 
   const loadSession = useCallback(async () => {
     setSessionLoading(true);
@@ -851,6 +919,29 @@ export default function DashboardPage() {
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (sessionLoading || sessionError) {
+      setIsTutorialPromptOpen(false);
+      return;
+    }
+
+    const localMarker = window.localStorage.getItem(DASHBOARD_TUTORIAL_STORAGE_KEY);
+    const hasSeenTutorial = hasDashboardTutorialMarker(document.cookie, localMarker);
+    setIsTutorialPromptOpen(!hasSeenTutorial);
+  }, [sessionError, sessionLoading]);
+
+  useEffect(
+    () => () => {
+      tutorialDriverRef.current?.destroy();
+      tutorialDriverRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1316,11 +1407,20 @@ export default function DashboardPage() {
 
   return (
     <main className="relative min-h-screen overflow-x-hidden pb-10">
+      {isTutorialPromptOpen ? (
+        <TutorialLaunchModal
+          onRunTutorial={() => runDashboardTutorial({ markSeen: true })}
+          onSkipTutorial={() => {
+            markTutorialSeen();
+            setIsTutorialPromptOpen(false);
+          }}
+        />
+      ) : null}
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(45rem_30rem_at_10%_-10%,rgba(56,189,248,0.25),transparent),radial-gradient(40rem_30rem_at_90%_0%,rgba(20,184,166,0.2),transparent),radial-gradient(35rem_30rem_at_50%_120%,rgba(249,115,22,0.16),transparent)]" />
 
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-3">
+          <div className="space-y-3" data-tutorial="dashboard-title">
             <Badge variant="secondary" className="border border-border/60 bg-card/80 px-3 py-1 text-[11px] uppercase">
               Multi-Tenant Sales Dashboard
             </Badge>
@@ -1333,7 +1433,15 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              data-tutorial="run-tutorial-button"
+              onClick={() => runDashboardTutorial({ markSeen: true })}
+            >
+              Run Tutorial
+            </Button>
             <Badge variant={isSuperAdmin ? 'default' : 'outline'} className="px-3 py-1">
               {isSuperAdmin ? 'Super Admin Session' : 'Tenant Session'}
             </Badge>
@@ -1402,12 +1510,18 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowCreateWorkspace((current) => !current)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-tutorial="workspace-create-toggle"
+                  onClick={() => setShowCreateWorkspace((current) => !current)}
+                >
                   {showCreateWorkspace ? 'Cancel New Workspace' : 'Create New Workspace'}
                 </Button>
                 <Button
                   type="button"
                   variant="destructive"
+                  data-tutorial="workspace-delete"
                   disabled={state.loading || !tenantId}
                   onClick={() =>
                     runAction(async () => {
@@ -1484,7 +1598,10 @@ export default function DashboardPage() {
               ) : null}
 
               {guildResourcesLoading ? (
-                <div className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
+                <div
+                  data-tutorial="bot-install-status"
+                  className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground"
+                >
                   <Loader2 className="size-4 animate-spin" />
                   Checking bot status and loading channels/roles...
                 </div>
@@ -1493,7 +1610,7 @@ export default function DashboardPage() {
               {guildResourcesError ? <p className="text-xs text-destructive">{guildResourcesError}</p> : null}
 
               {guildResources && !guildResources.botInGuild ? (
-                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3">
+                <div data-tutorial="bot-install-status" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3">
                   <p className="text-sm text-destructive">
                     Bot is not in <strong>{guildResources.guild.name}</strong>. Add the bot first, then continue.
                   </p>
@@ -1508,13 +1625,16 @@ export default function DashboardPage() {
               ) : null}
 
               {guildResources?.botInGuild ? (
-                <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+                <div
+                  data-tutorial="bot-install-status"
+                  className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-200"
+                >
                   Bot is installed in this server.
                   {guildLinking ? ' Linking workspace...' : ' Workspace link is managed automatically.'}
                 </div>
               ) : null}
 
-              <div className="rounded-lg border border-border/60 bg-secondary/35 p-3">
+              <div data-tutorial="context-preview" className="rounded-lg border border-border/60 bg-secondary/35 p-3">
                 <p className="mb-2 text-xs font-medium text-muted-foreground">Current Context</p>
                 <pre className="whitespace-pre-wrap text-[11px] text-muted-foreground">
                   {JSON.stringify(contextPreview, null, 2)}
@@ -1558,7 +1678,7 @@ export default function DashboardPage() {
                 </select>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2" data-tutorial="staff-roles">
                 <Label>Staff Roles (can run /sale)</Label>
                 {!serverReady ? (
                   <p className="text-xs text-muted-foreground">Add bot to server first.</p>
@@ -1641,7 +1761,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2" data-tutorial="referral-categories">
                   <Label>Categories eligible for referral rewards</Label>
                   {pointsCategoryOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
@@ -1723,7 +1843,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2" data-tutorial="points-earn-categories">
                   <Label>Categories that earn points</Label>
                   {pointsCategoryOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
@@ -1744,7 +1864,7 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2" data-tutorial="points-redeem-categories">
                   <Label>Categories where points can be redeemed</Label>
                   {pointsCategoryOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
@@ -1775,7 +1895,7 @@ export default function DashboardPage() {
                   Leave search empty to show the 3 most recently updated customers.
                 </p>
 
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-col gap-2 sm:flex-row" data-tutorial="customer-points-search">
                   <Input
                     value={pointsSearchInput}
                     onChange={(event) => setPointsSearchInput(event.target.value)}
@@ -1899,6 +2019,7 @@ export default function DashboardPage() {
 
               <Button
                 type="button"
+                data-tutorial="save-server-settings"
                 disabled={state.loading || !serverReady}
                 onClick={() =>
                   runAction(async () => {
@@ -2030,6 +2151,7 @@ export default function DashboardPage() {
 
               <Button
                 type="button"
+                data-tutorial="save-voodoo"
                 disabled={state.loading || !serverReady}
                 onClick={() =>
                   runAction(async () => {
@@ -2073,7 +2195,7 @@ export default function DashboardPage() {
               </Button>
 
               {voodooWebhookUrl ? (
-                <div className="rounded-lg border border-border/60 bg-secondary/35 p-3 text-sm">
+                <div data-tutorial="voodoo-webhook" className="rounded-lg border border-border/60 bg-secondary/35 p-3 text-sm">
                   <p className="font-medium">Webhook URL</p>
                   <p className="mt-1 break-all text-muted-foreground">{voodooWebhookUrl}</p>
                   <p className="mt-2 text-xs text-muted-foreground">Webhook Key: {voodooWebhookKey}</p>
@@ -2110,6 +2232,7 @@ export default function DashboardPage() {
                 <Button
                   type="button"
                   variant="outline"
+                  data-tutorial="coupons-refresh"
                   disabled={state.loading || !serverReady}
                   onClick={() =>
                     runAction(async () => {
@@ -2216,7 +2339,10 @@ export default function DashboardPage() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3">
+                <div
+                  className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3"
+                  data-tutorial="coupon-product-scope"
+                >
                   <Label className="text-sm">Product Scope (optional)</Label>
                   {couponProductOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">No products available yet.</p>
@@ -2236,7 +2362,10 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </div>
-                <div className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3">
+                <div
+                  className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3"
+                  data-tutorial="coupon-variant-scope"
+                >
                   <Label className="text-sm">Variation Scope (optional)</Label>
                   {couponVariantOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">No variations available yet.</p>
@@ -2264,6 +2393,7 @@ export default function DashboardPage() {
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button
                   type="button"
+                  data-tutorial="save-coupon"
                   disabled={state.loading || !serverReady}
                   className="sm:flex-1"
                   onClick={() =>
@@ -2352,6 +2482,7 @@ export default function DashboardPage() {
                     type="button"
                     size="sm"
                     variant="outline"
+                    data-tutorial="products-refresh"
                     disabled={productsLoading || !serverReady}
                     onClick={() =>
                       runAction(async () => {
@@ -2625,7 +2756,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2" data-tutorial="question-list">
                   {questions.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No questions yet.</p>
                   ) : (
@@ -2724,6 +2855,7 @@ export default function DashboardPage() {
                 <Button
                   type="button"
                   variant="outline"
+                  data-tutorial="save-category-questions"
                   disabled={state.loading || !serverReady}
                   onClick={() =>
                     runAction(async () => {
@@ -2912,6 +3044,7 @@ export default function DashboardPage() {
               <div className="flex flex-col gap-2 pt-2 sm:flex-row">
                 <Button
                   type="button"
+                  data-tutorial="save-product"
                   disabled={state.loading || !serverReady}
                   className="sm:flex-1"
                   onClick={() =>
@@ -3014,7 +3147,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
           {isSuperAdmin ? (
-            <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur" data-tutorial="super-admin-card">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Shield className="size-4 text-primary" />
@@ -3054,6 +3187,7 @@ export default function DashboardPage() {
                   <Button
                     type="button"
                     variant="outline"
+                    data-tutorial="super-admin-list-tenants"
                     disabled={state.loading}
                     onClick={() => runAction(() => apiCall('/api/admin/tenants'))}
                   >
@@ -3062,6 +3196,7 @@ export default function DashboardPage() {
                   <Button
                     type="button"
                     variant="outline"
+                    data-tutorial="super-admin-list-users"
                     disabled={state.loading}
                     onClick={() => runAction(() => apiCall('/api/admin/users'))}
                   >
@@ -3073,7 +3208,7 @@ export default function DashboardPage() {
           ) : null}
         </section>
 
-        <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+        <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur" data-tutorial="latest-action">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Activity className="size-4 text-primary" />

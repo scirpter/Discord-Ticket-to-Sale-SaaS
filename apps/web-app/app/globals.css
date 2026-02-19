@@ -124,3 +124,67 @@
   }
 }
 
+.driver-popover {
+  max-width: min(92vw, 34rem);
+  border: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-card) 94%, transparent);
+  color: var(--color-card-foreground);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px -24px rgba(0, 0, 0, 0.7);
+}
+
+.driver-popover-title {
+  color: var(--color-foreground);
+  font-size: 1.02rem;
+}
+
+.driver-popover-description {
+  color: var(--color-muted-foreground);
+  line-height: 1.45;
+}
+
+.driver-popover-progress-text {
+  color: var(--color-muted-foreground);
+}
+
+.driver-popover-next-btn,
+.driver-popover-prev-btn,
+.driver-popover-close-btn {
+  min-height: 2.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  padding-inline: 0.9rem;
+  font-weight: 600;
+}
+
+.driver-popover-next-btn {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.driver-popover-prev-btn,
+.driver-popover-close-btn {
+  background: var(--color-secondary);
+  color: var(--color-secondary-foreground);
+}
+
+.driver-popover-next-btn:hover {
+  opacity: 0.95;
+}
+
+.driver-popover-prev-btn:hover,
+.driver-popover-close-btn:hover {
+  background: color-mix(in oklab, var(--color-secondary) 78%, var(--color-accent));
+}
+
+.driver-overlay,
+.driver-overlay-animated {
+  z-index: 3300 !important;
+}
+
+.driver-popover,
+.driver-popover-animated {
+  z-index: 3400 !important;
+}
+

@@ -55,6 +55,10 @@ Copy `.env.example` to `.env` and fill values.
 - Dashboard now loads Discord servers from OAuth (manage-server capable guilds), auto-checks bot installation, and auto-links selected server to workspace.
 - A Discord server is now bound to exactly one workspace at a time; reconnecting a server moves it to the current workspace mapping.
 - Server settings now use Discord channel/role selectors instead of manual ID fields.
+- Dashboard now includes a first-launch interactive tutorial prompt with explicit `Run Tutorial` and `Skip Tutorial` actions.
+- Tutorial completion/skip state is persisted using a long-lived marker cookie plus local storage fallback.
+- Tutorial can be rerun at any time from the header `Run Tutorial` action in the dashboard.
+- Tutorial walkthrough is role-aware and includes Super Admin-only steps only for super-admin sessions.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Server settings now include rewards configuration:
   - `point value` (minor currency based)
