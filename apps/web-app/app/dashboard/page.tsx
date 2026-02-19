@@ -633,14 +633,32 @@ export default function DashboardPage() {
       const tutorialDriver = driver({
         animate: true,
         smoothScroll: true,
+        allowClose: false,
+        overlayColor: '#020617',
+        overlayOpacity: 0.72,
+        stagePadding: 14,
+        stageRadius: 14,
+        popoverOffset: 16,
+        popoverClass: 'dashboard-tour-popover',
         showProgress: true,
-        showButtons: ['previous', 'next', 'close'],
+        progressText: 'Step {{current}} of {{total}}',
+        showButtons: ['previous', 'next'],
         prevBtnText: 'Back',
         nextBtnText: 'Next',
         doneBtnText: 'Finish Tutorial',
         steps,
-        onPopoverRender: (popover) => {
-          popover.closeButton.textContent = 'Skip Tutorial';
+        onPopoverRender: (popover, options) => {
+          if (!popover.footerButtons.querySelector('.dashboard-tour-skip-btn')) {
+            const skipButton = document.createElement('button');
+            skipButton.type = 'button';
+            skipButton.className = 'dashboard-tour-skip-btn';
+            skipButton.textContent = 'Skip Tutorial';
+            skipButton.addEventListener('click', () => {
+              markTutorialSeen();
+              options.driver.destroy();
+            });
+            popover.footerButtons.prepend(skipButton);
+          }
         },
         onDestroyed: () => {
           tutorialDriverRef.current = null;
