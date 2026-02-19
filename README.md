@@ -59,6 +59,8 @@ Copy `.env.example` to `.env` and fill values.
 - Tutorial completion/skip state is persisted using a long-lived marker cookie plus local storage fallback.
 - Tutorial can be rerun at any time from the header `Run Tutorial` action in the dashboard.
 - Tutorial walkthrough is role-aware and includes Super Admin-only steps only for super-admin sessions.
+- Tutorial popover now includes a `Jump to section` control for direct navigation to major dashboard parts.
+- Each major dashboard section now includes an `(i)` info action that starts the tutorial at that section.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Server settings now include rewards configuration:
   - `point value` (minor currency based)

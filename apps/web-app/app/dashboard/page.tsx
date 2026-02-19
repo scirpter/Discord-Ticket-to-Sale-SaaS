@@ -8,6 +8,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Globe,
+  Info,
   Loader2,
   Pencil,
   Plus,
@@ -33,6 +34,8 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   DASHBOARD_TUTORIAL_STORAGE_KEY,
   buildDashboardTutorialCookie,
+  buildDashboardTutorialSectionJumps,
+  buildDashboardTutorialStepDefs,
   buildDashboardTutorialSteps,
   hasDashboardTutorialMarker,
 } from '@/lib/dashboard-tutorial';
@@ -609,7 +612,7 @@ export default function DashboardPage() {
   }, []);
 
   const runDashboardTutorial = useCallback(
-    (options?: { markSeen?: boolean }) => {
+    (options?: { markSeen?: boolean; startAtStepId?: string }) => {
       if (typeof window === 'undefined') {
         return;
       }
@@ -621,6 +624,7 @@ export default function DashboardPage() {
       setIsTutorialPromptOpen(false);
       tutorialDriverRef.current?.destroy();
 
+      const stepDefs = buildDashboardTutorialStepDefs({ isSuperAdmin });
       const steps = buildDashboardTutorialSteps({ isSuperAdmin }).map((step) => {
         if (typeof step.element === 'string' && !document.querySelector(step.element)) {
           const { element: _missingElement, ...stepWithoutElement } = step;
@@ -629,6 +633,8 @@ export default function DashboardPage() {
 
         return step;
       });
+      const stepIdToIndex = new Map(stepDefs.map((step, index) => [step.id, index]));
+      const sectionJumps = buildDashboardTutorialSectionJumps({ isSuperAdmin });
 
       const tutorialDriver = driver({
         animate: true,
@@ -648,6 +654,45 @@ export default function DashboardPage() {
         doneBtnText: 'Finish Tutorial',
         steps,
         onPopoverRender: (popover, options) => {
+          if (!popover.wrapper.querySelector('.dashboard-tour-jump')) {
+            const jumpContainer = document.createElement('div');
+            jumpContainer.className = 'dashboard-tour-jump';
+
+            const jumpLabel = document.createElement('label');
+            jumpLabel.className = 'dashboard-tour-jump-label';
+            jumpLabel.textContent = 'Jump to section';
+
+            const jumpSelect = document.createElement('select');
+            jumpSelect.className = 'dashboard-tour-jump-select';
+            jumpSelect.ariaLabel = 'Jump to section';
+
+            for (const section of sectionJumps) {
+              const option = document.createElement('option');
+              option.value = String(section.stepIndex);
+              option.textContent = section.label;
+              jumpSelect.appendChild(option);
+            }
+
+            const activeIndex = typeof options.state.activeIndex === 'number' ? options.state.activeIndex : 0;
+            const activeSection = [...sectionJumps]
+              .reverse()
+              .find((section) => activeIndex >= section.stepIndex);
+            if (activeSection) {
+              jumpSelect.value = String(activeSection.stepIndex);
+            }
+
+            jumpSelect.addEventListener('change', () => {
+              const nextStepIndex = Number.parseInt(jumpSelect.value, 10);
+              if (Number.isFinite(nextStepIndex)) {
+                options.driver.moveTo(nextStepIndex);
+              }
+            });
+
+            jumpContainer.appendChild(jumpLabel);
+            jumpContainer.appendChild(jumpSelect);
+            popover.wrapper.insertBefore(jumpContainer, popover.footer);
+          }
+
           if (!popover.footerButtons.querySelector('.dashboard-tour-skip-btn')) {
             const skipButton = document.createElement('button');
             skipButton.type = 'button';
@@ -666,7 +711,11 @@ export default function DashboardPage() {
       });
 
       tutorialDriverRef.current = tutorialDriver;
-      tutorialDriver.drive();
+      const startAtStepIndex =
+        options?.startAtStepId && stepIdToIndex.has(options.startAtStepId)
+          ? (stepIdToIndex.get(options.startAtStepId) ?? 0)
+          : 0;
+      tutorialDriver.drive(startAtStepIndex);
     },
     [isSuperAdmin, markTutorialSeen],
   );
@@ -1472,7 +1521,17 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Store className="size-4 text-primary" />
-                1. Workspace + Discord Server
+                <span>1. Workspace + Discord Server</span>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Workspace and Discord Server"
+                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'workspace-select' })}
+                >
+                  <Info className="size-4" />
+                </Button>
               </CardTitle>
               <CardDescription>
                 Choose workspace and Discord server. Server linking is automatic when bot is installed.
@@ -1667,7 +1726,17 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Settings2 className="size-4 text-primary" />
-                2. Server Sales Settings
+                <span>2. Server Sales Settings</span>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Server Sales Settings"
+                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'paid-log-channel' })}
+                >
+                  <Info className="size-4" />
+                </Button>
               </CardTitle>
               <CardDescription>Choose paid-log channel and staff roles for this server.</CardDescription>
             </CardHeader>
@@ -2131,7 +2200,17 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Wallet className="size-4 text-primary" />
-                3. Voodoo Pay Integration
+                <span>3. Voodoo Pay Integration</span>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Voodoo Pay Integration"
+                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'wallet-address' })}
+                >
+                  <Info className="size-4" />
+                </Button>
               </CardTitle>
               <CardDescription>Callback secret is optional. Leave empty to auto-generate/preserve.</CardDescription>
             </CardHeader>
@@ -2238,7 +2317,17 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Wallet className="size-4 text-primary" />
-                3.1 Coupons
+                <span>3.1 Coupons</span>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Coupons"
+                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'coupons-refresh' })}
+                >
+                  <Info className="size-4" />
+                </Button>
               </CardTitle>
               <CardDescription>Create coupon codes that reduce order total before checkout.</CardDescription>
             </CardHeader>
@@ -2488,7 +2577,17 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Globe className="size-4 text-primary" />
-                4. Products, Prices, and Customer Questions
+                <span>4. Products, Prices, and Customer Questions</span>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Products, Prices, and Customer Questions"
+                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'products-refresh' })}
+                >
+                  <Info className="size-4" />
+                </Button>
               </CardTitle>
               <CardDescription>Create, edit, and delete products for this server.</CardDescription>
             </CardHeader>
@@ -3169,7 +3268,17 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Shield className="size-4 text-primary" />
-                  Super Admin
+                  <span>Super Admin</span>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="ml-auto text-muted-foreground hover:text-foreground"
+                    aria-label="Show tutorial info for Super Admin"
+                    onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'super-admin-card' })}
+                  >
+                    <Info className="size-4" />
+                  </Button>
                 </CardTitle>
                 <CardDescription>Global operations only visible to super-admin sessions.</CardDescription>
               </CardHeader>
@@ -3230,7 +3339,17 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Activity className="size-4 text-primary" />
-              Latest Action
+              <span>Latest Action</span>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="ml-auto text-muted-foreground hover:text-foreground"
+                aria-label="Show tutorial info for Latest Action"
+                onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'latest-action' })}
+              >
+                <Info className="size-4" />
+              </Button>
             </CardTitle>
             <CardDescription>Real-time result from your last dashboard API call.</CardDescription>
           </CardHeader>

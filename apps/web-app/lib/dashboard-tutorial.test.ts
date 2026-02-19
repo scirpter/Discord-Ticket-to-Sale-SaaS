@@ -4,6 +4,8 @@ import {
   DASHBOARD_TUTORIAL_COOKIE_KEY,
   DASHBOARD_TUTORIAL_STORAGE_KEY,
   buildDashboardTutorialCookie,
+  buildDashboardTutorialSectionJumps,
+  buildDashboardTutorialStepDefs,
   buildDashboardTutorialSteps,
   hasDashboardTutorialMarker,
 } from './dashboard-tutorial';
@@ -75,5 +77,27 @@ describe('dashboard tutorial steps', () => {
 
   it('uses the shared tutorial storage key in tests', () => {
     expect(DASHBOARD_TUTORIAL_STORAGE_KEY).toBe('vd_dashboard_tutorial_seen_v1');
+  });
+});
+
+describe('dashboard tutorial section jumps', () => {
+  it('does not expose super-admin jump for tenant sessions', () => {
+    const sections = buildDashboardTutorialSectionJumps({ isSuperAdmin: false });
+    expect(sections.find((section) => section.id === 'super-admin')).toBeUndefined();
+  });
+
+  it('includes super-admin jump for super-admin sessions', () => {
+    const sections = buildDashboardTutorialSectionJumps({ isSuperAdmin: true });
+    expect(sections.find((section) => section.id === 'super-admin')).toBeDefined();
+  });
+
+  it('returns deterministic indexes mapped to filtered step defs', () => {
+    const stepDefs = buildDashboardTutorialStepDefs({ isSuperAdmin: true });
+    const sections = buildDashboardTutorialSectionJumps({ isSuperAdmin: true });
+    const stepByIndex = new Map(stepDefs.map((step, index) => [index, step.id]));
+
+    expect(
+      sections.every((section) => stepByIndex.get(section.stepIndex) === section.stepId),
+    ).toBe(true);
   });
 });

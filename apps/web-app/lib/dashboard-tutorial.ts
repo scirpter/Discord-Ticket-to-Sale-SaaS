@@ -16,6 +16,20 @@ export type DashboardTutorialStepDef = {
   role: TutorialRole;
 };
 
+type DashboardTutorialSectionJumpDef = {
+  id: string;
+  label: string;
+  stepId: string;
+  role: TutorialRole;
+};
+
+export type DashboardTutorialSectionJump = {
+  id: string;
+  label: string;
+  stepId: string;
+  stepIndex: number;
+};
+
 export const DASHBOARD_TUTORIAL_STEP_DEFS: DashboardTutorialStepDef[] = [
   {
     id: 'welcome',
@@ -499,6 +513,57 @@ export const DASHBOARD_TUTORIAL_STEP_DEFS: DashboardTutorialStepDef[] = [
   },
 ];
 
+const DASHBOARD_TUTORIAL_SECTION_JUMP_DEFS: DashboardTutorialSectionJumpDef[] = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    stepId: 'welcome',
+    role: 'all',
+  },
+  {
+    id: 'workspace-server',
+    label: 'Workspace + Discord Server',
+    stepId: 'workspace-select',
+    role: 'all',
+  },
+  {
+    id: 'sales-settings',
+    label: 'Server Sales Settings',
+    stepId: 'paid-log-channel',
+    role: 'all',
+  },
+  {
+    id: 'voodoo-pay',
+    label: 'Voodoo Pay Integration',
+    stepId: 'wallet-address',
+    role: 'all',
+  },
+  {
+    id: 'coupons',
+    label: 'Coupons',
+    stepId: 'coupons-refresh',
+    role: 'all',
+  },
+  {
+    id: 'products',
+    label: 'Products and Questions',
+    stepId: 'products-refresh',
+    role: 'all',
+  },
+  {
+    id: 'super-admin',
+    label: 'Super Admin',
+    stepId: 'super-admin-card',
+    role: 'super_admin',
+  },
+  {
+    id: 'latest-action',
+    label: 'Latest Action',
+    stepId: 'latest-action',
+    role: 'all',
+  },
+];
+
 function readCookieValue(cookieString: string, key: string): string | null {
   const segments = cookieString
     .split(';')
@@ -546,10 +611,37 @@ export function buildDashboardTutorialCookie(params: { secure: boolean }): strin
   return segments.join('; ');
 }
 
+export function buildDashboardTutorialStepDefs(params: { isSuperAdmin: boolean }): DashboardTutorialStepDef[] {
+  return DASHBOARD_TUTORIAL_STEP_DEFS.filter((step) => (step.role === 'all' ? true : params.isSuperAdmin));
+}
+
+export function buildDashboardTutorialSectionJumps(params: {
+  isSuperAdmin: boolean;
+}): DashboardTutorialSectionJump[] {
+  const stepDefs = buildDashboardTutorialStepDefs(params);
+  const stepIndexes = new Map(stepDefs.map((step, index) => [step.id, index]));
+
+  return DASHBOARD_TUTORIAL_SECTION_JUMP_DEFS.filter((section) =>
+    section.role === 'all' ? true : params.isSuperAdmin,
+  )
+    .map((section) => {
+      const stepIndex = stepIndexes.get(section.stepId);
+      if (stepIndex === undefined) {
+        return null;
+      }
+
+      return {
+        id: section.id,
+        label: section.label,
+        stepId: section.stepId,
+        stepIndex,
+      };
+    })
+    .filter((section): section is DashboardTutorialSectionJump => section !== null);
+}
+
 export function buildDashboardTutorialSteps(params: { isSuperAdmin: boolean }): DriveStep[] {
-  return DASHBOARD_TUTORIAL_STEP_DEFS.filter((step) =>
-    step.role === 'all' ? true : params.isSuperAdmin,
-  ).map((step) => ({
+  return buildDashboardTutorialStepDefs(params).map((step) => ({
     element: step.selector,
     popover: {
       title: step.title,
