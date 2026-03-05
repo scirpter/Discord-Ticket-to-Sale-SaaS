@@ -1,5 +1,7 @@
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
@@ -8,7 +10,7 @@ import {
   type GuildMember,
   type GuildTextBasedChannel,
 } from 'discord.js';
-import { SaleService, TenantRepository } from '@voodoo/core';
+import { SaleService, TenantRepository, type SaleCheckoutOption } from '@voodoo/core';
 
 import { canStartSale } from '../permissions/sale-permissions.js';
 import { createSaleDraft } from '../flows/sale-draft-store.js';
@@ -233,18 +235,31 @@ export async function sendCheckoutMessage(
   channel: GuildTextBasedChannel,
   input: {
     checkoutUrl: string;
+    checkoutOptions?: SaleCheckoutOption[];
     orderSessionId: string;
     customerDiscordUserId: string;
   },
 ): Promise<void> {
+  const checkoutOptions =
+    input.checkoutOptions && input.checkoutOptions.length > 0
+      ? input.checkoutOptions
+      : [{ method: 'pay' as const, label: 'Pay', url: input.checkoutUrl }];
+
+  const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    checkoutOptions.slice(0, 5).map((option) =>
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(option.label).setURL(option.url),
+    ),
+  );
+
   await channel.send({
     content: [
       `Sale created for <@${input.customerDiscordUserId}>.`,
       `Order Session: \`${input.orderSessionId}\``,
-      `Checkout: [Click here to pay](${input.checkoutUrl})`,
+      'Choose payment method below.',
       '',
       'Payment update will be posted here once paid. This may take up to 30 minutes. Do NOT pay again.',
     ].join('\n'),
+    components: [buttonRow],
   });
 }
 

@@ -51,6 +51,7 @@ export type OrderSessionRecord = {
   status: 'pending_payment' | 'cancelled' | 'paid';
   answers: Record<string, string>;
   checkoutUrl: string | null;
+  checkoutUrlCrypto: string | null;
   checkoutTokenExpiresAt: Date;
 };
 
@@ -79,6 +80,7 @@ function mapOrderSessionRow(row: typeof orderSessions.$inferSelect): OrderSessio
     status: row.status,
     answers: row.answers,
     checkoutUrl: row.checkoutUrl,
+    checkoutUrlCrypto: row.checkoutUrlCrypto,
     checkoutTokenExpiresAt: row.checkoutTokenExpiresAt,
   };
 }
@@ -162,6 +164,7 @@ export class OrderRepository {
       status: 'pending_payment',
       answers: input.answers,
       checkoutUrl: null,
+      checkoutUrlCrypto: null,
       checkoutTokenExpiresAt: input.checkoutTokenExpiresAt,
     };
   }
@@ -222,10 +225,15 @@ export class OrderRepository {
     tenantId: string;
     orderSessionId: string;
     checkoutUrl: string;
+    checkoutUrlCrypto?: string | null;
   }): Promise<void> {
     await this.db
       .update(orderSessions)
-      .set({ checkoutUrl: input.checkoutUrl, updatedAt: new Date() })
+      .set({
+        checkoutUrl: input.checkoutUrl,
+        checkoutUrlCrypto: input.checkoutUrlCrypto ?? null,
+        updatedAt: new Date(),
+      })
       .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
   }
 
@@ -373,6 +381,7 @@ export class OrderRepository {
     const existing = await this.db.query.webhookEvents.findFirst({
       where: and(
         eq(webhookEvents.tenantId, input.tenantId),
+        eq(webhookEvents.provider, input.provider),
         eq(webhookEvents.providerDeliveryId, input.deliveryId),
       ),
     });

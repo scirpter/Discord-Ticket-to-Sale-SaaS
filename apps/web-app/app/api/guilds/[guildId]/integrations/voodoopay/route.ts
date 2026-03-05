@@ -39,6 +39,9 @@ export async function GET(
     return NextResponse.json({
       integration: {
         merchantWalletAddress: result.value.merchantWalletAddress,
+        cryptoGatewayEnabled: result.value.cryptoGatewayEnabled,
+        cryptoAddFees: result.value.cryptoAddFees,
+        cryptoWallets: result.value.cryptoWallets,
         checkoutDomain: result.value.checkoutDomain,
         tenantWebhookKey: result.value.tenantWebhookKey,
         webhookUrl: `${env.BOT_PUBLIC_URL}/api/webhooks/voodoopay/${result.value.tenantWebhookKey}`,
@@ -65,7 +68,38 @@ export async function PUT(
       merchantWalletAddress: string;
       checkoutDomain: string;
       callbackSecret?: string;
+      cryptoGatewayEnabled?: boolean;
+      cryptoAddFees?: boolean;
+      cryptoWallets?: {
+        evm?: string;
+        btc?: string;
+        bitcoincash?: string;
+        ltc?: string;
+        doge?: string;
+        trc20?: string;
+        solana?: string;
+      };
     }>(request);
+
+    const existing = await integrationService.getResolvedVoodooPayIntegrationByGuild({
+      tenantId: body.tenantId,
+      guildId,
+    });
+    if (existing.isErr() && existing.error.statusCode !== 404) {
+      return NextResponse.json({ error: existing.error.message }, { status: existing.error.statusCode });
+    }
+
+    const existingWallets = existing.isOk()
+      ? {
+          evm: existing.value.cryptoWallets.evm ?? undefined,
+          btc: existing.value.cryptoWallets.btc ?? undefined,
+          bitcoincash: existing.value.cryptoWallets.bitcoincash ?? undefined,
+          ltc: existing.value.cryptoWallets.ltc ?? undefined,
+          doge: existing.value.cryptoWallets.doge ?? undefined,
+          trc20: existing.value.cryptoWallets.trc20 ?? undefined,
+          solana: existing.value.cryptoWallets.solana ?? undefined,
+        }
+      : {};
 
     const result = await integrationService.upsertVoodooPayConfig(auth.session, {
       tenantId: body.tenantId,
@@ -74,6 +108,9 @@ export async function PUT(
         merchantWalletAddress: body.merchantWalletAddress,
         checkoutDomain: body.checkoutDomain,
         callbackSecret: body.callbackSecret,
+        cryptoGatewayEnabled: body.cryptoGatewayEnabled ?? (existing.isOk() ? existing.value.cryptoGatewayEnabled : false),
+        cryptoAddFees: body.cryptoAddFees ?? (existing.isOk() ? existing.value.cryptoAddFees : false),
+        cryptoWallets: body.cryptoWallets ?? existingWallets,
       },
     });
 

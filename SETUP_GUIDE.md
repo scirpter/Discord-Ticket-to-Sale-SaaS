@@ -186,6 +186,9 @@ Paste and update values:
 ```env
 DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
 DISCORD_CLIENT_ID=YOUR_DISCORD_CLIENT_ID
+NUKE_DISCORD_TOKEN=YOUR_NUKE_BOT_TOKEN
+NUKE_DISCORD_CLIENT_ID=YOUR_NUKE_BOT_CLIENT_ID
+NUKE_POLL_INTERVAL_MS=30000
 DATABASE_URL=mysql://voodoo_user:CHANGE_ME_STRONG_PASSWORD@localhost:3306/voodoo
 
 LOG_LEVEL=info
@@ -225,6 +228,7 @@ Run migrations and deploy slash commands:
 ```bash
 pnpm migrate
 pnpm deploy:commands
+pnpm deploy:commands:nuke
 ```
 
 ---
@@ -263,6 +267,16 @@ module.exports = {
         NODE_ENV: 'production'
       },
       env_file: '/var/www/voodoo/.env'
+    },
+    {
+      name: 'voodoo-nuke',
+      cwd: '/var/www/voodoo',
+      script: 'node',
+      args: 'apps/nuke-worker/dist/index.js',
+      env: {
+        NODE_ENV: 'production'
+      },
+      env_file: '/var/www/voodoo/.env'
     }
   ]
 };
@@ -289,6 +303,7 @@ Useful logs:
 ```bash
 pm2 logs voodoo-web --lines 100
 pm2 logs voodoo-bot --lines 100
+pm2 logs voodoo-nuke --lines 100
 ```
 
 ---
@@ -355,8 +370,10 @@ After updates:
 ```bash
 cd /var/www/voodoo
 pnpm deploy:commands
+pnpm deploy:commands:nuke
 pm2 restart voodoo-web
 pm2 restart voodoo-bot
+pm2 restart voodoo-nuke
 ```
 
 ---
@@ -389,8 +406,10 @@ pnpm install
 pnpm build
 pnpm migrate
 pnpm deploy:commands
+pnpm deploy:commands:nuke
 pm2 restart voodoo-web
 pm2 restart voodoo-bot
+pm2 restart voodoo-nuke
 ```
 
 ---
@@ -426,4 +445,9 @@ Expected:
 - Bot offline:
   - Verify `DISCORD_TOKEN`
   - Check `pm2 logs voodoo-bot`
+
+- Nuke worker offline:
+  - Verify `NUKE_DISCORD_TOKEN`
+  - Verify `NUKE_DISCORD_CLIENT_ID`
+  - Check `pm2 logs voodoo-nuke`
 

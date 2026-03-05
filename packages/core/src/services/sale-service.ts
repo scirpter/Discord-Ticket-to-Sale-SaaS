@@ -14,7 +14,7 @@ import type { SessionPayload } from '../security/session-token.js';
 import { signVoodooCallbackToken } from '../security/voodoo-callback-token.js';
 import { AuthorizationService } from './authorization-service.js';
 import { computeCouponEligibleSubtotalMinor } from './coupon-scope.js';
-import { IntegrationService } from './integration-service.js';
+import { IntegrationService, normalizeCheckoutDomain } from './integration-service.js';
 import {
   calculatePointsOrderTotals,
   normalizeCategoryKey,
@@ -61,6 +61,20 @@ type ResolvedPointsConfig = {
   redeemCategoryKeys: string[];
   referralRewardMinor: number;
   referralRewardCategoryKeys: string[];
+};
+
+export type SaleCheckoutOption = {
+  method: 'pay' | 'crypto';
+  label: string;
+  url: string;
+};
+
+type SaleSessionResult = {
+  orderSessionId: string;
+  checkoutUrl: string;
+  checkoutOptions: SaleCheckoutOption[];
+  warnings: string[];
+  expiresAt: string;
 };
 
 export function calculateReferralRewardMinorSnapshot(input: {
@@ -299,16 +313,7 @@ export class SaleService {
   public async createSaleSession(
     actor: SessionPayload,
     input: SaleSessionInput,
-  ): Promise<
-    Result<
-      {
-        orderSessionId: string;
-        checkoutUrl: string;
-        expiresAt: string;
-      },
-      AppError
-    >
-  > {
+  ): Promise<Result<SaleSessionResult, AppError>> {
     try {
       const roleCheck = await this.authorizationService.ensureTenantRole(actor, {
         tenantId: input.tenantId,
@@ -329,16 +334,7 @@ export class SaleService {
     }
   }
 
-  public async createSaleSessionFromBot(input: SaleSessionInput): Promise<
-    Result<
-      {
-        orderSessionId: string;
-        checkoutUrl: string;
-        expiresAt: string;
-      },
-      AppError
-    >
-  > {
+  public async createSaleSessionFromBot(input: SaleSessionInput): Promise<Result<SaleSessionResult, AppError>> {
     try {
       const tenantActiveCheck = await this.authorizationService.ensureTenantIsActive(input.tenantId);
       if (tenantActiveCheck.isErr()) {
@@ -351,16 +347,7 @@ export class SaleService {
     }
   }
 
-  private async createSaleSessionInternal(input: SaleSessionInput): Promise<
-    Result<
-      {
-        orderSessionId: string;
-        checkoutUrl: string;
-        expiresAt: string;
-      },
-      AppError
-    >
-  > {
+  private async createSaleSessionInternal(input: SaleSessionInput): Promise<Result<SaleSessionResult, AppError>> {
     const parsedAnswers = answerSchema.safeParse(input.answers);
     if (!parsedAnswers.success) {
       return err(validationError(parsedAnswers.error.issues));
@@ -568,6 +555,7 @@ export class SaleService {
     );
 
     if (voodooIntegration.isOk()) {
+      const warnings: string[] = [];
       const voodooCheckout = await this.buildVoodooPayCheckoutUrl({
         tenantId: input.tenantId,
         guildId: input.guildId,
@@ -588,15 +576,53 @@ export class SaleService {
         return err(voodooCheckout.error);
       }
 
+      let cryptoCheckoutUrl: string | null = null;
+      if (voodooIntegration.value.cryptoGatewayEnabled) {
+        const cryptoCheckout = await this.buildVoodooPayMulticoinCheckoutUrl({
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          orderSessionId: orderSession.id,
+          totalMinor: calc.totalMinor,
+          currency: primaryItem.currency,
+          integration: voodooIntegration.value,
+        });
+
+        if (cryptoCheckout.isErr()) {
+          warnings.push(
+            `Crypto checkout could not be generated and was disabled for this sale: ${cryptoCheckout.error.message}`,
+          );
+        } else {
+          cryptoCheckoutUrl = cryptoCheckout.value;
+        }
+      }
+
+      const checkoutOptions: SaleCheckoutOption[] = [
+        {
+          method: 'pay',
+          label: 'Pay',
+          url: voodooCheckout.value,
+        },
+      ];
+      if (cryptoCheckoutUrl) {
+        checkoutOptions.push({
+          method: 'crypto',
+          label: 'Pay with Crypto',
+          url: cryptoCheckoutUrl,
+        });
+      }
+
       await this.orderRepository.setCheckoutUrl({
         tenantId: input.tenantId,
         orderSessionId: orderSession.id,
         checkoutUrl: voodooCheckout.value,
+        checkoutUrlCrypto: cryptoCheckoutUrl,
       });
 
       return ok({
         orderSessionId: orderSession.id,
         checkoutUrl: voodooCheckout.value,
+        checkoutOptions,
+        warnings,
         expiresAt: expiresAt.toISOString(),
       });
     }
@@ -626,11 +652,20 @@ export class SaleService {
       tenantId: input.tenantId,
       orderSessionId: orderSession.id,
       checkoutUrl: providerCheckoutUrl,
+      checkoutUrlCrypto: null,
     });
 
     return ok({
       orderSessionId: orderSession.id,
       checkoutUrl: providerCheckoutUrl,
+      checkoutOptions: [
+        {
+          method: 'pay',
+          label: 'Pay',
+          url: providerCheckoutUrl,
+        },
+      ],
+      warnings: [],
       expiresAt: expiresAt.toISOString(),
     });
   }
@@ -758,10 +793,20 @@ export class SaleService {
       }
 
       const checkoutUrl = new URL('/pay.php', this.env.VOODOO_PAY_CHECKOUT_BASE_URL);
+      const checkoutDomain = normalizeCheckoutDomain(input.integration.checkoutDomain);
+      if (checkoutDomain.length === 0) {
+        return err(
+          new AppError(
+            'VOODOO_PAY_CHECKOUT_DOMAIN_INVALID',
+            'Configured checkout domain is invalid for standard checkout.',
+            422,
+          ),
+        );
+      }
       checkoutUrl.searchParams.set('address', walletPayload.address_in);
       checkoutUrl.searchParams.set('amount', (input.totalMinor / 100).toFixed(2));
       checkoutUrl.searchParams.set('currency', input.currency);
-      checkoutUrl.searchParams.set('domain', input.integration.checkoutDomain);
+      checkoutUrl.searchParams.set('domain', checkoutDomain);
       checkoutUrl.searchParams.set('vd_token', input.token);
       checkoutUrl.searchParams.set('vd_order_session_id', input.orderSessionId);
 
@@ -779,6 +824,112 @@ export class SaleService {
       return ok(checkoutUrl.toString());
     } catch (error) {
       return err(fromUnknownError(error, 'VOODOO_PAY_CHECKOUT_FAILED'));
+    }
+  }
+
+  private async buildVoodooPayMulticoinCheckoutUrl(input: {
+    tenantId: string;
+    guildId: string;
+    orderSessionId: string;
+    totalMinor: number;
+    currency: string;
+    integration: {
+      tenantWebhookKey: string;
+      callbackSecret: string;
+      checkoutDomain: string;
+      cryptoAddFees: boolean;
+      cryptoWallets: {
+        evm: string | null;
+        btc: string | null;
+        bitcoincash: string | null;
+        ltc: string | null;
+        doge: string | null;
+        trc20: string | null;
+        solana: string | null;
+      };
+    };
+  }): Promise<Result<string, AppError>> {
+    try {
+      const callbackToken = signVoodooCallbackToken(
+        {
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          orderSessionId: input.orderSessionId,
+        },
+        input.integration.callbackSecret,
+      );
+
+      const callbackUrl = new URL(
+        `/api/webhooks/voodoopay/${input.integration.tenantWebhookKey}/${input.orderSessionId}/${callbackToken}`,
+        this.env.BOT_PUBLIC_URL,
+      );
+      callbackUrl.searchParams.set('order_session_id', input.orderSessionId);
+      callbackUrl.searchParams.set('cb_token', callbackToken);
+
+      const walletPayload: Record<string, string | number> = {
+        fiat_amount: Number((input.totalMinor / 100).toFixed(2)),
+        fiat_currency: input.currency,
+        callback: callbackUrl.toString(),
+      };
+
+      for (const [key, value] of Object.entries(input.integration.cryptoWallets)) {
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          continue;
+        }
+        walletPayload[key] = value.trim();
+      }
+
+      const createWalletUrl = new URL('/crypto/multi-hosted-wallet.php', this.env.VOODOO_PAY_API_BASE_URL);
+      const walletResponse = await fetch(createWalletUrl.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(walletPayload),
+      });
+      if (!walletResponse.ok) {
+        return err(
+          new AppError(
+            'VOODOO_PAY_MULTICOIN_CREATE_WALLET_FAILED',
+            `Voodoo Pay multicoin wallet creation failed with status ${walletResponse.status}`,
+            502,
+          ),
+        );
+      }
+
+      const responsePayload = (await walletResponse.json()) as {
+        payment_token?: unknown;
+      };
+      if (
+        typeof responsePayload.payment_token !== 'string' ||
+        responsePayload.payment_token.trim().length === 0
+      ) {
+        return err(
+          new AppError(
+            'VOODOO_PAY_MULTICOIN_INVALID_RESPONSE',
+            'Missing payment_token in multicoin wallet response',
+            502,
+          ),
+        );
+      }
+
+      const checkoutDomain = normalizeCheckoutDomain(input.integration.checkoutDomain);
+      if (checkoutDomain.length === 0) {
+        return err(
+          new AppError(
+            'VOODOO_PAY_MULTICOIN_CHECKOUT_DOMAIN_INVALID',
+            'Configured checkout domain is invalid for hosted multi-coin checkout.',
+            422,
+          ),
+        );
+      }
+
+      const checkoutUrl = new URL(`https://${checkoutDomain}/crypto/hosted.php`);
+      checkoutUrl.searchParams.set('payment_token', responsePayload.payment_token.trim());
+      checkoutUrl.searchParams.set('add_fees', input.integration.cryptoAddFees ? '1' : '0');
+      return ok(checkoutUrl.toString());
+    } catch (error) {
+      return err(fromUnknownError(error, 'VOODOO_PAY_MULTICOIN_CHECKOUT_FAILED'));
     }
   }
 

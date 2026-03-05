@@ -20,6 +20,17 @@ export type VoodooPayIntegrationRecord = {
   tenantId: string;
   guildId: string;
   merchantWalletAddress: string;
+  cryptoGatewayEnabled: boolean;
+  cryptoAddFees: boolean;
+  cryptoWallets: {
+    evm: string | null;
+    btc: string | null;
+    bitcoincash: string | null;
+    ltc: string | null;
+    doge: string | null;
+    trc20: string | null;
+    solana: string | null;
+  };
   checkoutDomain: string;
   tenantWebhookKey: string;
   callbackSecretEncrypted: string;
@@ -147,6 +158,17 @@ export class IntegrationRepository {
     tenantId: string;
     guildId: string;
     merchantWalletAddress: string;
+    cryptoGatewayEnabled: boolean;
+    cryptoAddFees: boolean;
+    cryptoWallets: {
+      evm?: string | null;
+      btc?: string | null;
+      bitcoincash?: string | null;
+      ltc?: string | null;
+      doge?: string | null;
+      trc20?: string | null;
+      solana?: string | null;
+    };
     checkoutDomain: string;
     tenantWebhookKey: string;
     callbackSecretEncrypted: string;
@@ -163,6 +185,15 @@ export class IntegrationRepository {
         .update(tenantIntegrationsVoodooPay)
         .set({
           merchantWalletAddress: input.merchantWalletAddress,
+          cryptoGatewayEnabled: input.cryptoGatewayEnabled,
+          cryptoAddFees: input.cryptoAddFees,
+          cryptoWalletEvm: input.cryptoWallets.evm ?? null,
+          cryptoWalletBtc: input.cryptoWallets.btc ?? null,
+          cryptoWalletBitcoincash: input.cryptoWallets.bitcoincash ?? null,
+          cryptoWalletLtc: input.cryptoWallets.ltc ?? null,
+          cryptoWalletDoge: input.cryptoWallets.doge ?? null,
+          cryptoWalletTrc20: input.cryptoWallets.trc20 ?? null,
+          cryptoWalletSolana: input.cryptoWallets.solana ?? null,
           checkoutDomain: input.checkoutDomain,
           tenantWebhookKey: input.tenantWebhookKey,
           callbackSecretEncrypted: input.callbackSecretEncrypted,
@@ -175,6 +206,17 @@ export class IntegrationRepository {
         tenantId: input.tenantId,
         guildId: input.guildId,
         merchantWalletAddress: input.merchantWalletAddress,
+        cryptoGatewayEnabled: input.cryptoGatewayEnabled,
+        cryptoAddFees: input.cryptoAddFees,
+        cryptoWallets: {
+          evm: input.cryptoWallets.evm ?? null,
+          btc: input.cryptoWallets.btc ?? null,
+          bitcoincash: input.cryptoWallets.bitcoincash ?? null,
+          ltc: input.cryptoWallets.ltc ?? null,
+          doge: input.cryptoWallets.doge ?? null,
+          trc20: input.cryptoWallets.trc20 ?? null,
+          solana: input.cryptoWallets.solana ?? null,
+        },
         checkoutDomain: input.checkoutDomain,
         tenantWebhookKey: input.tenantWebhookKey,
         callbackSecretEncrypted: input.callbackSecretEncrypted,
@@ -187,6 +229,15 @@ export class IntegrationRepository {
       tenantId: input.tenantId,
       guildId: input.guildId,
       merchantWalletAddress: input.merchantWalletAddress,
+      cryptoGatewayEnabled: input.cryptoGatewayEnabled,
+      cryptoAddFees: input.cryptoAddFees,
+      cryptoWalletEvm: input.cryptoWallets.evm ?? null,
+      cryptoWalletBtc: input.cryptoWallets.btc ?? null,
+      cryptoWalletBitcoincash: input.cryptoWallets.bitcoincash ?? null,
+      cryptoWalletLtc: input.cryptoWallets.ltc ?? null,
+      cryptoWalletDoge: input.cryptoWallets.doge ?? null,
+      cryptoWalletTrc20: input.cryptoWallets.trc20 ?? null,
+      cryptoWalletSolana: input.cryptoWallets.solana ?? null,
       checkoutDomain: input.checkoutDomain,
       tenantWebhookKey: input.tenantWebhookKey,
       callbackSecretEncrypted: input.callbackSecretEncrypted,
@@ -197,6 +248,17 @@ export class IntegrationRepository {
       tenantId: input.tenantId,
       guildId: input.guildId,
       merchantWalletAddress: input.merchantWalletAddress,
+      cryptoGatewayEnabled: input.cryptoGatewayEnabled,
+      cryptoAddFees: input.cryptoAddFees,
+      cryptoWallets: {
+        evm: input.cryptoWallets.evm ?? null,
+        btc: input.cryptoWallets.btc ?? null,
+        bitcoincash: input.cryptoWallets.bitcoincash ?? null,
+        ltc: input.cryptoWallets.ltc ?? null,
+        doge: input.cryptoWallets.doge ?? null,
+        trc20: input.cryptoWallets.trc20 ?? null,
+        solana: input.cryptoWallets.solana ?? null,
+      },
       checkoutDomain: input.checkoutDomain,
       tenantWebhookKey: input.tenantWebhookKey,
       callbackSecretEncrypted: input.callbackSecretEncrypted,
@@ -223,6 +285,17 @@ export class IntegrationRepository {
       tenantId: row.tenantId,
       guildId: row.guildId,
       merchantWalletAddress: row.merchantWalletAddress,
+      cryptoGatewayEnabled: row.cryptoGatewayEnabled,
+      cryptoAddFees: row.cryptoAddFees,
+      cryptoWallets: {
+        evm: row.cryptoWalletEvm,
+        btc: row.cryptoWalletBtc,
+        bitcoincash: row.cryptoWalletBitcoincash,
+        ltc: row.cryptoWalletLtc,
+        doge: row.cryptoWalletDoge,
+        trc20: row.cryptoWalletTrc20,
+        solana: row.cryptoWalletSolana,
+      },
       checkoutDomain: row.checkoutDomain,
       tenantWebhookKey: row.tenantWebhookKey,
       callbackSecretEncrypted: row.callbackSecretEncrypted,
@@ -245,6 +318,17 @@ export class IntegrationRepository {
       tenantId: row.tenantId,
       guildId: row.guildId,
       merchantWalletAddress: row.merchantWalletAddress,
+      cryptoGatewayEnabled: row.cryptoGatewayEnabled,
+      cryptoAddFees: row.cryptoAddFees,
+      cryptoWallets: {
+        evm: row.cryptoWalletEvm,
+        btc: row.cryptoWalletBtc,
+        bitcoincash: row.cryptoWalletBitcoincash,
+        ltc: row.cryptoWalletLtc,
+        doge: row.cryptoWalletDoge,
+        trc20: row.cryptoWalletTrc20,
+        solana: row.cryptoWalletSolana,
+      },
       checkoutDomain: row.checkoutDomain,
       tenantWebhookKey: row.tenantWebhookKey,
       callbackSecretEncrypted: row.callbackSecretEncrypted,

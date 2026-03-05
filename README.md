@@ -14,6 +14,7 @@ Multi-tenant Discord bot + web dashboard for ticket-based sales with WooCommerce
 
 - `apps/web-app`: Next.js dashboard + REST/webhook API routes.
 - `apps/bot-worker`: Discord interaction worker with `/sale`, `/points`, and component/modal flows.
+- `apps/nuke-worker`: separate-token Discord worker for `/nuke` scheduling and channel nukes.
 - `packages/core`: shared domain/config/security/services/repositories.
 - `drizzle/migrations`: SQL migrations.
 
@@ -32,6 +33,9 @@ Recommended for production:
 - `CHECKOUT_SIGNING_SECRET`
 - `SUPER_ADMIN_DISCORD_IDS`
 - `BOT_PUBLIC_URL`
+- `NUKE_DISCORD_TOKEN`
+- `NUKE_DISCORD_CLIENT_ID`
+- `NUKE_POLL_INTERVAL_MS`
 
 Copy `.env.example` to `.env` and fill values.
 
@@ -46,6 +50,8 @@ Copy `.env.example` to `.env` and fill values.
 - Build: `pnpm build`
 - Migrate: `pnpm migrate`
 - Deploy slash commands: `pnpm deploy:commands`
+- Deploy nuke slash commands: `pnpm deploy:commands:nuke`
+- Deploy both command sets: `pnpm deploy:commands:all`
 
 ## OAuth + Dashboard
 
@@ -93,9 +99,17 @@ Copy `.env.example` to `.env` and fill values.
 - Points are reserved at checkout creation and only deducted after successful payment confirmation.
 - Paid confirmation message now includes updated points balance.
 - Referral rewards are auto-granted on first paid order for claimed customer emails, using category eligibility + purchased variant reward snapshots.
-- Bot creates `order_session` and sends a direct checkout hyperlink message in the ticket (`Click here to pay`).
+- Bot creates `order_session` and posts payment buttons in the ticket (`Pay`, and optionally `Pay with Crypto`).
 - Checkout amount now reflects basket total minus coupon plus tip.
-- If Voodoo Pay multi-provider integration is configured, checkout uses hosted `pay.php` provider-selection mode.
+- Dashboard Voodoo integration now supports Hosted Multi-Coin mode with enable/disable toggle and wallet inputs.
+- Hosted Multi-Coin wallet mapping:
+  - BTC -> `btc`
+  - LTC -> `ltc`
+  - ETH/EVM -> `evm`
+  - BCH -> `bitcoincash`
+  - DOGE -> `doge`
+  - TRX -> `trc20`
+  - SOL -> `solana`
 - Checkout URL now always includes the `email` query parameter (from answers, or a safe fallback email when missing).
 - Voodoo Pay callbacks accept query/form/json payloads, and paid logs fall back to the ticket channel if paid-log channel delivery fails.
 - Woo webhook confirms payment (`processing`/`completed`).
@@ -117,6 +131,15 @@ Copy `.env.example` to `.env` and fill values.
 - First valid referral claim for a customer email wins.
 - Successful `/refer` reply is private (ephemeral) and customizable via server settings.
 - Owner/staff can monitor submission and payout outcomes via referral log channel.
+
+## Nuke Command
+
+- Runs from separate worker/token (`apps/nuke-worker`).
+- `/nuke schedule time:<HH:mm> timezone:<IANA>` sets daily nuke for the current channel.
+- `/nuke disable` disables daily nuke for the current channel.
+- `/nuke now confirm:NUKE` clones current channel and deletes original channel immediately.
+- Runtime permission checks require user `Manage Channels` or `Administrator`.
+- Bot must have `View Channel` + `Manage Channels`.
 
 ## WordPress / WooCommerce Setup
 

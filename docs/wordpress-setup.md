@@ -35,3 +35,17 @@ When webhook indicates paid state (`processing` or `completed`):
 - Sale session is finalized.
 - Woo order notes are fetched from `/wp-json/wc/v3/orders/{id}/notes`.
 - Paid order entry is posted to configured Discord paid-log channel.
+
+## 5) Hosted Multi-Coin Callback Notes
+
+When Hosted Multi-Coin mode is enabled in dashboard:
+
+- Checkout creation posts to `POST /crypto/multi-hosted-wallet.php`.
+- Required request keys: `fiat_amount`, `fiat_currency`, `callback`.
+- Optional wallet keys: `evm`, `btc`, `bitcoincash`, `ltc`, `doge`, `trc20`, `solana`.
+- Callback is routed to the same Voodoo webhook endpoints and should include:
+  - `order_session_id`
+  - `cb_token`
+  - transaction/payment fields (`txid_in`, `status`, `value_coin`, `ipn_token` equivalents)
+
+This keeps crypto and standard Voodoo payment confirmation on one webhook pipeline.

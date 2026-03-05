@@ -254,6 +254,15 @@ export const tenantIntegrationsVoodooPay = mysqlTable(
     tenantId: varchar('tenant_id', { length: 26 }).notNull(),
     guildId: varchar('guild_id', { length: 32 }).notNull(),
     merchantWalletAddress: varchar('merchant_wallet_address', { length: 128 }).notNull(),
+    cryptoGatewayEnabled: boolean('crypto_gateway_enabled').notNull().default(false),
+    cryptoAddFees: boolean('crypto_add_fees').notNull().default(false),
+    cryptoWalletEvm: varchar('crypto_wallet_evm', { length: 191 }),
+    cryptoWalletBtc: varchar('crypto_wallet_btc', { length: 191 }),
+    cryptoWalletBitcoincash: varchar('crypto_wallet_bitcoincash', { length: 191 }),
+    cryptoWalletLtc: varchar('crypto_wallet_ltc', { length: 191 }),
+    cryptoWalletDoge: varchar('crypto_wallet_doge', { length: 191 }),
+    cryptoWalletTrc20: varchar('crypto_wallet_trc20', { length: 191 }),
+    cryptoWalletSolana: varchar('crypto_wallet_solana', { length: 191 }),
     checkoutDomain: varchar('checkout_domain', { length: 120 }).notNull().default('checkout.voodoo-pay.uk'),
     tenantWebhookKey: varchar('tenant_webhook_key', { length: 64 }).notNull(),
     callbackSecretEncrypted: text('callback_secret_encrypted').notNull(),
@@ -339,6 +348,7 @@ export const orderSessions = mysqlTable(
     totalMinor: int('total_minor').notNull().default(0),
     answers: json('answers').$type<Record<string, string>>().notNull().default({}),
     checkoutUrl: text('checkout_url'),
+    checkoutUrlCrypto: text('checkout_url_crypto'),
     checkoutTokenExpiresAt: timestamp('checkout_token_expires_at', { mode: 'date' }).notNull(),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
@@ -513,12 +523,90 @@ export const webhookEvents = mysqlTable(
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (table) => ({
-    tenantDeliveryUnique: uniqueIndex('webhook_events_tenant_delivery_uq').on(
+    tenantProviderDeliveryUnique: uniqueIndex('webhook_events_tenant_provider_delivery_uq').on(
       table.tenantId,
+      table.provider,
       table.providerDeliveryId,
     ),
     tenantGuildIdx: index('webhook_events_tenant_guild_idx').on(table.tenantId, table.guildId),
     tenantCreatedIdx: index('webhook_events_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const channelNukeSchedules = mysqlTable(
+  'channel_nuke_schedules',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    channelId: varchar('channel_id', { length: 32 }).notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    localTimeHhmm: varchar('local_time_hhmm', { length: 5 }).notNull(),
+    timezone: varchar('timezone', { length: 64 }).notNull(),
+    nextRunAtUtc: timestamp('next_run_at_utc', { mode: 'date' }).notNull(),
+    lastRunAtUtc: timestamp('last_run_at_utc', { mode: 'date' }),
+    lastLocalRunDate: varchar('last_local_run_date', { length: 10 }),
+    consecutiveFailures: int('consecutive_failures').notNull().default(0),
+    updatedByDiscordUserId: varchar('updated_by_discord_user_id', { length: 32 }),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildChannelUnique: uniqueIndex('channel_nuke_schedules_tenant_guild_channel_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.channelId,
+    ),
+    enabledNextRunIdx: index('channel_nuke_schedules_enabled_next_run_idx').on(
+      table.enabled,
+      table.nextRunAtUtc,
+    ),
+    tenantGuildIdx: index('channel_nuke_schedules_tenant_guild_idx').on(table.tenantId, table.guildId),
+  }),
+);
+
+export const channelNukeRuns = mysqlTable(
+  'channel_nuke_runs',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    scheduleId: varchar('schedule_id', { length: 26 }),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    channelId: varchar('channel_id', { length: 32 }).notNull(),
+    triggerType: mysqlEnum('trigger_type', ['scheduled', 'manual', 'retry']).notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
+    status: mysqlEnum('status', ['queued', 'running', 'success', 'partial', 'failed', 'skipped'])
+      .notNull()
+      .default('queued'),
+    attempt: int('attempt').notNull().default(0),
+    oldChannelId: varchar('old_channel_id', { length: 32 }),
+    newChannelId: varchar('new_channel_id', { length: 32 }),
+    errorMessage: text('error_message'),
+    actorDiscordUserId: varchar('actor_discord_user_id', { length: 32 }),
+    correlationId: varchar('correlation_id', { length: 26 }).notNull(),
+    startedAt: timestamp('started_at', { mode: 'date' }).defaultNow().notNull(),
+    finishedAt: timestamp('finished_at', { mode: 'date' }),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    idempotencyUnique: uniqueIndex('channel_nuke_runs_idempotency_uq').on(table.idempotencyKey),
+    scheduleIdx: index('channel_nuke_runs_schedule_idx').on(table.scheduleId),
+    tenantCreatedIdx: index('channel_nuke_runs_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const channelNukeLocks = mysqlTable(
+  'channel_nuke_locks',
+  {
+    lockKey: varchar('lock_key', { length: 96 }).primaryKey(),
+    ownerId: varchar('owner_id', { length: 64 }).notNull(),
+    leaseUntil: timestamp('lease_until', { mode: 'date' }).notNull(),
+    heartbeatAt: timestamp('heartbeat_at', { mode: 'date' }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    leaseUntilIdx: index('channel_nuke_locks_lease_until_idx').on(table.leaseUntil),
   }),
 );
 

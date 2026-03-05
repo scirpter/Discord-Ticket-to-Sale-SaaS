@@ -13,6 +13,7 @@ export const logger = pino({
       '*.consumerKey',
       '*.consumerSecret',
       '*.DISCORD_TOKEN',
+      '*.NUKE_DISCORD_TOKEN',
     ],
     censor: '[REDACTED]',
   },

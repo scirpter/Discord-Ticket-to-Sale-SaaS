@@ -71,6 +71,13 @@
       "when": 1771367190559,
       "tag": "0009_loud_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1772649512147,
+      "tag": "0010_empty_living_lightning",
+      "breakpoints": true
     }
   ]
 }

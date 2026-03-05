@@ -385,6 +385,7 @@ async function finalizeDraft(input: {
   try {
     await sendCheckoutMessage(input.interaction.channel as any, {
       checkoutUrl: created.value.checkoutUrl,
+      checkoutOptions: created.value.checkoutOptions,
       orderSessionId: created.value.orderSessionId,
       customerDiscordUserId: input.draft.customerDiscordUserId,
     });
@@ -394,14 +395,21 @@ async function finalizeDraft(input: {
         'Checkout created, but I could not post the public checkout message in this channel.',
         `Order Session: \`${created.value.orderSessionId}\``,
         `Checkout URL: ${created.value.checkoutUrl}`,
+        ...created.value.checkoutOptions
+          .filter((option) => option.method === 'crypto')
+          .map((option) => `Crypto Checkout URL: ${option.url}`),
       ].join('\n'),
       components: [],
     });
     return;
   }
 
+  const warningLines = created.value.warnings.map((warning) => `Warning: ${warning}`);
   await input.interaction.editReply({
-    content: `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
+    content: [
+      `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
+      ...warningLines,
+    ].join('\n'),
     components: [],
   });
 }
