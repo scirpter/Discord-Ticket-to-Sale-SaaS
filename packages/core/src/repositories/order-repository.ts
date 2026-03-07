@@ -4,6 +4,24 @@ import { ulid } from 'ulid';
 import { getDb } from '../infra/db/client.js';
 import { orderNotesCache, orderSessions, ordersPaid, webhookEvents } from '../infra/db/schema/index.js';
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const code = 'code' in error ? (error as { code?: unknown }).code : null;
+  const message =
+    'message' in error && typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : '';
+
+  if (code !== 'ER_BAD_FIELD_ERROR') {
+    return false;
+  }
+
+  return message.includes(`Unknown column '${columnName}'`);
+}
+
 export type OrderSessionBasketItem = {
   productId: string;
   productName: string;
@@ -267,14 +285,28 @@ export class OrderRepository {
     checkoutUrl: string;
     checkoutUrlCrypto?: string | null;
   }): Promise<void> {
-    await this.db
-      .update(orderSessions)
-      .set({
-        checkoutUrl: input.checkoutUrl,
-        checkoutUrlCrypto: input.checkoutUrlCrypto ?? null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
+    try {
+      await this.db
+        .update(orderSessions)
+        .set({
+          checkoutUrl: input.checkoutUrl,
+          checkoutUrlCrypto: input.checkoutUrlCrypto ?? null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
+    } catch (error) {
+      if (!input.checkoutUrlCrypto || !isMissingColumnError(error, 'checkout_url_crypto')) {
+        throw error;
+      }
+
+      await this.db
+        .update(orderSessions)
+        .set({
+          checkoutUrl: input.checkoutUrl,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orderSessions.id, input.orderSessionId), eq(orderSessions.tenantId, input.tenantId)));
+    }
   }
 
   public async cancelOrderSession(input: {

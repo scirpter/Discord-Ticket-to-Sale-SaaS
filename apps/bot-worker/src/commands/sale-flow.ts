@@ -240,6 +240,38 @@ export async function sendCheckoutMessage(
     customerDiscordUserId: string;
   },
 ): Promise<void> {
+  const isSendable = (channel as { isSendable?: () => boolean }).isSendable;
+  if (typeof isSendable === 'function' && !isSendable.call(channel)) {
+    throw new Error(
+      'Bot cannot post checkout messages in this channel. Check Send Messages permissions and thread state.',
+    );
+  }
+
+  const buttonRows = buildCheckoutComponents({
+    checkoutUrl: input.checkoutUrl,
+    checkoutOptions: input.checkoutOptions,
+  });
+
+  if (buttonRows.length === 0) {
+    throw new Error('No checkout button could be generated for this sale session.');
+  }
+
+  await channel.send({
+    content: [
+      `Sale created for <@${input.customerDiscordUserId}>.`,
+      `Order Session: \`${input.orderSessionId}\``,
+      'Choose payment method below.',
+      '',
+      'Payment update will be posted here once paid. This may take up to 30 minutes. Do NOT pay again.',
+    ].join('\n'),
+    components: buttonRows,
+  });
+}
+
+export function buildCheckoutComponents(input: {
+  checkoutUrl: string;
+  checkoutOptions?: SaleCheckoutOption[];
+}): ActionRowBuilder<ButtonBuilder>[] {
   const checkoutOptions =
     input.checkoutOptions && input.checkoutOptions.length > 0
       ? input.checkoutOptions
@@ -251,15 +283,6 @@ export async function sendCheckoutMessage(
     ),
   );
 
-  await channel.send({
-    content: [
-      `Sale created for <@${input.customerDiscordUserId}>.`,
-      `Order Session: \`${input.orderSessionId}\``,
-      'Choose payment method below.',
-      '',
-      'Payment update will be posted here once paid. This may take up to 30 minutes. Do NOT pay again.',
-    ].join('\n'),
-    components: [buttonRow],
-  });
+  return [buttonRow];
 }
 

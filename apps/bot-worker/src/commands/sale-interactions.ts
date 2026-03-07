@@ -27,7 +27,7 @@ import {
   type SaleDraft,
   type SaleDraftFormField,
 } from '../flows/sale-draft-store.js';
-import { sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
+import { buildCheckoutComponents, sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 
 const productRepository = new ProductRepository();
 const couponRepository = new CouponRepository();
@@ -340,78 +340,88 @@ async function finalizeDraft(input: {
   draft: SaleDraft;
   interaction: DraftFinalizeInteraction;
 }): Promise<void> {
-  if (!input.interaction.inGuild() || !input.interaction.channel || input.draft.basketItems.length === 0) {
-    await input.interaction.editReply({
-      content: 'Sale draft expired. Please start again with `/sale`.',
-      components: [],
-    });
-    return;
-  }
-
-  const primaryItem = input.draft.basketItems[0];
-  if (!primaryItem) {
-    await input.interaction.editReply({
-      content: 'Basket is empty. Please restart `/sale`.',
-      components: [],
-    });
-    return;
-  }
-
-  const created = await saleService.createSaleSessionFromBot({
-    tenantId: input.draft.tenantId,
-    guildId: input.draft.guildId,
-    ticketChannelId: input.draft.ticketChannelId,
-    staffDiscordUserId: input.draft.staffDiscordUserId,
-    customerDiscordUserId: input.draft.customerDiscordUserId,
-    productId: primaryItem.productId,
-    variantId: primaryItem.variantId,
-    items: input.draft.basketItems.map((item) => ({
-      productId: item.productId,
-      variantId: item.variantId,
-    })),
-    couponCode: input.draft.couponCode,
-    tipMinor: input.draft.tipMinor,
-    usePoints: input.draft.usePoints,
-    answers: input.draft.answers,
-  });
-
-  if (created.isErr()) {
-    await input.interaction.editReply({ content: created.error.message, components: [] });
-    return;
-  }
-
-  removeSaleDraft(input.draftId);
-
   try {
-    await sendCheckoutMessage(input.interaction.channel as any, {
-      checkoutUrl: created.value.checkoutUrl,
-      checkoutOptions: created.value.checkoutOptions,
-      orderSessionId: created.value.orderSessionId,
+    if (!input.interaction.inGuild() || !input.interaction.channel || input.draft.basketItems.length === 0) {
+      await input.interaction.editReply({
+        content: 'Sale draft expired. Please start again with `/sale`.',
+        components: [],
+      });
+      return;
+    }
+
+    const primaryItem = input.draft.basketItems[0];
+    if (!primaryItem) {
+      await input.interaction.editReply({
+        content: 'Basket is empty. Please restart `/sale`.',
+        components: [],
+      });
+      return;
+    }
+
+    const created = await saleService.createSaleSessionFromBot({
+      tenantId: input.draft.tenantId,
+      guildId: input.draft.guildId,
+      ticketChannelId: input.draft.ticketChannelId,
+      staffDiscordUserId: input.draft.staffDiscordUserId,
       customerDiscordUserId: input.draft.customerDiscordUserId,
+      productId: primaryItem.productId,
+      variantId: primaryItem.variantId,
+      items: input.draft.basketItems.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+      })),
+      couponCode: input.draft.couponCode,
+      tipMinor: input.draft.tipMinor,
+      usePoints: input.draft.usePoints,
+      answers: input.draft.answers,
     });
-  } catch {
+
+    if (created.isErr()) {
+      await input.interaction.editReply({ content: created.error.message, components: [] });
+      return;
+    }
+
+    removeSaleDraft(input.draftId);
+
+    try {
+      await sendCheckoutMessage(input.interaction.channel as any, {
+        checkoutUrl: created.value.checkoutUrl,
+        checkoutOptions: created.value.checkoutOptions,
+        orderSessionId: created.value.orderSessionId,
+        customerDiscordUserId: input.draft.customerDiscordUserId,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown error while posting checkout message.';
+      await input.interaction.editReply({
+        content: [
+          'Checkout created, but I could not post the public checkout message in this channel.',
+          `Reason: ${reason}`,
+          'Use the checkout button below instead.',
+          `Order Session: \`${created.value.orderSessionId}\``,
+        ].join('\n'),
+        components: buildCheckoutComponents({
+          checkoutUrl: created.value.checkoutUrl,
+          checkoutOptions: created.value.checkoutOptions,
+        }),
+      });
+      return;
+    }
+
+    const warningLines = created.value.warnings.map((warning) => `Warning: ${warning}`);
     await input.interaction.editReply({
       content: [
-        'Checkout created, but I could not post the public checkout message in this channel.',
-        `Order Session: \`${created.value.orderSessionId}\``,
-        `Checkout URL: ${created.value.checkoutUrl}`,
-        ...created.value.checkoutOptions
-          .filter((option) => option.method === 'crypto')
-          .map((option) => `Crypto Checkout URL: ${option.url}`),
+        `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
+        ...warningLines,
       ].join('\n'),
       components: [],
     });
-    return;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected checkout error.';
+    await input.interaction.editReply({
+      content: `Checkout creation failed: ${message}`,
+      components: [],
+    });
   }
-
-  const warningLines = created.value.warnings.map((warning) => `Warning: ${warning}`);
-  await input.interaction.editReply({
-    content: [
-      `Checkout link generated. Order session: \`${created.value.orderSessionId}\``,
-      ...warningLines,
-    ].join('\n'),
-    components: [],
-  });
 }
 
 async function maybePromptPointsBeforeFinalize(input: {
