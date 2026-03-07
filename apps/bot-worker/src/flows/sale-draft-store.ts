@@ -58,7 +58,14 @@ export type SaleDraft = {
 
 const draftStore = new Map<string, SaleDraft>();
 
-const DRAFT_TTL_MS = 15 * 60 * 1000;
+export const SALE_DRAFT_TTL_MS = 60 * 60 * 1000;
+
+function refreshDraftExpiry(draft: SaleDraft): SaleDraft {
+  return {
+    ...draft,
+    expiresAt: Date.now() + SALE_DRAFT_TTL_MS,
+  };
+}
 
 export function createSaleDraft(input: {
   tenantId: string;
@@ -97,7 +104,7 @@ export function createSaleDraft(input: {
     pointsReservedIfUsed: 0,
     pointsDiscountMinorIfUsed: 0,
     pointValueMinor: 1,
-    expiresAt: Date.now() + DRAFT_TTL_MS,
+    expiresAt: Date.now() + SALE_DRAFT_TTL_MS,
   };
 
   draftStore.set(draft.id, draft);
@@ -115,14 +122,13 @@ export function getSaleDraft(draftId: string): SaleDraft | null {
     return null;
   }
 
-  return draft;
+  const refreshedDraft = refreshDraftExpiry(draft);
+  draftStore.set(draftId, refreshedDraft);
+  return refreshedDraft;
 }
 
 export function updateSaleDraft(draft: SaleDraft): void {
-  draftStore.set(draft.id, {
-    ...draft,
-    expiresAt: Date.now() + DRAFT_TTL_MS,
-  });
+  draftStore.set(draft.id, refreshDraftExpiry(draft));
 }
 
 export function removeSaleDraft(draftId: string): void {

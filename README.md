@@ -87,6 +87,7 @@ Copy `.env.example` to `.env` and fill values.
 ## Ticket Sale Flow
 
 - Staff runs `/sale` in any server channel where they have required permissions.
+- Sale drafts stay active for 1 hour and refresh their expiry as staff move through the flow.
 - Bot shows category -> product -> variant flow with Back buttons on selection steps.
 - After variant selection, bot supports basket flow (`Add More Products` or continue).
 - Coupon step is optional; entered code is validated against server coupon settings and selected basket item scope.
