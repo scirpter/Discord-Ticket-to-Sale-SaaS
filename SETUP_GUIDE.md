@@ -427,6 +427,7 @@ Expected:
 - Both PM2 apps are `online`
 - Domain responds with HTTP success code
 - `/dashboard` opens in browser
+- Dashboard sections expand/collapse correctly and the catalog builder shows the four guided steps
 
 ---
 

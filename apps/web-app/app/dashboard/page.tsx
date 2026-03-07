@@ -3366,7 +3366,7 @@ export default function DashboardPage() {
                   isOpen={openCatalogSections.includes('overview')}
                   onToggle={toggleCatalogSection}
                   stepLabel="01"
-                  title="Review Existing Products"
+                  title="Review catalog"
                   description="Refresh the live catalog and jump into edits without opening the full builder."
                   summaryItems={catalogOverviewSummaryItems}
                 >
@@ -3852,13 +3852,13 @@ export default function DashboardPage() {
                   isOpen={openCatalogSections.includes('product')}
                   onToggle={toggleCatalogSection}
                   stepLabel="03"
-                  title="Product details"
+                  title="Product basics"
                   description="Choose the category, set the product name, and decide if this listing should be active right away."
                   summaryItems={productStepSummaryItems}
                 >
                   <div className="space-y-4">
                     <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Create / Edit Product
+                      Product basics
                     </h3>
 
                     <div className="grid gap-4 md:grid-cols-2">
@@ -3889,8 +3889,8 @@ export default function DashboardPage() {
                           </Button>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Pick an existing category from the list, or create a new one from the
-                          section above.
+                          Pick an existing category from the list, or build the category template in
+                          Step 02 first.
                         </p>
                       </div>
                       <div className="space-y-2">

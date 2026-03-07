@@ -3,12 +3,13 @@
 ## Server Settings
 
 - Open dashboard and select workspace + Discord server.
-- In **Server Sales Settings**, enable or disable:
+- Expand the **Sales Settings** panel.
+- In **Sales Settings**, enable or disable:
   - `Ask customer for optional tip before checkout link generation`.
 
 ## Coupon Management
 
-- Open dashboard section **Coupons**.
+- Expand the **Coupons** panel.
 - Create coupon:
   - `Code` (e.g. `SAVE10`).
   - `Discount Amount (GBP)` (fixed amount).

@@ -8,7 +8,7 @@
 
 ## Merchant Setup
 
-In dashboard **Server Sales Settings**:
+In dashboard, expand **Sales Settings**:
 
 - Set `Value of 1 point` (major currency input, stored as minor integer).
   - This controls redemption value (discount per point), not how many points are earned per 1.00 spent.
@@ -18,7 +18,7 @@ In dashboard **Server Sales Settings**:
 
 ## Customer Management
 
-Dashboard **Customer Points** supports:
+Inside the **Sales Settings** panel, the **Customer Points** area supports:
 
 - List customer emails with `balance`, `reserved`, and `available` points.
 - Search by email.
