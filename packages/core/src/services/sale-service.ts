@@ -328,7 +328,7 @@ export class SaleService {
         return err(tenantActiveCheck.error);
       }
 
-      return this.createSaleSessionInternal(input);
+      return await this.createSaleSessionInternal(input);
     } catch (error) {
       return err(fromUnknownError(error));
     }
@@ -341,7 +341,7 @@ export class SaleService {
         return err(tenantActiveCheck.error);
       }
 
-      return this.createSaleSessionInternal(input);
+      return await this.createSaleSessionInternal(input);
     } catch (error) {
       return err(fromUnknownError(error));
     }
