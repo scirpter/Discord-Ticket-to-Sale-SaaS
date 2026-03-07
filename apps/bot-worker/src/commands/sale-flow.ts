@@ -1,7 +1,5 @@
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
@@ -247,14 +245,10 @@ export async function sendCheckoutMessage(
     );
   }
 
-  const buttonRows = buildCheckoutComponents({
+  const checkoutLinks = buildCheckoutLinkLines({
     checkoutUrl: input.checkoutUrl,
     checkoutOptions: input.checkoutOptions,
   });
-
-  if (buttonRows.length === 0) {
-    throw new Error('No checkout button could be generated for this sale session.');
-  }
 
   await channel.send({
     content: [
@@ -262,27 +256,31 @@ export async function sendCheckoutMessage(
       `Order Session: \`${input.orderSessionId}\``,
       'Choose payment method below.',
       '',
+      ...checkoutLinks,
+      '',
       'Payment update will be posted here once paid. This may take up to 30 minutes. Do NOT pay again.',
     ].join('\n'),
-    components: buttonRows,
   });
 }
 
-export function buildCheckoutComponents(input: {
+function toMaskedLink(label: string, url: string): string {
+  const safeUrl = url.replace(/\)/g, '%29');
+  return `[${label}](<${safeUrl}>)`;
+}
+
+export function buildCheckoutLinkLines(input: {
   checkoutUrl: string;
   checkoutOptions?: SaleCheckoutOption[];
-}): ActionRowBuilder<ButtonBuilder>[] {
+}): string[] {
   const checkoutOptions =
     input.checkoutOptions && input.checkoutOptions.length > 0
       ? input.checkoutOptions
       : [{ method: 'pay' as const, label: 'Pay', url: input.checkoutUrl }];
 
-  const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    checkoutOptions.slice(0, 5).map((option) =>
-      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(option.label).setURL(option.url),
-    ),
-  );
+  if (checkoutOptions.length === 1 && checkoutOptions[0]?.method === 'pay') {
+    return [`${toMaskedLink('Click Here To Pay', checkoutOptions[0].url)}`];
+  }
 
-  return [buttonRow];
+  return checkoutOptions.slice(0, 5).map((option) => `- ${toMaskedLink(option.label, option.url)}`);
 }
 

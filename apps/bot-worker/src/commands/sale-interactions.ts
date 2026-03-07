@@ -27,7 +27,7 @@ import {
   type SaleDraft,
   type SaleDraftFormField,
 } from '../flows/sale-draft-store.js';
-import { buildCheckoutComponents, sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
+import { buildCheckoutLinkLines, sendCheckoutMessage, startSaleFlowFromButton } from './sale-flow.js';
 
 const productRepository = new ProductRepository();
 const couponRepository = new CouponRepository();
@@ -396,13 +396,15 @@ async function finalizeDraft(input: {
         content: [
           'Checkout created, but I could not post the public checkout message in this channel.',
           `Reason: ${reason}`,
-          'Use the checkout button below instead.',
+          'Use the checkout link below instead.',
           `Order Session: \`${created.value.orderSessionId}\``,
+          '',
+          ...buildCheckoutLinkLines({
+            checkoutUrl: created.value.checkoutUrl,
+            checkoutOptions: created.value.checkoutOptions,
+          }),
         ].join('\n'),
-        components: buildCheckoutComponents({
-          checkoutUrl: created.value.checkoutUrl,
-          checkoutOptions: created.value.checkoutOptions,
-        }),
+        components: [],
       });
       return;
     }
