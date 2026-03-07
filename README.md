@@ -67,6 +67,8 @@ Copy `.env.example` to `.env` and fill values.
 - Tutorial walkthrough is role-aware and includes Super Admin-only steps only for super-admin sessions.
 - Tutorial popover now includes a `Jump to section` control for direct navigation to major dashboard parts.
 - Each major dashboard section now includes an `(i)` info action that starts the tutorial at that section.
+- Dashboard header now supports branded light/dark logos from the repo `assets` folder.
+- Catalog management now uses collapsible step panels so merchants can review products, manage category questions, edit product details, and handle variations without keeping the full builder open at once.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Server settings now include rewards configuration:
   - `point value` (minor currency based)

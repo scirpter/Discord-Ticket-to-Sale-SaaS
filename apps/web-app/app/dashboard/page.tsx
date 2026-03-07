@@ -6,10 +6,12 @@ import { driver } from 'driver.js';
 import {
   Activity,
   AlertCircle,
+  ChevronDown,
   CheckCircle2,
   Globe,
   Info,
   Loader2,
+  Layers3,
   Pencil,
   Plus,
   Settings2,
@@ -19,8 +21,19 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
+import {
+  type ComponentType,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
+import darkModeLogo from '../../../../assets/darkmode-logo.png';
+import lightModeLogo from '../../../../assets/lightmode-logo.png';
 import { TutorialLaunchModal } from '@/components/dashboard/tutorial-launch-modal';
 import { ModeToggle } from '@/components/mode-toggle';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +52,18 @@ import {
   buildDashboardTutorialSteps,
   hasDashboardTutorialMarker,
 } from '@/lib/dashboard-tutorial';
+import { getDashboardFocusForTutorialStep } from '@/lib/dashboard-layout';
+import {
+  CATALOG_SECTION_IDS,
+  DASHBOARD_SECTION_IDS,
+  DEFAULT_OPEN_CATALOG_SECTIONS,
+  DEFAULT_OPEN_DASHBOARD_SECTIONS,
+  ensurePanelOpen,
+  ensurePanelsOpen,
+  type CatalogSectionId,
+  type DashboardSectionId,
+  togglePanel,
+} from '@/lib/dashboard-panels';
 import { cn } from '@/lib/utils';
 
 type FieldType = 'short_text' | 'long_text' | 'email' | 'number';
@@ -223,7 +248,10 @@ async function apiCall(path: string, method = 'GET', body?: unknown): Promise<un
 
   if (!response.ok) {
     const message =
-      payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+      payload &&
+      typeof payload === 'object' &&
+      'error' in payload &&
+      typeof payload.error === 'string'
         ? payload.error
         : responseText.startsWith('<!DOCTYPE') || responseText.startsWith('<html')
           ? `Request failed with ${response.status}. Server returned HTML instead of JSON. Check Workspace ID + Discord Server ID first.`
@@ -322,8 +350,9 @@ function normalizeDiscordId(value: unknown): string {
 }
 
 function normalizeDiscordIdList(value: unknown): string[] {
-  const normalizeArray = (items: unknown[]): string[] =>
-    [...new Set(items.map((item) => normalizeDiscordId(item)).filter(Boolean))];
+  const normalizeArray = (items: unknown[]): string[] => [
+    ...new Set(items.map((item) => normalizeDiscordId(item)).filter(Boolean)),
+  ];
 
   if (Array.isArray(value)) {
     return normalizeArray(value);
@@ -408,6 +437,144 @@ function getDefaultQuestions(): QuestionDraft[] {
   return ensureRequiredEmailQuestion([]);
 }
 
+function compactSummary(...items: Array<string | false | null | undefined>): string[] {
+  return items.filter((item): item is string => Boolean(item));
+}
+
+type DashboardSectionHeaderProps = {
+  action?: ReactNode;
+  description: string;
+  icon: ComponentType<{ className?: string }>;
+  isOpen: boolean;
+  onToggle: (sectionId: DashboardSectionId) => void;
+  sectionId: DashboardSectionId;
+  summaryItems: string[];
+  title: string;
+};
+
+function DashboardSectionHeader({
+  action,
+  description,
+  icon: Icon,
+  isOpen,
+  onToggle,
+  sectionId,
+  summaryItems,
+  title,
+}: DashboardSectionHeaderProps): ReactNode {
+  return (
+    <CardHeader className="gap-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+        <button
+          type="button"
+          className="group flex w-full flex-1 items-start gap-4 rounded-2xl border border-border/60 bg-secondary/20 p-4 text-left transition-colors hover:bg-secondary/35"
+          onClick={() => onToggle(sectionId)}
+          aria-expanded={isOpen}
+        >
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-border/60 bg-background/80 shadow-sm">
+            <Icon className="size-4 text-primary" />
+          </span>
+          <span className="min-w-0 flex-1 space-y-3">
+            <span className="flex flex-wrap items-center gap-2">
+              <CardTitle className="text-lg">{title}</CardTitle>
+              <Badge
+                variant={isOpen ? 'default' : 'outline'}
+                className="rounded-full px-2.5 py-0.5 text-[11px]"
+              >
+                {isOpen ? 'Open' : 'Closed'}
+              </Badge>
+            </span>
+            <CardDescription>{description}</CardDescription>
+            <span className="flex flex-wrap gap-2">
+              {summaryItems.map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
+                >
+                  {item}
+                </span>
+              ))}
+            </span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground">
+            {isOpen ? 'Hide' : 'Open'}
+            <ChevronDown
+              className={cn('size-4 transition-transform duration-200', isOpen ? 'rotate-180' : '')}
+            />
+          </span>
+        </button>
+        {action ? <div className="flex items-center justify-end lg:pt-2">{action}</div> : null}
+      </div>
+    </CardHeader>
+  );
+}
+
+type CatalogStepPanelProps = {
+  children: ReactNode;
+  description: string;
+  isOpen: boolean;
+  onToggle: (sectionId: CatalogSectionId) => void;
+  sectionId: CatalogSectionId;
+  stepLabel: string;
+  summaryItems: string[];
+  title: string;
+};
+
+function CatalogStepPanel({
+  children,
+  description,
+  isOpen,
+  onToggle,
+  sectionId,
+  stepLabel,
+  summaryItems,
+  title,
+}: CatalogStepPanelProps): ReactNode {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border/60 bg-secondary/15">
+      <button
+        type="button"
+        className="flex w-full items-start gap-4 px-4 py-4 text-left transition-colors hover:bg-secondary/25"
+        onClick={() => onToggle(sectionId)}
+        aria-expanded={isOpen}
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-border/60 bg-background/80 text-xs font-semibold text-primary shadow-sm">
+          {stepLabel}
+        </span>
+        <span className="min-w-0 flex-1 space-y-2">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">{title}</span>
+            <Badge
+              variant={isOpen ? 'secondary' : 'outline'}
+              className="rounded-full px-2.5 py-0.5 text-[11px]"
+            >
+              {isOpen ? 'Expanded' : 'Collapsed'}
+            </Badge>
+          </span>
+          <p className="text-sm text-muted-foreground">{description}</p>
+          <span className="flex flex-wrap gap-2">
+            {summaryItems.map((item) => (
+              <span
+                key={item}
+                className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
+              >
+                {item}
+              </span>
+            ))}
+          </span>
+        </span>
+        <ChevronDown
+          className={cn(
+            'mt-1 size-4 shrink-0 text-muted-foreground transition-transform',
+            isOpen ? 'rotate-180' : '',
+          )}
+        />
+      </button>
+      {isOpen ? <div className="border-t border-border/60 px-4 py-4">{children}</div> : null}
+    </div>
+  );
+}
+
 function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
   const mapped = fields
     .map((field, index) => ({
@@ -424,7 +591,9 @@ function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
     return getDefaultQuestions();
   }
 
-  return ensureRequiredEmailQuestion(mapped.map((question, sortOrder) => ({ ...question, sortOrder })));
+  return ensureRequiredEmailQuestion(
+    mapped.map((question, sortOrder) => ({ ...question, sortOrder })),
+  );
 }
 
 export default function DashboardPage() {
@@ -443,6 +612,16 @@ export default function DashboardPage() {
   const [sessionError, setSessionError] = useState('');
   const [isTutorialPromptOpen, setIsTutorialPromptOpen] = useState(false);
   const tutorialDriverRef = useRef<ReturnType<typeof driver> | null>(null);
+  const tutorialExpansionStateRef = useRef<{
+    dashboardSections: DashboardSectionId[];
+    catalogSections: CatalogSectionId[];
+  } | null>(null);
+  const [openDashboardSections, setOpenDashboardSections] = useState<DashboardSectionId[]>(
+    DEFAULT_OPEN_DASHBOARD_SECTIONS,
+  );
+  const [openCatalogSections, setOpenCatalogSections] = useState<CatalogSectionId[]>(
+    DEFAULT_OPEN_CATALOG_SECTIONS,
+  );
 
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [createTenantName, setCreateTenantName] = useState('');
@@ -556,9 +735,13 @@ export default function DashboardPage() {
   );
   const existingCategories = useMemo(
     () =>
-      Array.from(new Set(products.map((product) => product.category.trim()).filter((category) => Boolean(category)))).sort(
-        (a, b) => a.localeCompare(b),
-      ),
+      Array.from(
+        new Set(
+          products
+            .map((product) => product.category.trim())
+            .filter((category) => Boolean(category)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
     [products],
   );
   const categoryTemplateByKey = useMemo(() => {
@@ -588,15 +771,21 @@ export default function DashboardPage() {
   }, [products]);
   const categorySelectOptions = useMemo(
     () =>
-      Array.from(new Set([...existingCategories, categoryBuilderName.trim()].filter((category) => Boolean(category)))).sort(
-        (a, b) => a.localeCompare(b),
-      ),
+      Array.from(
+        new Set(
+          [...existingCategories, categoryBuilderName.trim()].filter((category) =>
+            Boolean(category),
+          ),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
     [categoryBuilderName, existingCategories],
   );
   const selectedExistingCategoryForBuilder = useMemo(() => {
     const normalizedBuilder = normalizeCategoryKey(categoryBuilderName);
     return (
-      categorySelectOptions.find((category) => normalizeCategoryKey(category) === normalizedBuilder) ?? ''
+      categorySelectOptions.find(
+        (category) => normalizeCategoryKey(category) === normalizedBuilder,
+      ) ?? ''
     );
   }, [categoryBuilderName, categorySelectOptions]);
   const pointsCategoryOptions = useMemo(
@@ -631,6 +820,119 @@ export default function DashboardPage() {
         )
         .sort((left, right) => left.label.localeCompare(right.label)),
     [products],
+  );
+  const selectedTenantName = myTenants.find((tenant) => tenant.id === tenantId)?.name ?? '';
+  const normalizedCheckoutDomain = normalizeCheckoutDomainInput(voodooCheckoutDomain);
+  const workspaceSummaryItems = compactSummary(
+    tenantId ? `Workspace: ${selectedTenantName || tenantId}` : 'Select workspace',
+    guildId ? `Server: ${selectedDiscordGuild?.name ?? guildId}` : 'Select Discord server',
+    guildResourcesLoading
+      ? 'Checking bot access'
+      : serverReady
+        ? 'Bot installed'
+        : guildId
+          ? 'Invite bot to continue'
+          : 'Bot status pending',
+  );
+  const salesSummaryItems = compactSummary(
+    paidLogChannelId ? 'Paid log ready' : 'Paid log pending',
+    `${selectedStaffRoleIds.length} staff role${selectedStaffRoleIds.length === 1 ? '' : 's'}`,
+    tipEnabled ? 'Tips enabled' : 'Tips off',
+    referralRewardCategoryKeys.length ||
+      pointsEarnCategoryKeys.length ||
+      pointsRedeemCategoryKeys.length
+      ? 'Rewards configured'
+      : 'Rewards optional',
+  );
+  const paymentSummaryItems = compactSummary(
+    normalizedCheckoutDomain ? `Domain: ${normalizedCheckoutDomain}` : 'Checkout domain missing',
+    voodooMerchantWalletAddress.trim() ? 'Wallet set' : 'Wallet pending',
+    voodooWebhookUrl ? 'Webhook ready' : 'Webhook not generated',
+    voodooCryptoGatewayEnabled ? 'Crypto on' : 'Crypto off',
+  );
+  const couponSummaryItems = compactSummary(
+    `${coupons.length} coupon${coupons.length === 1 ? '' : 's'}`,
+    editingCouponId ? 'Editing coupon draft' : 'No coupon draft open',
+    couponAllowedProductIdsInput.length || couponAllowedVariantIdsInput.length
+      ? 'Scoped discount'
+      : 'Store-wide discount',
+  );
+  const catalogSummaryItems = compactSummary(
+    `${products.length} product${products.length === 1 ? '' : 's'}`,
+    `${existingCategories.length} categor${existingCategories.length === 1 ? 'y' : 'ies'}`,
+    editingProductId
+      ? 'Editing product draft'
+      : productName.trim() || variants.length > 0
+        ? 'New product draft in progress'
+        : 'No product draft open',
+    `${questions.length} checkout question${questions.length === 1 ? '' : 's'}`,
+  );
+  const superAdminSummaryItems = compactSummary(
+    'Global tenant tools',
+    botToken.trim() ? 'Token draft present' : 'Token input empty',
+  );
+  const latestActionSummaryItems = compactSummary(
+    state.loading
+      ? 'Request running'
+      : state.error
+        ? 'Last request failed'
+        : state.response
+          ? 'Last request succeeded'
+          : 'No recent actions',
+    state.error ? 'Review output for details' : '',
+  );
+  const catalogOverviewSummaryItems = compactSummary(
+    `${products.length} live product${products.length === 1 ? '' : 's'}`,
+    `${existingCategories.length} categor${existingCategories.length === 1 ? 'y' : 'ies'}`,
+    editingProductId ? 'Edit mode ready' : 'Choose a product to edit',
+  );
+  const categoryStepSummaryItems = compactSummary(
+    categoryBuilderName.trim()
+      ? `Category: ${categoryBuilderName.trim()}`
+      : 'Choose or type a category',
+    `${questions.length} question${questions.length === 1 ? '' : 's'} in draft`,
+    selectedExistingCategoryForBuilder ? 'Using existing template' : 'New template flow',
+  );
+  const productStepSummaryItems = compactSummary(
+    productCategory.trim() ? `Category: ${productCategory.trim()}` : 'Product category missing',
+    productName.trim() ? `Name: ${productName.trim()}` : 'Product name pending',
+    productActive ? 'Marked active' : 'Marked inactive',
+  );
+  const pricingStepSummaryItems = compactSummary(
+    `${variants.length} price option${variants.length === 1 ? '' : 's'}`,
+    editingVariantIndex !== null ? 'Editing one price option' : 'Ready for a new price option',
+    editingProductId ? 'Save updates when pricing is ready' : 'Finish here to create the product',
+  );
+
+  const toggleDashboardSection = useCallback((sectionId: DashboardSectionId) => {
+    setOpenDashboardSections((current) => togglePanel(current, sectionId));
+  }, []);
+
+  const focusDashboardSection = useCallback((sectionId: DashboardSectionId) => {
+    setOpenDashboardSections((current) => ensurePanelOpen(current, sectionId));
+  }, []);
+
+  const toggleCatalogSection = useCallback((sectionId: CatalogSectionId) => {
+    setOpenCatalogSections((current) => togglePanel(current, sectionId));
+  }, []);
+
+  const focusCatalogSection = useCallback(
+    (sectionId: CatalogSectionId) => {
+      focusDashboardSection('catalog');
+      setOpenCatalogSections((current) => ensurePanelOpen(current, sectionId));
+    },
+    [focusDashboardSection],
+  );
+
+  const focusTutorialStep = useCallback(
+    (stepId: string) => {
+      const target = getDashboardFocusForTutorialStep(stepId);
+      focusDashboardSection(target.dashboard);
+      if (target.catalog) {
+        focusCatalogSection(target.catalog);
+      }
+    },
+    [focusCatalogSection, focusDashboardSection],
   );
 
   const runAction = useCallback(async (action: () => Promise<unknown>) => {
@@ -671,15 +973,29 @@ export default function DashboardPage() {
 
       setIsTutorialPromptOpen(false);
       tutorialDriverRef.current?.destroy();
+      tutorialExpansionStateRef.current = {
+        dashboardSections: [...openDashboardSections],
+        catalogSections: [...openCatalogSections],
+      };
+      setOpenDashboardSections((current) => ensurePanelsOpen(current, DASHBOARD_SECTION_IDS));
+      setOpenCatalogSections((current) => ensurePanelsOpen(current, CATALOG_SECTION_IDS));
 
       const stepDefs = buildDashboardTutorialStepDefs({ isSuperAdmin });
-      const steps = buildDashboardTutorialSteps({ isSuperAdmin }).map((step) => {
+      const steps = buildDashboardTutorialSteps({ isSuperAdmin }).map((step, index) => {
+        const stepDef = stepDefs[index];
+        const stepWithFocus = stepDef
+          ? {
+              ...step,
+              onHighlightStarted: () => focusTutorialStep(stepDef.id),
+            }
+          : step;
+
         if (typeof step.element === 'string' && !document.querySelector(step.element)) {
-          const { element: _missingElement, ...stepWithoutElement } = step;
+          const { element: _missingElement, ...stepWithoutElement } = stepWithFocus;
           return stepWithoutElement;
         }
 
-        return step;
+        return stepWithFocus;
       });
       const stepIdToIndex = new Map(stepDefs.map((step, index) => [step.id, index]));
       const sectionJumps = buildDashboardTutorialSectionJumps({ isSuperAdmin });
@@ -721,7 +1037,8 @@ export default function DashboardPage() {
               jumpSelect.appendChild(option);
             }
 
-            const activeIndex = typeof options.state.activeIndex === 'number' ? options.state.activeIndex : 0;
+            const activeIndex =
+              typeof options.state.activeIndex === 'number' ? options.state.activeIndex : 0;
             const activeSection = [...sectionJumps]
               .reverse()
               .find((section) => activeIndex >= section.stepIndex);
@@ -754,6 +1071,12 @@ export default function DashboardPage() {
           }
         },
         onDestroyed: () => {
+          const previousExpansionState = tutorialExpansionStateRef.current;
+          if (previousExpansionState) {
+            setOpenDashboardSections(previousExpansionState.dashboardSections);
+            setOpenCatalogSections(previousExpansionState.catalogSections);
+            tutorialExpansionStateRef.current = null;
+          }
           tutorialDriverRef.current = null;
         },
       });
@@ -763,9 +1086,12 @@ export default function DashboardPage() {
         options?.startAtStepId && stepIdToIndex.has(options.startAtStepId)
           ? (stepIdToIndex.get(options.startAtStepId) ?? 0)
           : 0;
+      if (options?.startAtStepId) {
+        focusTutorialStep(options.startAtStepId);
+      }
       tutorialDriver.drive(startAtStepIndex);
     },
-    [isSuperAdmin, markTutorialSeen],
+    [focusTutorialStep, isSuperAdmin, markTutorialSeen, openCatalogSections, openDashboardSections],
   );
 
   const loadSession = useCallback(async () => {
@@ -780,7 +1106,10 @@ export default function DashboardPage() {
 
       if (!response.ok) {
         const message =
-          payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+          payload &&
+          typeof payload === 'object' &&
+          'error' in payload &&
+          typeof payload.error === 'string'
             ? payload.error
             : responseText.startsWith('<!DOCTYPE') || responseText.startsWith('<html')
               ? 'Authentication endpoint returned HTML. Verify nginx is proxying /api to Next.js.'
@@ -862,7 +1191,9 @@ export default function DashboardPage() {
       setGuildResources(payload);
     } catch (error) {
       setGuildResources(null);
-      setGuildResourcesError(error instanceof Error ? error.message : 'Unable to load server metadata');
+      setGuildResourcesError(
+        error instanceof Error ? error.message : 'Unable to load server metadata',
+      );
     } finally {
       setGuildResourcesLoading(false);
     }
@@ -932,21 +1263,29 @@ export default function DashboardPage() {
         setTipEnabled(Boolean(configPayload.config.tipEnabled));
         setPointsEarnCategoryKeys(
           Array.isArray(configPayload.config.pointsEarnCategoryKeys)
-            ? configPayload.config.pointsEarnCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+            ? configPayload.config.pointsEarnCategoryKeys
+                .map((value) => normalizeCategoryKey(value))
+                .filter(Boolean)
             : [],
         );
         setPointsRedeemCategoryKeys(
           Array.isArray(configPayload.config.pointsRedeemCategoryKeys)
-            ? configPayload.config.pointsRedeemCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+            ? configPayload.config.pointsRedeemCategoryKeys
+                .map((value) => normalizeCategoryKey(value))
+                .filter(Boolean)
             : [],
         );
         setPointValueMajor(formatPointValueMinorToMajor(configPayload.config.pointValueMinor));
-        const nextReferralRewardMajor = formatMinorToMajor(configPayload.config.referralRewardMinor);
+        const nextReferralRewardMajor = formatMinorToMajor(
+          configPayload.config.referralRewardMinor,
+        );
         setReferralRewardMajor(nextReferralRewardMajor);
         setVariantReferralRewardInput(nextReferralRewardMajor);
         setReferralRewardCategoryKeys(
           Array.isArray(configPayload.config.referralRewardCategoryKeys)
-            ? configPayload.config.referralRewardCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
+            ? configPayload.config.referralRewardCategoryKeys
+                .map((value) => normalizeCategoryKey(value))
+                .filter(Boolean)
             : [],
         );
         setReferralLogChannelId(normalizeDiscordId(configPayload.config.referralLogChannelId));
@@ -1166,7 +1505,10 @@ export default function DashboardPage() {
     void hydrateContextData();
   }, [guildId, hydrateContextData, tenantId]);
 
-  function requireWorkspaceAndServer(options?: { requireBot?: boolean }): { workspaceId: string; discordServerId: string } {
+  function requireWorkspaceAndServer(options?: { requireBot?: boolean }): {
+    workspaceId: string;
+    discordServerId: string;
+  } {
     const workspaceId = tenantId.trim();
     const discordServerId = guildId.trim();
 
@@ -1189,6 +1531,8 @@ export default function DashboardPage() {
   }
 
   function addPriceOption() {
+    focusCatalogSection('pricing');
+
     if (!variantLabelInput.trim()) {
       setState({ loading: false, response: '', error: 'Price option label is required.' });
       return;
@@ -1230,6 +1574,7 @@ export default function DashboardPage() {
   }
 
   function removePriceOption(index: number) {
+    focusCatalogSection('pricing');
     setVariants((current) => current.filter((_, currentIndex) => currentIndex !== index));
     setEditingVariantIndex((current) => {
       if (current === null) {
@@ -1246,6 +1591,7 @@ export default function DashboardPage() {
   }
 
   function editPriceOption(index: number): void {
+    focusCatalogSection('pricing');
     const variant = variants[index];
     if (!variant) {
       return;
@@ -1265,14 +1611,24 @@ export default function DashboardPage() {
   }
 
   function addQuestion() {
+    focusCatalogSection('category');
+
     if (!questionKeyInput.trim() || !questionLabelInput.trim()) {
-      setState({ loading: false, response: '', error: 'Question key and question label are required.' });
+      setState({
+        loading: false,
+        response: '',
+        error: 'Question key and question label are required.',
+      });
       return;
     }
 
     const normalizedKey = questionKeyInput.trim().toLowerCase();
     if (questions.some((question) => question.key.trim().toLowerCase() === normalizedKey)) {
-      setState({ loading: false, response: '', error: 'Question key must be unique per category.' });
+      setState({
+        loading: false,
+        response: '',
+        error: 'Question key must be unique per category.',
+      });
       return;
     }
 
@@ -1350,6 +1706,7 @@ export default function DashboardPage() {
   }
 
   function loadQuestionsForCategory(category: string): void {
+    focusCatalogSection('category');
     const normalizedCategory = category.trim();
     setCategoryBuilderName(normalizedCategory);
     if (normalizedCategory) {
@@ -1367,7 +1724,11 @@ export default function DashboardPage() {
       return;
     }
 
-    setQuestions(ensureRequiredEmailQuestion(template.questions.map((question, sortOrder) => ({ ...question, sortOrder }))));
+    setQuestions(
+      ensureRequiredEmailQuestion(
+        template.questions.map((question, sortOrder) => ({ ...question, sortOrder })),
+      ),
+    );
   }
 
   async function refreshProducts(): Promise<ProductRecord[]> {
@@ -1392,7 +1753,9 @@ export default function DashboardPage() {
     return nextCoupons;
   }
 
-  async function refreshPointsCustomers(search = pointsSearchInput): Promise<PointsCustomerRecord[]> {
+  async function refreshPointsCustomers(
+    search = pointsSearchInput,
+  ): Promise<PointsCustomerRecord[]> {
     const context = requireWorkspaceAndServer({ requireBot: true });
 
     setPointsCustomersLoading(true);
@@ -1454,10 +1817,7 @@ export default function DashboardPage() {
     });
   }
 
-  function setVoodooCryptoWallet(
-    key: keyof VoodooCryptoWallets,
-    value: string,
-  ): void {
+  function setVoodooCryptoWallet(key: keyof VoodooCryptoWallets, value: string): void {
     setVoodooCryptoWallets((current) => ({
       ...current,
       [key]: value,
@@ -1474,6 +1834,7 @@ export default function DashboardPage() {
   }
 
   function loadCouponIntoBuilder(coupon: CouponRecord): void {
+    focusDashboardSection('coupons');
     setEditingCouponId(coupon.id);
     setCouponCodeInput(coupon.code);
     setCouponDiscountInput((coupon.discountMinor / 100).toFixed(2));
@@ -1487,6 +1848,7 @@ export default function DashboardPage() {
   }
 
   function resetProductBuilder(options?: { keepCategory?: string }): void {
+    focusCatalogSection('product');
     setEditingProductId(null);
     setProductCategory(options?.keepCategory?.trim() || categoryBuilderName.trim() || 'Accounts');
     setProductName('');
@@ -1500,6 +1862,8 @@ export default function DashboardPage() {
   }
 
   function loadProductIntoBuilder(product: ProductRecord): void {
+    focusCatalogSection('product');
+    focusCatalogSection('pricing');
     setEditingProductId(product.id);
     setCategoryBuilderName(product.category);
     setProductCategory(product.category);
@@ -1577,15 +1941,36 @@ export default function DashboardPage() {
 
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-3" data-tutorial="dashboard-title">
-            <Badge variant="secondary" className="border border-border/60 bg-card/80 px-3 py-1 text-[11px] uppercase">
-              Multi-Tenant Sales Dashboard
-            </Badge>
+          <div className="space-y-4" data-tutorial="dashboard-title">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <div className="inline-flex w-fit items-center rounded-[1.25rem] border border-border/60 bg-card/80 px-4 py-3 shadow-lg shadow-black/5 backdrop-blur">
+                <Image
+                  src={lightModeLogo}
+                  alt="Dashboard logo"
+                  priority
+                  className="h-7 w-auto dark:hidden"
+                />
+                <Image
+                  src={darkModeLogo}
+                  alt="Dashboard logo"
+                  priority
+                  className="hidden h-7 w-auto dark:block"
+                />
+              </div>
+              <Badge
+                variant="secondary"
+                className="w-fit border border-border/60 bg-card/80 px-3 py-1 text-[11px] uppercase"
+              >
+                Merchant Dashboard
+              </Badge>
+            </div>
             <div className="space-y-2">
-              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Ticket Commerce Control Center</h1>
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                Ticket Commerce Control Center
+              </h1>
               <p className="max-w-3xl text-sm text-muted-foreground sm:text-base">
-                Pick workspace, select Discord server, then configure channels, roles, Voodoo Pay, and products without
-                manual IDs.
+                Open only the section you need, work top to bottom, and keep merchant setup focused
+                without bouncing across a crowded page.
               </p>
             </div>
           </div>
@@ -1606,2005 +1991,2311 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-1">
+        <section className="grid gap-4">
           <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Store className="size-4 text-primary" />
-                <span>1. Workspace + Discord Server</span>
+            <DashboardSectionHeader
+              sectionId="workspace"
+              isOpen={openDashboardSections.includes('workspace')}
+              onToggle={toggleDashboardSection}
+              icon={Store}
+              title="Workspace & Server"
+              description="Start here. Choose the merchant workspace and Discord server before editing any setup below."
+              summaryItems={workspaceSummaryItems}
+              action={
                 <Button
                   type="button"
                   size="icon-sm"
                   variant="ghost"
-                  className="ml-auto text-muted-foreground hover:text-foreground"
-                  aria-label="Show tutorial info for Workspace and Discord Server"
-                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'workspace-select' })}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Workspace and Server"
+                  onClick={() =>
+                    runDashboardTutorial({ markSeen: true, startAtStepId: 'workspace-select' })
+                  }
                 >
                   <Info className="size-4" />
                 </Button>
-              </CardTitle>
-              <CardDescription>
-                Choose workspace and Discord server. Server linking is automatic when bot is installed.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="workspace-select">Workspace</Label>
-                  <select
-                    id="workspace-select"
-                    className={nativeSelectClass}
-                    value={tenantId}
-                    onChange={(event) => {
-                      setTenantId(event.target.value);
-                      setLinkedContextKeys({});
-                    }}
-                    disabled={myTenants.length === 0}
-                  >
-                    <option value="">
-                      {myTenants.length === 0 ? 'No workspaces available yet' : 'Select workspace'}
-                    </option>
-                    {myTenants.map((tenant) => (
-                      <option key={tenant.id} value={tenant.id}>
-                        {tenant.name} ({tenant.status})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="discord-server-select">Discord Server</Label>
-                  <select
-                    id="discord-server-select"
-                    className={nativeSelectClass}
-                    value={guildId}
-                    onChange={(event) => {
-                      setGuildId(event.target.value);
-                      setLinkedContextKeys({});
-                    }}
-                    disabled={discordGuilds.length === 0}
-                  >
-                    <option value="">
-                      {discordGuilds.length === 0 ? 'No manageable Discord servers found' : 'Select Discord server'}
-                    </option>
-                    {discordGuilds.map((guild) => (
-                      <option key={guild.id} value={guild.id}>
-                        {guild.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  data-tutorial="workspace-create-toggle"
-                  onClick={() => setShowCreateWorkspace((current) => !current)}
-                >
-                  {showCreateWorkspace ? 'Cancel New Workspace' : 'Create New Workspace'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  data-tutorial="workspace-delete"
-                  disabled={state.loading || !tenantId}
-                  onClick={() =>
-                    runAction(async () => {
-                      const selectedTenant = myTenants.find((tenant) => tenant.id === tenantId);
-                      if (!selectedTenant) {
-                        throw new Error('Select a workspace to delete.');
-                      }
-
-                      const confirmed = window.confirm(
-                        `Delete workspace "${selectedTenant.name}" and all associated data? This cannot be undone.`,
-                      );
-                      if (!confirmed) {
-                        return { cancelled: true };
-                      }
-
-                      await apiCall(`/api/tenants/${encodeURIComponent(selectedTenant.id)}`, 'DELETE');
-                      await loadSession();
-                      setLinkedContextKeys({});
-                      return { deletedWorkspaceId: selectedTenant.id };
-                    })
-                  }
-                >
-                  <Trash2 className="size-4" />
-                  Delete Workspace
-                </Button>
-              </div>
-
-              {showCreateWorkspace ? (
-                <div className="rounded-lg border border-border/60 bg-secondary/35 p-3">
+              }
+            />
+            {openDashboardSections.includes('workspace') ? (
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 lg:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="workspace-name">New Workspace Name</Label>
-                    <Input
-                      id="workspace-name"
-                      value={createTenantName}
-                      onChange={(event) => setCreateTenantName(event.target.value)}
-                    />
-                  </div>
-                  <div className="mt-3">
-                    <Button
-                      type="button"
-                      disabled={state.loading}
-                      onClick={() =>
-                        runAction(async () => {
-                          if (!createTenantName.trim()) {
-                            throw new Error('Workspace name is required.');
-                          }
-
-                          const payload = (await apiCall('/api/tenants', 'POST', {
-                            name: createTenantName.trim(),
-                          })) as { tenant?: { id: string } };
-
-                          setCreateTenantName('');
-                          await loadSession();
-                          if (payload.tenant?.id) {
-                            setTenantId(payload.tenant.id);
-                          }
-                          return payload;
-                        })
-                      }
+                    <Label htmlFor="workspace-select">Workspace</Label>
+                    <select
+                      id="workspace-select"
+                      className={nativeSelectClass}
+                      value={tenantId}
+                      onChange={(event) => {
+                        setTenantId(event.target.value);
+                        setLinkedContextKeys({});
+                      }}
+                      disabled={myTenants.length === 0}
                     >
-                      Create Workspace
-                    </Button>
+                      <option value="">
+                        {myTenants.length === 0
+                          ? 'No workspaces available yet'
+                          : 'Select workspace'}
+                      </option>
+                      {myTenants.map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.name} ({tenant.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="discord-server-select">Discord Server</Label>
+                    <select
+                      id="discord-server-select"
+                      className={nativeSelectClass}
+                      value={guildId}
+                      onChange={(event) => {
+                        setGuildId(event.target.value);
+                        setLinkedContextKeys({});
+                      }}
+                      disabled={discordGuilds.length === 0}
+                    >
+                      <option value="">
+                        {discordGuilds.length === 0
+                          ? 'No manageable Discord servers found'
+                          : 'Select Discord server'}
+                      </option>
+                      {discordGuilds.map((guild) => (
+                        <option key={guild.id} value={guild.id}>
+                          {guild.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              ) : null}
 
-              {discordGuildsError ? (
-                <p className="text-xs text-destructive">
-                  {discordGuildsError}{' '}
-                  <a href="/api/auth/discord/login" className="underline">
-                    Reconnect Discord
-                  </a>
-                </p>
-              ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    data-tutorial="workspace-create-toggle"
+                    onClick={() => setShowCreateWorkspace((current) => !current)}
+                  >
+                    {showCreateWorkspace ? 'Cancel New Workspace' : 'Create New Workspace'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    data-tutorial="workspace-delete"
+                    disabled={state.loading || !tenantId}
+                    onClick={() =>
+                      runAction(async () => {
+                        const selectedTenant = myTenants.find((tenant) => tenant.id === tenantId);
+                        if (!selectedTenant) {
+                          throw new Error('Select a workspace to delete.');
+                        }
 
-              {guildResourcesLoading ? (
-                <div
-                  data-tutorial="bot-install-status"
-                  className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground"
-                >
-                  <Loader2 className="size-4 animate-spin" />
-                  Checking bot status and loading channels/roles...
+                        const confirmed = window.confirm(
+                          `Delete workspace "${selectedTenant.name}" and all associated data? This cannot be undone.`,
+                        );
+                        if (!confirmed) {
+                          return { cancelled: true };
+                        }
+
+                        await apiCall(
+                          `/api/tenants/${encodeURIComponent(selectedTenant.id)}`,
+                          'DELETE',
+                        );
+                        await loadSession();
+                        setLinkedContextKeys({});
+                        return { deletedWorkspaceId: selectedTenant.id };
+                      })
+                    }
+                  >
+                    <Trash2 className="size-4" />
+                    Delete Workspace
+                  </Button>
                 </div>
-              ) : null}
 
-              {guildResourcesError ? <p className="text-xs text-destructive">{guildResourcesError}</p> : null}
+                {showCreateWorkspace ? (
+                  <div className="rounded-lg border border-border/60 bg-secondary/35 p-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="workspace-name">New Workspace Name</Label>
+                      <Input
+                        id="workspace-name"
+                        value={createTenantName}
+                        onChange={(event) => setCreateTenantName(event.target.value)}
+                      />
+                    </div>
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        disabled={state.loading}
+                        onClick={() =>
+                          runAction(async () => {
+                            if (!createTenantName.trim()) {
+                              throw new Error('Workspace name is required.');
+                            }
 
-              {guildResources && !guildResources.botInGuild ? (
-                <div data-tutorial="bot-install-status" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3">
-                  <p className="text-sm text-destructive">
-                    Bot is not in <strong>{guildResources.guild.name}</strong>. Add the bot first, then continue.
+                            const payload = (await apiCall('/api/tenants', 'POST', {
+                              name: createTenantName.trim(),
+                            })) as { tenant?: { id: string } };
+
+                            setCreateTenantName('');
+                            await loadSession();
+                            if (payload.tenant?.id) {
+                              setTenantId(payload.tenant.id);
+                            }
+                            return payload;
+                          })
+                        }
+                      >
+                        Create Workspace
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {discordGuildsError ? (
+                  <p className="text-xs text-destructive">
+                    {discordGuildsError}{' '}
+                    <a href="/api/auth/discord/login" className="underline">
+                      Reconnect Discord
+                    </a>
                   </p>
-                  <div className="mt-2">
-                    <Button asChild variant="destructive">
-                      <a href={guildResources.inviteUrl} target="_blank" rel="noreferrer">
-                        Add Bot to Server
-                      </a>
-                    </Button>
+                ) : null}
+
+                {guildResourcesLoading ? (
+                  <div
+                    data-tutorial="bot-install-status"
+                    className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground"
+                  >
+                    <Loader2 className="size-4 animate-spin" />
+                    Checking bot status and loading channels/roles...
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              {guildResources?.botInGuild ? (
+                {guildResourcesError ? (
+                  <p className="text-xs text-destructive">{guildResourcesError}</p>
+                ) : null}
+
+                {guildResources && !guildResources.botInGuild ? (
+                  <div
+                    data-tutorial="bot-install-status"
+                    className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                  >
+                    <p className="text-sm text-destructive">
+                      Bot is not in <strong>{guildResources.guild.name}</strong>. Add the bot first,
+                      then continue.
+                    </p>
+                    <div className="mt-2">
+                      <Button asChild variant="destructive">
+                        <a href={guildResources.inviteUrl} target="_blank" rel="noreferrer">
+                          Add Bot to Server
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {guildResources?.botInGuild ? (
+                  <div
+                    data-tutorial="bot-install-status"
+                    className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-200"
+                  >
+                    Bot is installed in this server.
+                    {guildLinking
+                      ? ' Linking workspace...'
+                      : ' Workspace link is managed automatically.'}
+                  </div>
+                ) : null}
+
                 <div
-                  data-tutorial="bot-install-status"
-                  className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-200"
+                  data-tutorial="context-preview"
+                  className="rounded-lg border border-border/60 bg-secondary/35 p-3"
                 >
-                  Bot is installed in this server.
-                  {guildLinking ? ' Linking workspace...' : ' Workspace link is managed automatically.'}
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">Current Context</p>
+                  <pre className="whitespace-pre-wrap text-[11px] text-muted-foreground">
+                    {JSON.stringify(contextPreview, null, 2)}
+                  </pre>
                 </div>
-              ) : null}
-
-              <div data-tutorial="context-preview" className="rounded-lg border border-border/60 bg-secondary/35 p-3">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">Current Context</p>
-                <pre className="whitespace-pre-wrap text-[11px] text-muted-foreground">
-                  {JSON.stringify(contextPreview, null, 2)}
-                </pre>
-              </div>
-            </CardContent>
+              </CardContent>
+            ) : null}
           </Card>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-2">
+        <section className="grid gap-4">
           <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Settings2 className="size-4 text-primary" />
-                <span>2. Server Sales Settings</span>
+            <DashboardSectionHeader
+              sectionId="sales"
+              isOpen={openDashboardSections.includes('sales')}
+              onToggle={toggleDashboardSection}
+              icon={Settings2}
+              title="Sales Settings"
+              description="Channels, staff access, tips, rewards, and customer points for the selected server."
+              summaryItems={salesSummaryItems}
+              action={
                 <Button
                   type="button"
                   size="icon-sm"
                   variant="ghost"
-                  className="ml-auto text-muted-foreground hover:text-foreground"
-                  aria-label="Show tutorial info for Server Sales Settings"
-                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'paid-log-channel' })}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Sales Settings"
+                  onClick={() =>
+                    runDashboardTutorial({ markSeen: true, startAtStepId: 'paid-log-channel' })
+                  }
                 >
                   <Info className="size-4" />
                 </Button>
-              </CardTitle>
-              <CardDescription>Choose paid-log channel and staff roles for this server.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="paid-log-channel">Paid Order Log Channel</Label>
-                <select
-                  id="paid-log-channel"
-                  className={nativeSelectClass}
-                  value={paidLogChannelId}
-                  onChange={(event) => setPaidLogChannelId(event.target.value)}
-                  disabled={!serverReady || !guildResources || guildResources.channels.length === 0}
-                >
-                  <option value="">
-                    {!serverReady
-                      ? 'Add bot to server first'
-                      : guildResources?.channels.length
-                        ? 'Select paid-log channel'
-                        : 'No text channels available'}
-                  </option>
-                  {guildResources?.channels.map((channel) => (
-                    <option key={channel.id} value={channel.id}>
-                      #{channel.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2" data-tutorial="staff-roles">
-                <Label>Staff Roles (can run /sale)</Label>
-                {!serverReady ? (
-                  <p className="text-xs text-muted-foreground">Add bot to server first.</p>
-                ) : guildResources?.roles.length ? (
-                  <div className="max-h-52 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
-                    {guildResources.roles.map((role) => {
-                      const checked = selectedStaffRoleIds.includes(role.id);
-                      return (
-                        <label key={role.id} className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={(next) =>
-                              setSelectedStaffRoleIds((current) =>
-                                next === true ? [...new Set([...current, role.id])] : current.filter((id) => id !== role.id),
-                              )
-                            }
-                          />
-                          <span>{role.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No selectable roles available.</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="currency">Default Currency</Label>
-                <Input id="currency" value={defaultCurrency} readOnly />
-              </div>
-
-              <div className="inline-flex items-center gap-2">
-                <Checkbox
-                  id="tip-enabled"
-                  checked={tipEnabled}
-                  onCheckedChange={(checked) => setTipEnabled(checked === true)}
-                />
-                <Label htmlFor="tip-enabled" className="text-sm font-normal text-muted-foreground">
-                  Ask customer for optional tip before checkout link
-                </Label>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Rewards Settings</h3>
-                <p className="text-xs text-muted-foreground">
-                  Rewards are optional. Leave this section blank (no reward categories selected) to disable rewards.
-                </p>
-
+              }
+            />
+            {openDashboardSections.includes('sales') ? (
+              <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="point-value">Value of 1 point ({defaultCurrency})</Label>
-                  <Input
-                    id="point-value"
-                    value={pointValueMajor}
-                    onChange={(event) => setPointValueMajor(event.target.value)}
-                    placeholder="0.01"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Example: 0.01 means 1 point = 0.01 {defaultCurrency}. Earn rate is fixed at 1 point per 1.00
-                    {' '}
-                    {defaultCurrency} spent on earn-eligible items.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="referral-reward">Referral Reward ({defaultCurrency})</Label>
-                  <Input
-                    id="referral-reward"
-                    value={referralRewardMajor}
-                    onChange={(event) => setReferralRewardMajor(event.target.value)}
-                    placeholder="10.00"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Fallback reward used only when eligible purchased variants do not define their own referral reward.
-                    Set to 0.00 to disable fallback. Fallback points:
-                    {' '}
-                    {previewReferralRewardPoints(referralRewardMajor, pointValueMajor)}.
-                  </p>
-                </div>
-
-                <div className="space-y-2" data-tutorial="referral-categories">
-                  <Label>Categories eligible for referral rewards</Label>
-                  {pointsCategoryOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      Create product categories first, then select referral-eligible categories.
-                    </p>
-                  ) : (
-                    <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
-                      {pointsCategoryOptions.map((category) => (
-                        <label
-                          key={`referral-${category.key}`}
-                          className="flex items-center gap-2 text-sm text-muted-foreground"
-                        >
-                          <Checkbox
-                            checked={referralRewardCategoryKeys.includes(category.key)}
-                            onCheckedChange={() => togglePointsCategory(category.label, setReferralRewardCategoryKeys)}
-                          />
-                          <span>{category.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    If no category is selected, all categories are eligible.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="referral-log-channel">Referral Log Channel</Label>
+                  <Label htmlFor="paid-log-channel">Paid Order Log Channel</Label>
                   <select
-                    id="referral-log-channel"
+                    id="paid-log-channel"
                     className={nativeSelectClass}
-                    value={referralLogChannelId}
-                    onChange={(event) => setReferralLogChannelId(event.target.value)}
-                    disabled={!serverReady || !guildResources || guildResources.channels.length === 0}
+                    value={paidLogChannelId}
+                    onChange={(event) => setPaidLogChannelId(event.target.value)}
+                    disabled={
+                      !serverReady || !guildResources || guildResources.channels.length === 0
+                    }
                   >
                     <option value="">
                       {!serverReady
                         ? 'Add bot to server first'
                         : guildResources?.channels.length
-                          ? 'Select referral log channel'
+                          ? 'Select paid-log channel'
                           : 'No text channels available'}
                     </option>
                     {guildResources?.channels.map((channel) => (
-                      <option key={`referral-${channel.id}`} value={channel.id}>
+                      <option key={channel.id} value={channel.id}>
                         #{channel.name}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="referral-submission-template">Referral Submission Reply Template</Label>
-                  <Textarea
-                    id="referral-submission-template"
-                    value={referralSubmissionTemplate}
-                    onChange={(event) => setReferralSubmissionTemplate(event.target.value)}
-                    placeholder={DEFAULT_REFERRAL_SUBMISSION_TEMPLATE}
-                    className="min-h-20"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Sent as an ephemeral reply after a successful `/refer` submission (private to submitter).
-                    Placeholders: {'{referrer_email}'}, {'{referred_email}'}, {'{submitter_mention}'}.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="referral-thank-you-template">Referral Thank-You Template</Label>
-                  <Textarea
-                    id="referral-thank-you-template"
-                    value={referralThankYouTemplate}
-                    onChange={(event) => setReferralThankYouTemplate(event.target.value)}
-                    placeholder={DEFAULT_REFERRAL_THANK_YOU_TEMPLATE}
-                    className="min-h-24"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Sent as DM to referrer after payout. Placeholders: {'{points}'}, {'{amount_gbp}'},{' '}
-                    {'{referred_email}'}, {'{referrer_email}'}, {'{referrer_mention}'}, {'{order_session_id}'}.
-                    Referrer mention is automatically prefixed if you do not include {'{referrer_mention}'}.
-                  </p>
-                </div>
-
-                <div className="space-y-2" data-tutorial="points-earn-categories">
-                  <Label>Categories that earn points</Label>
-                  {pointsCategoryOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      Create product categories first, then select reward categories.
-                    </p>
-                  ) : (
-                    <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
-                      {pointsCategoryOptions.map((category) => (
-                        <label key={`earn-${category.key}`} className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Checkbox
-                            checked={pointsEarnCategoryKeys.includes(category.key)}
-                            onCheckedChange={() => togglePointsCategory(category.label, setPointsEarnCategoryKeys)}
-                          />
-                          <span>{category.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2" data-tutorial="points-redeem-categories">
-                  <Label>Categories where points can be redeemed</Label>
-                  {pointsCategoryOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      Create product categories first, then select redeem categories.
-                    </p>
-                  ) : (
-                    <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
-                      {pointsCategoryOptions.map((category) => (
-                        <label
-                          key={`redeem-${category.key}`}
-                          className="flex items-center gap-2 text-sm text-muted-foreground"
-                        >
-                          <Checkbox
-                            checked={pointsRedeemCategoryKeys.includes(category.key)}
-                            onCheckedChange={() => togglePointsCategory(category.label, setPointsRedeemCategoryKeys)}
-                          />
-                          <span>{category.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Customer Points</h3>
-                <p className="text-xs text-muted-foreground">
-                  Leave search empty to show the 3 most recently updated customers.
-                </p>
-
-                <div className="flex flex-col gap-2 sm:flex-row" data-tutorial="customer-points-search">
-                  <Input
-                    value={pointsSearchInput}
-                    onChange={(event) => setPointsSearchInput(event.target.value)}
-                    placeholder="Search customer email..."
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={state.loading || !serverReady || pointsCustomersLoading}
-                    onClick={() =>
-                      runAction(async () => {
-                        const customers = await refreshPointsCustomers(pointsSearchInput);
-                        return { customers: customers.length, search: pointsSearchInput.trim() || null };
-                      })
-                    }
-                  >
-                    {pointsCustomersLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Refresh Customers
-                  </Button>
-                </div>
-
-                <div className="max-h-56 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
-                  {pointsCustomers.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No customer points accounts found for this server.</p>
-                  ) : (
-                    pointsCustomers.map((customer) => (
-                      <div
-                        key={customer.emailNormalized}
-                        className="rounded-md border border-border/50 bg-card/70 px-3 py-2 text-xs"
-                      >
-                        <p className="font-medium">{customer.emailDisplay}</p>
-                        <p className="text-muted-foreground">
-                          Balance: {customer.balancePoints} | Reserved: {customer.reservedPoints} | Available:{' '}
-                          {customer.availablePoints}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="points-adjust-email">Customer Email</Label>
-                    <Input
-                      id="points-adjust-email"
-                      value={pointsAdjustEmail}
-                      onChange={(event) => setPointsAdjustEmail(event.target.value)}
-                      placeholder="customer@example.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="points-adjust-value">Points</Label>
-                    <Input
-                      id="points-adjust-value"
-                      value={pointsAdjustValueInput}
-                      onChange={(event) => setPointsAdjustValueInput(event.target.value)}
-                      placeholder="10"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={state.loading || !serverReady}
-                    onClick={() =>
-                      runAction(async () => {
-                        const context = requireWorkspaceAndServer({ requireBot: true });
-                        await ensureGuildLinked(context.workspaceId, context.discordServerId);
-
-                        const points = parseWholePoints(pointsAdjustValueInput);
-
-                        if (!pointsAdjustEmail.trim()) {
-                          throw new Error('Customer email is required.');
-                        }
-
-                        const result = await apiCall(`/api/guilds/${context.discordServerId}/points/adjust`, 'POST', {
-                          tenantId: context.workspaceId,
-                          email: pointsAdjustEmail.trim(),
-                          action: 'add',
-                          points,
-                        });
-                        await refreshPointsCustomers(pointsSearchInput);
-                        return result;
-                      })
-                    }
-                  >
-                    Add Points
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={state.loading || !serverReady}
-                    onClick={() =>
-                      runAction(async () => {
-                        const context = requireWorkspaceAndServer({ requireBot: true });
-                        await ensureGuildLinked(context.workspaceId, context.discordServerId);
-
-                        const points = parseWholePoints(pointsAdjustValueInput);
-
-                        if (!pointsAdjustEmail.trim()) {
-                          throw new Error('Customer email is required.');
-                        }
-
-                        const result = await apiCall(`/api/guilds/${context.discordServerId}/points/adjust`, 'POST', {
-                          tenantId: context.workspaceId,
-                          email: pointsAdjustEmail.trim(),
-                          action: 'remove',
-                          points,
-                        });
-                        await refreshPointsCustomers(pointsSearchInput);
-                        return result;
-                      })
-                    }
-                  >
-                    Remove Points
-                  </Button>
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                data-tutorial="save-server-settings"
-                disabled={state.loading || !serverReady}
-                onClick={() =>
-                  runAction(async () => {
-                    const context = requireWorkspaceAndServer({ requireBot: true });
-                    await ensureGuildLinked(context.workspaceId, context.discordServerId);
-                    const pointValueMinor = parsePointValueMajorToMinor(pointValueMajor);
-                    const referralRewardMinor = parsePriceToMinor(referralRewardMajor);
-                    const normalizedEarnCategoryKeys = [...new Set(pointsEarnCategoryKeys.map(normalizeCategoryKey).filter(Boolean))];
-                    const normalizedRedeemCategoryKeys = [
-                      ...new Set(pointsRedeemCategoryKeys.map(normalizeCategoryKey).filter(Boolean)),
-                    ];
-                    const normalizedReferralCategoryKeys = [
-                      ...new Set(referralRewardCategoryKeys.map(normalizeCategoryKey).filter(Boolean)),
-                    ];
-                    const normalizedStaffRoleIds = normalizeDiscordIdList(selectedStaffRoleIds);
-
-                    const result = (await apiCall(`/api/guilds/${context.discordServerId}/config`, 'PATCH', {
-                      tenantId: context.workspaceId,
-                      paidLogChannelId: normalizeDiscordId(paidLogChannelId) || null,
-                      staffRoleIds: normalizedStaffRoleIds,
-                      defaultCurrency: DEFAULT_CURRENCY,
-                      tipEnabled,
-                      pointsEarnCategoryKeys: normalizedEarnCategoryKeys,
-                      pointsRedeemCategoryKeys: normalizedRedeemCategoryKeys,
-                      pointValueMinor,
-                      referralRewardMinor,
-                      referralRewardCategoryKeys: normalizedReferralCategoryKeys,
-                      referralLogChannelId: normalizeDiscordId(referralLogChannelId) || null,
-                      referralThankYouTemplate:
-                        referralThankYouTemplate.trim() || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
-                      referralSubmissionTemplate:
-                        referralSubmissionTemplate.trim() || DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
-                      ticketMetadataKey: 'isTicket',
-                    })) as {
-                      config?: {
-                        paidLogChannelId: string | null;
-                        staffRoleIds: string[];
-                        defaultCurrency: string;
-                        tipEnabled: boolean;
-                        pointsEarnCategoryKeys: string[];
-                        pointsRedeemCategoryKeys: string[];
-                        pointValueMinor: number;
-                        referralRewardMinor: number;
-                        referralRewardCategoryKeys: string[];
-                        referralLogChannelId: string | null;
-                        referralThankYouTemplate: string;
-                        referralSubmissionTemplate: string;
-                      };
-                    };
-                    if (result.config) {
-                      setPaidLogChannelId(normalizeDiscordId(result.config.paidLogChannelId));
-                      setSelectedStaffRoleIds(normalizeDiscordIdList(result.config.staffRoleIds));
-                      setDefaultCurrency(result.config.defaultCurrency || DEFAULT_CURRENCY);
-                      setTipEnabled(Boolean(result.config.tipEnabled));
-                      setPointsEarnCategoryKeys(
-                        Array.isArray(result.config.pointsEarnCategoryKeys)
-                          ? result.config.pointsEarnCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
-                          : [],
-                      );
-                      setPointsRedeemCategoryKeys(
-                        Array.isArray(result.config.pointsRedeemCategoryKeys)
-                          ? result.config.pointsRedeemCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
-                          : [],
-                      );
-                      setPointValueMajor(formatPointValueMinorToMajor(result.config.pointValueMinor));
-                      const nextReferralRewardMajor = formatMinorToMajor(result.config.referralRewardMinor);
-                      setReferralRewardMajor(nextReferralRewardMajor);
-                      setReferralRewardCategoryKeys(
-                        Array.isArray(result.config.referralRewardCategoryKeys)
-                          ? result.config.referralRewardCategoryKeys.map((value) => normalizeCategoryKey(value)).filter(Boolean)
-                          : [],
-                      );
-                      setReferralLogChannelId(normalizeDiscordId(result.config.referralLogChannelId));
-                      setReferralThankYouTemplate(
-                        result.config.referralThankYouTemplate || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
-                      );
-                      setReferralSubmissionTemplate(
-                        result.config.referralSubmissionTemplate || DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
-                      );
-                    }
-                    return result;
-                  })
-                }
-              >
-                Save Server Settings
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Wallet className="size-4 text-primary" />
-                <span>3. Voodoo Pay Integration</span>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  className="ml-auto text-muted-foreground hover:text-foreground"
-                  aria-label="Show tutorial info for Voodoo Pay Integration"
-                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'wallet-address' })}
-                >
-                  <Info className="size-4" />
-                </Button>
-              </CardTitle>
-              <CardDescription>
-                Configure standard Voodoo checkout and optional Hosted Multi-Coin crypto checkout.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="wallet-address">Merchant Wallet Address (Polygon)</Label>
-                <Input
-                  id="wallet-address"
-                  value={voodooMerchantWalletAddress}
-                  onChange={(event) => setVoodooMerchantWalletAddress(event.target.value)}
-                  placeholder="0x..."
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="checkout-domain">Checkout Domain</Label>
-                <Input
-                  id="checkout-domain"
-                  value={voodooCheckoutDomain}
-                  onChange={(event) => setVoodooCheckoutDomain(event.target.value)}
-                  placeholder="checkout.voodoo-pay.uk"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="callback-secret">Callback Secret (optional override)</Label>
-                <Input
-                  id="callback-secret"
-                  type="password"
-                  value={voodooCallbackSecret}
-                  onChange={(event) => setVoodooCallbackSecret(event.target.value)}
-                  placeholder="Leave blank to auto-generate or keep existing"
-                />
-              </div>
-
-              <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/35 p-3">
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    id="voodoo-crypto-enabled"
-                    checked={voodooCryptoGatewayEnabled}
-                    onCheckedChange={(checked) => setVoodooCryptoGatewayEnabled(checked === true)}
-                  />
-                  <div>
-                    <Label htmlFor="voodoo-crypto-enabled">Enable Hosted Multi-Coin Crypto Checkout</Label>
-                    <p className="text-xs text-muted-foreground">
-                      When enabled, checkout message shows both `Pay` and `Pay with Crypto` buttons.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    id="voodoo-crypto-add-fees"
-                    checked={voodooCryptoAddFees}
-                    onCheckedChange={(checked) => setVoodooCryptoAddFees(checked === true)}
-                  />
-                  <div>
-                    <Label htmlFor="voodoo-crypto-add-fees">Customer Pays Blockchain Fees</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Adds estimated network fee flag to hosted checkout (`add_fees=1`).
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label htmlFor="crypto-wallet-btc">BTC Wallet</Label>
-                    <Input
-                      id="crypto-wallet-btc"
-                      value={voodooCryptoWallets.btc}
-                      onChange={(event) => setVoodooCryptoWallet('btc', event.target.value)}
-                      placeholder="Bitcoin wallet address"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="crypto-wallet-ltc">LTC Wallet</Label>
-                    <Input
-                      id="crypto-wallet-ltc"
-                      value={voodooCryptoWallets.ltc}
-                      onChange={(event) => setVoodooCryptoWallet('ltc', event.target.value)}
-                      placeholder="Litecoin wallet address"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="crypto-wallet-evm">ETH / EVM Wallet</Label>
-                    <Input
-                      id="crypto-wallet-evm"
-                      value={voodooCryptoWallets.evm}
-                      onChange={(event) => setVoodooCryptoWallet('evm', event.target.value)}
-                      placeholder="EVM wallet (ETH, Polygon, Arbitrum, BSC...)"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="crypto-wallet-bch">BCH Wallet</Label>
-                    <Input
-                      id="crypto-wallet-bch"
-                      value={voodooCryptoWallets.bitcoincash}
-                      onChange={(event) => setVoodooCryptoWallet('bitcoincash', event.target.value)}
-                      placeholder="Bitcoin Cash wallet address"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="crypto-wallet-doge">DOGE Wallet</Label>
-                    <Input
-                      id="crypto-wallet-doge"
-                      value={voodooCryptoWallets.doge}
-                      onChange={(event) => setVoodooCryptoWallet('doge', event.target.value)}
-                      placeholder="Dogecoin wallet address"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="crypto-wallet-trx">TRX / TRC20 Wallet</Label>
-                    <Input
-                      id="crypto-wallet-trx"
-                      value={voodooCryptoWallets.trc20}
-                      onChange={(event) => setVoodooCryptoWallet('trc20', event.target.value)}
-                      placeholder="TRC20 wallet address"
-                    />
-                  </div>
-                  <div className="space-y-1 md:col-span-2">
-                    <Label htmlFor="crypto-wallet-sol">SOL Wallet</Label>
-                    <Input
-                      id="crypto-wallet-sol"
-                      value={voodooCryptoWallets.solana}
-                      onChange={(event) => setVoodooCryptoWallet('solana', event.target.value)}
-                      placeholder="Solana wallet address"
-                    />
-                  </div>
-                </div>
-
-                <div
-                  className={cn(
-                    'rounded-md border px-3 py-2 text-xs',
-                    voodooCryptoGatewayEnabled
-                      ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
-                      : 'border-amber-400/40 bg-amber-500/10 text-amber-200',
-                  )}
-                >
-                  {voodooCryptoGatewayEnabled
-                    ? 'Crypto gateway is enabled. At least one wallet must be configured before save.'
-                    : 'Crypto gateway is currently disabled for this server.'}
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                data-tutorial="save-voodoo"
-                disabled={state.loading || !serverReady}
-                onClick={() =>
-                  runAction(async () => {
-                    const context = requireWorkspaceAndServer({ requireBot: true });
-                    await ensureGuildLinked(context.workspaceId, context.discordServerId);
-                    const normalizedCheckoutDomain = normalizeCheckoutDomainInput(voodooCheckoutDomain);
-                    if (!normalizedCheckoutDomain) {
-                      throw new Error('Checkout domain is required.');
-                    }
-
-                    const payload: {
-                      tenantId: string;
-                      merchantWalletAddress: string;
-                      checkoutDomain: string;
-                      callbackSecret?: string;
-                      cryptoGatewayEnabled: boolean;
-                      cryptoAddFees: boolean;
-                      cryptoWallets: VoodooCryptoWallets;
-                    } = {
-                      tenantId: context.workspaceId,
-                      merchantWalletAddress: voodooMerchantWalletAddress,
-                      checkoutDomain: normalizedCheckoutDomain,
-                      cryptoGatewayEnabled: voodooCryptoGatewayEnabled,
-                      cryptoAddFees: voodooCryptoAddFees,
-                      cryptoWallets: {
-                        evm: voodooCryptoWallets.evm.trim(),
-                        btc: voodooCryptoWallets.btc.trim(),
-                        bitcoincash: voodooCryptoWallets.bitcoincash.trim(),
-                        ltc: voodooCryptoWallets.ltc.trim(),
-                        doge: voodooCryptoWallets.doge.trim(),
-                        trc20: voodooCryptoWallets.trc20.trim(),
-                        solana: voodooCryptoWallets.solana.trim(),
-                      },
-                    };
-
-                    if (voodooCallbackSecret.trim()) {
-                      payload.callbackSecret = voodooCallbackSecret.trim();
-                    }
-
-                    const result = (await apiCall(
-                      `/api/guilds/${context.discordServerId}/integrations/voodoopay`,
-                      'PUT',
-                      payload,
-                    )) as {
-                      webhookUrl: string;
-                      tenantWebhookKey: string;
-                      callbackSecretGenerated?: string | null;
-                    };
-
-                    setVoodooWebhookUrl(result.webhookUrl);
-                    setVoodooWebhookKey(result.tenantWebhookKey);
-                    setAutoGeneratedCallbackSecret(result.callbackSecretGenerated ?? '');
-                    setVoodooCallbackSecret('');
-                    await hydrateContextData();
-                    return result;
-                  })
-                }
-              >
-                Save Voodoo Pay Integration
-              </Button>
-
-              {voodooWebhookUrl ? (
-                <div data-tutorial="voodoo-webhook" className="rounded-lg border border-border/60 bg-secondary/35 p-3 text-sm">
-                  <p className="font-medium">Webhook URL</p>
-                  <p className="mt-1 break-all text-muted-foreground">{voodooWebhookUrl}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">Webhook Key: {voodooWebhookKey}</p>
-                </div>
-              ) : null}
-
-              {autoGeneratedCallbackSecret ? (
-                <div className="rounded-lg border border-amber-300/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-                  <p className="font-medium">Auto-generated Callback Secret</p>
-                  <p className="mt-1 break-all font-mono text-xs">{autoGeneratedCallbackSecret}</p>
-                  <p className="mt-2 text-xs text-amber-100/80">
-                    Save this value in your Voodoo Pay callback settings if your gateway account requires a callback
-                    secret.
-                  </p>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </section>
-        <section className="grid gap-6 lg:grid-cols-1">
-          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Wallet className="size-4 text-primary" />
-                <span>3.1 Coupons</span>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  className="ml-auto text-muted-foreground hover:text-foreground"
-                  aria-label="Show tutorial info for Coupons"
-                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'coupons-refresh' })}
-                >
-                  <Info className="size-4" />
-                </Button>
-              </CardTitle>
-              <CardDescription>Create coupon codes that reduce order total before checkout.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  {coupons.length} coupon(s) configured for this server.
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  data-tutorial="coupons-refresh"
-                  disabled={state.loading || !serverReady}
-                  onClick={() =>
-                    runAction(async () => {
-                      const refreshed = await refreshCoupons();
-                      return { couponCount: refreshed.length };
-                    })
-                  }
-                >
-                  Refresh Coupons
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                {coupons.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No coupons yet for this server.</p>
-                ) : (
-                  coupons.map((coupon) => (
-                    <div
-                      key={coupon.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/35 px-3 py-2 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium">{coupon.code}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Discount: {(coupon.discountMinor / 100).toFixed(2)} {DEFAULT_CURRENCY} -{' '}
-                          {coupon.active ? 'Active' : 'Inactive'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Scope:{' '}
-                          {coupon.allowedProductIds.length === 0 && coupon.allowedVariantIds.length === 0
-                            ? 'All products and variations'
-                            : `${coupon.allowedProductIds.length} product(s), ${coupon.allowedVariantIds.length} variation(s)`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button type="button" size="sm" variant="outline" onClick={() => loadCouponIntoBuilder(coupon)}>
-                          Edit
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          onClick={() =>
-                            runAction(async () => {
-                              const context = requireWorkspaceAndServer({ requireBot: true });
-                              const confirmed = window.confirm(`Delete coupon "${coupon.code}"?`);
-                              if (!confirmed) {
-                                return { cancelled: true };
+                <div className="space-y-2" data-tutorial="staff-roles">
+                  <Label>Staff Roles (can run /sale)</Label>
+                  {!serverReady ? (
+                    <p className="text-xs text-muted-foreground">Add bot to server first.</p>
+                  ) : guildResources?.roles.length ? (
+                    <div className="max-h-52 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                      {guildResources.roles.map((role) => {
+                        const checked = selectedStaffRoleIds.includes(role.id);
+                        return (
+                          <label
+                            key={role.id}
+                            className="flex items-center gap-2 text-sm text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(next) =>
+                                setSelectedStaffRoleIds((current) =>
+                                  next === true
+                                    ? [...new Set([...current, role.id])]
+                                    : current.filter((id) => id !== role.id),
+                                )
                               }
-
-                              await apiCall(
-                                `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons/${encodeURIComponent(coupon.id)}?tenantId=${encodeURIComponent(context.workspaceId)}`,
-                                'DELETE',
-                              );
-                              await refreshCoupons();
-                              if (editingCouponId === coupon.id) {
-                                resetCouponBuilder();
-                              }
-
-                              return { deletedCouponId: coupon.id };
-                            })
-                          }
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <Separator />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="coupon-code">Coupon Code</Label>
-                  <Input
-                    id="coupon-code"
-                    value={couponCodeInput}
-                    onChange={(event) => setCouponCodeInput(event.target.value.toUpperCase())}
-                    placeholder="SAVE10"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="coupon-discount">Discount Amount (GBP)</Label>
-                  <Input
-                    id="coupon-discount"
-                    value={couponDiscountInput}
-                    onChange={(event) => setCouponDiscountInput(event.target.value)}
-                    placeholder="5.00"
-                  />
-                </div>
-              </div>
-
-              <div className="inline-flex items-center gap-2">
-                <Checkbox
-                  id="coupon-active"
-                  checked={couponActiveInput}
-                  onCheckedChange={(checked) => setCouponActiveInput(checked === true)}
-                />
-                <Label htmlFor="coupon-active" className="text-sm font-normal text-muted-foreground">
-                  Coupon active
-                </Label>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div
-                  className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3"
-                  data-tutorial="coupon-product-scope"
-                >
-                  <Label className="text-sm">Product Scope (optional)</Label>
-                  {couponProductOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No products available yet.</p>
-                  ) : (
-                    <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
-                      {couponProductOptions.map((product) => (
-                        <label key={product.productId} className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Checkbox
-                            checked={couponAllowedProductIdsInput.includes(product.productId)}
-                            onCheckedChange={() =>
-                              toggleIdList(product.productId, setCouponAllowedProductIdsInput)
-                            }
-                          />
-                          <span>{product.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div
-                  className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3"
-                  data-tutorial="coupon-variant-scope"
-                >
-                  <Label className="text-sm">Variation Scope (optional)</Label>
-                  {couponVariantOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No variations available yet.</p>
-                  ) : (
-                    <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
-                      {couponVariantOptions.map((variant) => (
-                        <label key={variant.variantId} className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Checkbox
-                            checked={couponAllowedVariantIdsInput.includes(variant.variantId)}
-                            onCheckedChange={() =>
-                              toggleIdList(variant.variantId, setCouponAllowedVariantIdsInput)
-                            }
-                          />
-                          <span>{variant.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Leave both scope lists empty to let this coupon work on all products and variations.
-              </p>
-
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button
-                  type="button"
-                  data-tutorial="save-coupon"
-                  disabled={state.loading || !serverReady}
-                  className="sm:flex-1"
-                  onClick={() =>
-                    runAction(async () => {
-                      const context = requireWorkspaceAndServer({ requireBot: true });
-                      await ensureGuildLinked(context.workspaceId, context.discordServerId);
-
-                      const normalizedCode = couponCodeInput.trim().toUpperCase();
-                      if (!normalizedCode) {
-                        throw new Error('Coupon code is required.');
-                      }
-
-                      const discountMinor = parsePriceToMinor(couponDiscountInput);
-                      const validCouponProductIds = new Set(
-                        couponProductOptions.map((product) => product.productId),
-                      );
-                      const validCouponVariantIds = new Set(
-                        couponVariantOptions.map((variant) => variant.variantId),
-                      );
-                      const payload = {
-                        tenantId: context.workspaceId,
-                        coupon: {
-                          code: normalizedCode,
-                          discountMinor,
-                          active: couponActiveInput,
-                          allowedProductIds: couponAllowedProductIdsInput.filter((id) =>
-                            validCouponProductIds.has(id),
-                          ),
-                          allowedVariantIds: couponAllowedVariantIdsInput.filter((id) =>
-                            validCouponVariantIds.has(id),
-                          ),
-                        },
-                      };
-
-                      if (editingCouponId) {
-                        await apiCall(
-                          `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons/${encodeURIComponent(editingCouponId)}`,
-                          'PATCH',
-                          payload,
+                            />
+                            <span>{role.name}</span>
+                          </label>
                         );
-                      } else {
-                        await apiCall(
-                          `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons`,
-                          'POST',
-                          payload,
-                        );
-                      }
-
-                      await refreshCoupons();
-                      resetCouponBuilder();
-
-                      return { mode: editingCouponId ? 'updated' : 'created', code: normalizedCode };
-                    })
-                  }
-                >
-                  {editingCouponId ? 'Update Coupon' : 'Create Coupon'}
-                </Button>
-                {editingCouponId ? (
-                  <Button type="button" variant="outline" className="sm:flex-1" onClick={() => resetCouponBuilder()}>
-                    Cancel Edit
-                  </Button>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-        <section className={cn('grid gap-6', isSuperAdmin ? 'xl:grid-cols-3' : 'xl:grid-cols-1')}>
-          <Card
-            className={cn(
-              'border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur',
-              isSuperAdmin ? 'xl:col-span-2' : '',
-            )}
-          >
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Globe className="size-4 text-primary" />
-                <span>4. Products, Prices, and Customer Questions</span>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  className="ml-auto text-muted-foreground hover:text-foreground"
-                  aria-label="Show tutorial info for Products, Prices, and Customer Questions"
-                  onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'products-refresh' })}
-                >
-                  <Info className="size-4" />
-                </Button>
-              </CardTitle>
-              <CardDescription>Create, edit, and delete products for this server.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Existing Products</h3>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    data-tutorial="products-refresh"
-                    disabled={productsLoading || !serverReady}
-                    onClick={() =>
-                      runAction(async () => {
-                        const refreshed = await refreshProducts();
-                        return { productCount: refreshed.length };
-                      })
-                    }
-                  >
-                    {productsLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Refresh
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  {products.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No products yet for this server.</p>
-                  ) : (
-                    products.map((product) => (
-                      <div
-                        key={product.id}
-                        className="rounded-lg border border-border/60 bg-secondary/35 px-3 py-3 text-sm"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="font-medium">{product.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {product.category} • {product.active ? 'Active' : 'Inactive'} • {product.variants.length}{' '}
-                              price option(s)
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button type="button" size="sm" variant="outline" onClick={() => loadProductIntoBuilder(product)}>
-                              Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="destructive"
-                              onClick={() =>
-                                runAction(async () => {
-                                  const context = requireWorkspaceAndServer({ requireBot: true });
-                                  const confirmed = window.confirm(`Delete product "${product.name}"?`);
-                                  if (!confirmed) {
-                                    return { cancelled: true };
-                                  }
-
-                                  await apiCall(
-                                    `/api/guilds/${encodeURIComponent(context.discordServerId)}/products/${encodeURIComponent(product.id)}?tenantId=${encodeURIComponent(context.workspaceId)}`,
-                                    'DELETE',
-                                  );
-
-                                  await refreshProducts();
-                                  if (editingProductId === product.id) {
-                                    resetProductBuilder();
-                                  }
-                                  return { deletedProductId: product.id };
-                                })
-                              }
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Create Category + Questions
-                  </h3>
-                  <Badge variant="outline">{questions.length} question(s)</Badge>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="category-builder-existing">Pick Existing Category</Label>
-                    <select
-                      id="category-builder-existing"
-                      className={nativeSelectClass}
-                      value={selectedExistingCategoryForBuilder}
-                      onChange={(event) => {
-                        const nextCategory = event.target.value;
-                        setCategoryBuilderName(nextCategory);
-                        if (nextCategory) {
-                          setProductCategory(nextCategory);
-                        }
-                      }}
-                    >
-                      <option value="">Select category</option>
-                      {categorySelectOptions.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                    <Label htmlFor="category-builder-name">Or Type New Category</Label>
-                    <Input
-                      id="category-builder-name"
-                      value={categoryBuilderName}
-                      onChange={(event) => setCategoryBuilderName(event.target.value)}
-                      placeholder="Renew Subscription"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Questions are shared by category. Add them once here, then reuse for all products in that category.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => loadQuestionsForCategory(categoryBuilderName)}
-                    >
-                      Load Existing Category Questions
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setQuestions(getDefaultQuestions());
-                        setQuestionKeyInput('');
-                        setQuestionLabelInput('');
-                        setQuestionTypeInput('short_text');
-                        setQuestionRequiredInput(true);
-                        setQuestionSensitiveInput(false);
-                      }}
-                    >
-                      Reset Question Draft
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border/60 bg-secondary/20 p-3">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="category-rename-to">Rename Category To</Label>
-                      <Input
-                        id="category-rename-to"
-                        value={categoryRenameTo}
-                        onChange={(event) => setCategoryRenameTo(event.target.value)}
-                        placeholder="New category name"
-                      />
+                      })}
                     </div>
-                    <div className="flex flex-col justify-end gap-2 sm:flex-row">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={state.loading || !serverReady || !categoryBuilderName.trim() || !categoryRenameTo.trim()}
-                        onClick={() =>
-                          runAction(async () => {
-                            const context = requireWorkspaceAndServer({ requireBot: true });
-                            await ensureGuildLinked(context.workspaceId, context.discordServerId);
-
-                            const sourceCategory = categoryBuilderName.trim();
-                            const targetCategory = categoryRenameTo.trim();
-                            if (!sourceCategory) {
-                              throw new Error('Select a category to rename first.');
-                            }
-                            if (!targetCategory) {
-                              throw new Error('Enter a new category name.');
-                            }
-
-                            const payload = (await apiCall(
-                              `/api/guilds/${encodeURIComponent(context.discordServerId)}/categories`,
-                              'PATCH',
-                              {
-                                tenantId: context.workspaceId,
-                                category: sourceCategory,
-                                newCategory: targetCategory,
-                              },
-                            )) as { updatedProducts?: number };
-
-                            const nextProducts = await refreshProducts();
-                            setCategoryBuilderName(targetCategory);
-                            setCategoryRenameTo('');
-
-                            if (normalizeCategoryKey(productCategory) === normalizeCategoryKey(sourceCategory)) {
-                              setProductCategory(targetCategory);
-                            }
-
-                            if (
-                              editingProductId &&
-                              !nextProducts.some((product) => product.id === editingProductId)
-                            ) {
-                              resetProductBuilder({ keepCategory: targetCategory });
-                            }
-
-                            return {
-                              renamedCategory: sourceCategory,
-                              newCategory: targetCategory,
-                              updatedProducts: payload.updatedProducts ?? 0,
-                            };
-                          })
-                        }
-                      >
-                        Rename Category
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        disabled={state.loading || !serverReady || !categoryBuilderName.trim()}
-                        onClick={() =>
-                          runAction(async () => {
-                            const context = requireWorkspaceAndServer({ requireBot: true });
-                            await ensureGuildLinked(context.workspaceId, context.discordServerId);
-
-                            const categoryToDelete = categoryBuilderName.trim();
-                            if (!categoryToDelete) {
-                              throw new Error('Select a category to delete first.');
-                            }
-
-                            const confirmed = window.confirm(
-                              `Delete category \"${categoryToDelete}\" and ALL products in it? This cannot be undone.`,
-                            );
-                            if (!confirmed) {
-                              return { cancelled: true };
-                            }
-
-                            const payload = (await apiCall(
-                              `/api/guilds/${encodeURIComponent(context.discordServerId)}/categories`,
-                              'DELETE',
-                              {
-                                tenantId: context.workspaceId,
-                                category: categoryToDelete,
-                              },
-                            )) as { deletedProducts?: number };
-
-                            const nextProducts = await refreshProducts();
-                            const nextCategories = Array.from(
-                              new Set(
-                                nextProducts
-                                  .map((product) => product.category.trim())
-                                  .filter((category) => Boolean(category)),
-                              ),
-                            ).sort((a, b) => a.localeCompare(b));
-
-                            const nextCategory = nextCategories[0] ?? '';
-                            setCategoryBuilderName(nextCategory || 'Accounts');
-                            setCategoryRenameTo('');
-                            if (normalizeCategoryKey(productCategory) === normalizeCategoryKey(categoryToDelete)) {
-                              setProductCategory(nextCategory || 'Accounts');
-                            }
-
-                            if (
-                              editingProductId &&
-                              !nextProducts.some((product) => product.id === editingProductId)
-                            ) {
-                              setQuestions(getDefaultQuestions());
-                              resetProductBuilder({ keepCategory: nextCategory || 'Accounts' });
-                            }
-
-                            return {
-                              deletedCategory: categoryToDelete,
-                              deletedProducts: payload.deletedProducts ?? 0,
-                            };
-                          })
-                        }
-                      >
-                        Delete Category
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Renaming updates all products in the category. Deleting removes all products in that category.
-                  </p>
-                </div>
-
-                <div className="space-y-2" data-tutorial="question-list">
-                  {questions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No questions yet.</p>
                   ) : (
-                    questions.map((question, index) => {
-                      const isLockedEmailQuestion =
-                        question.key.trim().toLowerCase() === REQUIRED_EMAIL_QUESTION_KEY;
-                      return (
-                        <div
-                          key={`${question.key}-${index}`}
-                          className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
-                        >
-                          <div>
-                            <p className="text-sm font-medium">{question.label}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {question.fieldType} - {question.required ? 'Required' : 'Optional'} -{' '}
-                              {question.sensitive ? 'Sensitive' : 'Not sensitive'}
-                              {isLockedEmailQuestion ? ' - System field (locked)' : ''}
-                            </p>
-                          </div>
-                          {isLockedEmailQuestion ? (
-                            <Badge variant="outline">Locked</Badge>
-                          ) : (
-                            <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeQuestion(index)}>
-                              <X className="size-4" />
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })
+                    <p className="text-xs text-muted-foreground">No selectable roles available.</p>
                   )}
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="question-key">Question Key</Label>
-                    <Input
-                      id="question-key"
-                      value={questionKeyInput}
-                      onChange={(event) => setQuestionKeyInput(event.target.value)}
-                      placeholder="username"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="question-label">Question Label</Label>
-                    <Input
-                      id="question-label"
-                      value={questionLabelInput}
-                      onChange={(event) => setQuestionLabelInput(event.target.value)}
-                      placeholder="What is your email?"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="question-type">Input Type</Label>
-                    <select
-                      id="question-type"
-                      className={nativeSelectClass}
-                      value={questionTypeInput}
-                      onChange={(event) => setQuestionTypeInput(event.target.value as FieldType)}
-                    >
-                      <option value="short_text">Short text</option>
-                      <option value="long_text">Long text</option>
-                      <option value="email">Email</option>
-                      <option value="number">Number</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 self-end">
-                    <Checkbox
-                      id="question-required"
-                      checked={questionRequiredInput}
-                      onCheckedChange={(checked) => setQuestionRequiredInput(checked === true)}
-                    />
-                    <Label htmlFor="question-required" className="text-sm font-normal text-muted-foreground">
-                      Required
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2 self-end">
-                    <Checkbox
-                      id="question-sensitive"
-                      checked={questionSensitiveInput}
-                      onCheckedChange={(checked) => setQuestionSensitiveInput(checked === true)}
-                    />
-                    <Label htmlFor="question-sensitive" className="text-sm font-normal text-muted-foreground">
-                      Sensitive
-                    </Label>
-                  </div>
-                </div>
-
-                <Button type="button" variant="outline" onClick={addQuestion}>
-                  <Plus className="size-4" />
-                  Add Question
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  data-tutorial="save-category-questions"
-                  disabled={state.loading || !serverReady}
-                  onClick={() =>
-                    runAction(async () => {
-                      const context = requireWorkspaceAndServer({ requireBot: true });
-                      await ensureGuildLinked(context.workspaceId, context.discordServerId);
-
-                      const normalizedCategory = categoryBuilderName.trim();
-                      if (!normalizedCategory) {
-                        throw new Error('Category name is required before saving questions.');
-                      }
-
-                      const template = categoryTemplateByKey.get(normalizeCategoryKey(normalizedCategory));
-                      if (!template) {
-                        throw new Error(
-                          'Create at least one product in this category first. New products in that category will then reuse these questions automatically.',
-                        );
-                      }
-
-                      const preparedQuestions = prepareQuestionsForApi();
-                      await apiCall(
-                        `/api/guilds/${encodeURIComponent(context.discordServerId)}/forms/${encodeURIComponent(template.productId)}`,
-                        'PUT',
-                        {
-                          tenantId: context.workspaceId,
-                          formFields: preparedQuestions,
-                        },
-                      );
-
-                      await refreshProducts();
-                      setCategoryBuilderName(normalizedCategory);
-                      setProductCategory(normalizedCategory);
-                      return { savedCategoryQuestionsFor: normalizedCategory };
-                    })
-                  }
-                >
-                  Save Category Questions
-                </Button>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Create / Edit Product
-                </h3>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="product-category">Product Category</Label>
-                    <select
-                      id="product-category"
-                      className={nativeSelectClass}
-                      value={productCategory}
-                      onChange={(event) => setProductCategory(event.target.value)}
-                    >
-                      <option value="">Select category</option>
-                      {categorySelectOptions.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setProductCategory(categoryBuilderName.trim())}
-                        disabled={!categoryBuilderName.trim()}
-                      >
-                        Use Category Builder Name
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Pick an existing category from the list, or create a new one from the section above.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="product-name">Product Name</Label>
-                    <Input
-                      id="product-name"
-                      value={productName}
-                      onChange={(event) => setProductName(event.target.value)}
-                      placeholder="Starter Account"
-                    />
-                  </div>
-                </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="product-description">Description (optional)</Label>
-                  <Textarea
-                    id="product-description"
-                    value={productDescription}
-                    onChange={(event) => setProductDescription(event.target.value)}
-                    placeholder="Optional product details"
-                    className="min-h-24"
-                  />
+                  <Label htmlFor="currency">Default Currency</Label>
+                  <Input id="currency" value={defaultCurrency} readOnly />
                 </div>
 
                 <div className="inline-flex items-center gap-2">
                   <Checkbox
-                    id="product-active"
-                    checked={productActive}
-                    onCheckedChange={(checked) => setProductActive(checked === true)}
+                    id="tip-enabled"
+                    checked={tipEnabled}
+                    onCheckedChange={(checked) => setTipEnabled(checked === true)}
                   />
-                  <Label htmlFor="product-active" className="text-sm font-normal text-muted-foreground">
-                    Product active
+                  <Label
+                    htmlFor="tip-enabled"
+                    className="text-sm font-normal text-muted-foreground"
+                  >
+                    Ask customer for optional tip before checkout link
                   </Label>
                 </div>
 
                 <Separator />
 
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Price Options (GBP)</h3>
-                    <Badge variant="outline">{variants.length} option(s)</Badge>
+                <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Rewards Settings
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Rewards are optional. Leave this section blank (no reward categories selected)
+                    to disable rewards.
+                  </p>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="point-value">Value of 1 point ({defaultCurrency})</Label>
+                    <Input
+                      id="point-value"
+                      value={pointValueMajor}
+                      onChange={(event) => setPointValueMajor(event.target.value)}
+                      placeholder="0.01"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Example: 0.01 means 1 point = 0.01 {defaultCurrency}. Earn rate is fixed at 1
+                      point per 1.00 {defaultCurrency} spent on earn-eligible items.
+                    </p>
                   </div>
 
                   <div className="space-y-2">
-                    {variants.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No price options yet.</p>
+                    <Label htmlFor="referral-reward">Referral Reward ({defaultCurrency})</Label>
+                    <Input
+                      id="referral-reward"
+                      value={referralRewardMajor}
+                      onChange={(event) => setReferralRewardMajor(event.target.value)}
+                      placeholder="10.00"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Fallback reward used only when eligible purchased variants do not define their
+                      own referral reward. Set to 0.00 to disable fallback. Fallback points:{' '}
+                      {previewReferralRewardPoints(referralRewardMajor, pointValueMajor)}.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2" data-tutorial="referral-categories">
+                    <Label>Categories eligible for referral rewards</Label>
+                    {pointsCategoryOptions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Create product categories first, then select referral-eligible categories.
+                      </p>
                     ) : (
-                      variants.map((variant, index) => (
+                      <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                        {pointsCategoryOptions.map((category) => (
+                          <label
+                            key={`referral-${category.key}`}
+                            className="flex items-center gap-2 text-sm text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={referralRewardCategoryKeys.includes(category.key)}
+                              onCheckedChange={() =>
+                                togglePointsCategory(category.label, setReferralRewardCategoryKeys)
+                              }
+                            />
+                            <span>{category.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      If no category is selected, all categories are eligible.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="referral-log-channel">Referral Log Channel</Label>
+                    <select
+                      id="referral-log-channel"
+                      className={nativeSelectClass}
+                      value={referralLogChannelId}
+                      onChange={(event) => setReferralLogChannelId(event.target.value)}
+                      disabled={
+                        !serverReady || !guildResources || guildResources.channels.length === 0
+                      }
+                    >
+                      <option value="">
+                        {!serverReady
+                          ? 'Add bot to server first'
+                          : guildResources?.channels.length
+                            ? 'Select referral log channel'
+                            : 'No text channels available'}
+                      </option>
+                      {guildResources?.channels.map((channel) => (
+                        <option key={`referral-${channel.id}`} value={channel.id}>
+                          #{channel.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="referral-submission-template">
+                      Referral Submission Reply Template
+                    </Label>
+                    <Textarea
+                      id="referral-submission-template"
+                      value={referralSubmissionTemplate}
+                      onChange={(event) => setReferralSubmissionTemplate(event.target.value)}
+                      placeholder={DEFAULT_REFERRAL_SUBMISSION_TEMPLATE}
+                      className="min-h-20"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Sent as an ephemeral reply after a successful `/refer` submission (private to
+                      submitter). Placeholders: {'{referrer_email}'}, {'{referred_email}'},{' '}
+                      {'{submitter_mention}'}.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="referral-thank-you-template">Referral Thank-You Template</Label>
+                    <Textarea
+                      id="referral-thank-you-template"
+                      value={referralThankYouTemplate}
+                      onChange={(event) => setReferralThankYouTemplate(event.target.value)}
+                      placeholder={DEFAULT_REFERRAL_THANK_YOU_TEMPLATE}
+                      className="min-h-24"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Sent as DM to referrer after payout. Placeholders: {'{points}'},{' '}
+                      {'{amount_gbp}'}, {'{referred_email}'}, {'{referrer_email}'},{' '}
+                      {'{referrer_mention}'}, {'{order_session_id}'}. Referrer mention is
+                      automatically prefixed if you do not include {'{referrer_mention}'}.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2" data-tutorial="points-earn-categories">
+                    <Label>Categories that earn points</Label>
+                    {pointsCategoryOptions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Create product categories first, then select reward categories.
+                      </p>
+                    ) : (
+                      <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                        {pointsCategoryOptions.map((category) => (
+                          <label
+                            key={`earn-${category.key}`}
+                            className="flex items-center gap-2 text-sm text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={pointsEarnCategoryKeys.includes(category.key)}
+                              onCheckedChange={() =>
+                                togglePointsCategory(category.label, setPointsEarnCategoryKeys)
+                              }
+                            />
+                            <span>{category.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2" data-tutorial="points-redeem-categories">
+                    <Label>Categories where points can be redeemed</Label>
+                    {pointsCategoryOptions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Create product categories first, then select redeem categories.
+                      </p>
+                    ) : (
+                      <div className="max-h-40 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                        {pointsCategoryOptions.map((category) => (
+                          <label
+                            key={`redeem-${category.key}`}
+                            className="flex items-center gap-2 text-sm text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={pointsRedeemCategoryKeys.includes(category.key)}
+                              onCheckedChange={() =>
+                                togglePointsCategory(category.label, setPointsRedeemCategoryKeys)
+                              }
+                            />
+                            <span>{category.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Customer Points
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Leave search empty to show the 3 most recently updated customers.
+                  </p>
+
+                  <div
+                    className="flex flex-col gap-2 sm:flex-row"
+                    data-tutorial="customer-points-search"
+                  >
+                    <Input
+                      value={pointsSearchInput}
+                      onChange={(event) => setPointsSearchInput(event.target.value)}
+                      placeholder="Search customer email..."
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={state.loading || !serverReady || pointsCustomersLoading}
+                      onClick={() =>
+                        runAction(async () => {
+                          const customers = await refreshPointsCustomers(pointsSearchInput);
+                          return {
+                            customers: customers.length,
+                            search: pointsSearchInput.trim() || null,
+                          };
+                        })
+                      }
+                    >
+                      {pointsCustomersLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Refresh Customers
+                    </Button>
+                  </div>
+
+                  <div className="max-h-56 space-y-2 overflow-auto rounded-lg border border-border/60 bg-secondary/30 p-3">
+                    {pointsCustomers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No customer points accounts found for this server.
+                      </p>
+                    ) : (
+                      pointsCustomers.map((customer) => (
                         <div
-                          key={`${variant.label}-${index}`}
-                          className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                          key={customer.emailNormalized}
+                          className="rounded-md border border-border/50 bg-card/70 px-3 py-2 text-xs"
                         >
-                          <p className="text-sm">
-                            {variant.label}: {variant.priceMajor} {variant.currency} (Referral: {variant.referralRewardMajor}{' '}
-                            {variant.currency})
+                          <p className="font-medium">{customer.emailDisplay}</p>
+                          <p className="text-muted-foreground">
+                            Balance: {customer.balancePoints} | Reserved: {customer.reservedPoints}{' '}
+                            | Available: {customer.availablePoints}
                           </p>
-                          <div className="flex items-center gap-1">
-                            <Button type="button" variant="ghost" size="icon-sm" onClick={() => editPriceOption(index)}>
-                              <Pencil className="size-4" />
-                            </Button>
-                            <Button type="button" variant="ghost" size="icon-sm" onClick={() => removePriceOption(index)}>
-                              <X className="size-4" />
-                            </Button>
-                          </div>
                         </div>
                       ))
                     )}
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="variant-label">Price Label</Label>
+                      <Label htmlFor="points-adjust-email">Customer Email</Label>
                       <Input
-                        id="variant-label"
-                        value={variantLabelInput}
-                        onChange={(event) => setVariantLabelInput(event.target.value)}
+                        id="points-adjust-email"
+                        value={pointsAdjustEmail}
+                        onChange={(event) => setPointsAdjustEmail(event.target.value)}
+                        placeholder="customer@example.com"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="variant-price">Price (major unit)</Label>
+                      <Label htmlFor="points-adjust-value">Points</Label>
                       <Input
-                        id="variant-price"
-                        value={variantPriceInput}
-                        onChange={(event) => setVariantPriceInput(event.target.value)}
-                        placeholder="9.99"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="variant-referral-reward">Referral Reward (major unit)</Label>
-                      <Input
-                        id="variant-referral-reward"
-                        value={variantReferralRewardInput}
-                        onChange={(event) => setVariantReferralRewardInput(event.target.value)}
-                        placeholder={referralRewardMajor || DEFAULT_REFERRAL_REWARD_MAJOR}
+                        id="points-adjust-value"
+                        value={pointsAdjustValueInput}
+                        onChange={(event) => setPointsAdjustValueInput(event.target.value)}
+                        placeholder="10"
                       />
                     </div>
                   </div>
 
-                  <Button type="button" variant="outline" onClick={addPriceOption}>
-                    <Plus className="size-4" />
-                    {editingVariantIndex === null ? 'Add Price Option' : 'Save Price Option'}
-                  </Button>
-                  {editingVariantIndex !== null ? (
-                    <Button type="button" variant="outline" onClick={cancelPriceOptionEdit}>
-                      Cancel Variant Edit
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={state.loading || !serverReady}
+                      onClick={() =>
+                        runAction(async () => {
+                          const context = requireWorkspaceAndServer({ requireBot: true });
+                          await ensureGuildLinked(context.workspaceId, context.discordServerId);
 
-              <div className="flex flex-col gap-2 pt-2 sm:flex-row">
+                          const points = parseWholePoints(pointsAdjustValueInput);
+
+                          if (!pointsAdjustEmail.trim()) {
+                            throw new Error('Customer email is required.');
+                          }
+
+                          const result = await apiCall(
+                            `/api/guilds/${context.discordServerId}/points/adjust`,
+                            'POST',
+                            {
+                              tenantId: context.workspaceId,
+                              email: pointsAdjustEmail.trim(),
+                              action: 'add',
+                              points,
+                            },
+                          );
+                          await refreshPointsCustomers(pointsSearchInput);
+                          return result;
+                        })
+                      }
+                    >
+                      Add Points
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={state.loading || !serverReady}
+                      onClick={() =>
+                        runAction(async () => {
+                          const context = requireWorkspaceAndServer({ requireBot: true });
+                          await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                          const points = parseWholePoints(pointsAdjustValueInput);
+
+                          if (!pointsAdjustEmail.trim()) {
+                            throw new Error('Customer email is required.');
+                          }
+
+                          const result = await apiCall(
+                            `/api/guilds/${context.discordServerId}/points/adjust`,
+                            'POST',
+                            {
+                              tenantId: context.workspaceId,
+                              email: pointsAdjustEmail.trim(),
+                              action: 'remove',
+                              points,
+                            },
+                          );
+                          await refreshPointsCustomers(pointsSearchInput);
+                          return result;
+                        })
+                      }
+                    >
+                      Remove Points
+                    </Button>
+                  </div>
+                </div>
+
                 <Button
                   type="button"
-                  data-tutorial="save-product"
+                  data-tutorial="save-server-settings"
                   disabled={state.loading || !serverReady}
-                  className="sm:flex-1"
                   onClick={() =>
                     runAction(async () => {
                       const context = requireWorkspaceAndServer({ requireBot: true });
                       await ensureGuildLinked(context.workspaceId, context.discordServerId);
+                      const pointValueMinor = parsePointValueMajorToMinor(pointValueMajor);
+                      const referralRewardMinor = parsePriceToMinor(referralRewardMajor);
+                      const normalizedEarnCategoryKeys = [
+                        ...new Set(
+                          pointsEarnCategoryKeys.map(normalizeCategoryKey).filter(Boolean),
+                        ),
+                      ];
+                      const normalizedRedeemCategoryKeys = [
+                        ...new Set(
+                          pointsRedeemCategoryKeys.map(normalizeCategoryKey).filter(Boolean),
+                        ),
+                      ];
+                      const normalizedReferralCategoryKeys = [
+                        ...new Set(
+                          referralRewardCategoryKeys.map(normalizeCategoryKey).filter(Boolean),
+                        ),
+                      ];
+                      const normalizedStaffRoleIds = normalizeDiscordIdList(selectedStaffRoleIds);
 
-                      if (variants.length === 0) {
-                        throw new Error('Add at least one price option.');
-                      }
-
-                      const normalizedCategory = productCategory.trim();
-                      const normalizedName = productName.trim();
-                      const normalizedDescription = productDescription.trim();
-
-                      if (!normalizedCategory) {
-                        throw new Error('Product category is required.');
-                      }
-
-                      if (!normalizedName) {
-                        throw new Error('Product name is required.');
-                      }
-
-                      const normalizedCategoryKey = normalizeCategoryKey(normalizedCategory);
-                      const categoryAlreadyExists = existingCategories.some(
-                        (category) => normalizeCategoryKey(category) === normalizedCategoryKey,
-                      );
-
-                      const editingProduct = editingProductId
-                        ? products.find((product) => product.id === editingProductId) ?? null
-                        : null;
-                      if (
-                        editingProduct &&
-                        normalizeCategoryKey(editingProduct.category) !== normalizedCategoryKey
-                      ) {
-                        throw new Error(
-                          'Changing category on an existing product is blocked to keep category questions consistent. Create a new product in the target category instead.',
-                        );
-                      }
-
-                      const preparedVariants = variants.map((variant) => ({
-                        label: variant.label.trim(),
-                        priceMinor: parsePriceToMinor(variant.priceMajor),
-                        referralRewardMinor: parsePriceToMinor(variant.referralRewardMajor),
-                        currency: DEFAULT_CURRENCY,
-                      }));
-
-                      let preparedQuestions: QuestionDraft[] = [];
-                      if (!categoryAlreadyExists) {
-                        if (normalizeCategoryKey(categoryBuilderName) !== normalizedCategoryKey) {
-                          throw new Error(
-                            'For a new category, set the same category name in "Create Category + Questions" first.',
-                          );
-                        }
-
-                        preparedQuestions = prepareQuestionsForApi();
-                      }
-
-                      const productPayload = {
-                        category: normalizedCategory,
-                        name: normalizedName,
-                        description: normalizedDescription,
-                        active: productActive,
-                        variants: preparedVariants,
-                      };
-
-                      if (editingProductId) {
-                        await apiCall(
-                          `/api/guilds/${encodeURIComponent(context.discordServerId)}/products/${encodeURIComponent(editingProductId)}`,
-                          'PATCH',
-                          {
-                            tenantId: context.workspaceId,
-                            product: productPayload,
-                          },
-                        );
-                      } else {
-                        await apiCall(`/api/guilds/${context.discordServerId}/products`, 'POST', {
+                      const result = (await apiCall(
+                        `/api/guilds/${context.discordServerId}/config`,
+                        'PATCH',
+                        {
                           tenantId: context.workspaceId,
-                          product: productPayload,
-                          formFields: preparedQuestions,
-                        });
+                          paidLogChannelId: normalizeDiscordId(paidLogChannelId) || null,
+                          staffRoleIds: normalizedStaffRoleIds,
+                          defaultCurrency: DEFAULT_CURRENCY,
+                          tipEnabled,
+                          pointsEarnCategoryKeys: normalizedEarnCategoryKeys,
+                          pointsRedeemCategoryKeys: normalizedRedeemCategoryKeys,
+                          pointValueMinor,
+                          referralRewardMinor,
+                          referralRewardCategoryKeys: normalizedReferralCategoryKeys,
+                          referralLogChannelId: normalizeDiscordId(referralLogChannelId) || null,
+                          referralThankYouTemplate:
+                            referralThankYouTemplate.trim() || DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+                          referralSubmissionTemplate:
+                            referralSubmissionTemplate.trim() ||
+                            DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
+                          ticketMetadataKey: 'isTicket',
+                        },
+                      )) as {
+                        config?: {
+                          paidLogChannelId: string | null;
+                          staffRoleIds: string[];
+                          defaultCurrency: string;
+                          tipEnabled: boolean;
+                          pointsEarnCategoryKeys: string[];
+                          pointsRedeemCategoryKeys: string[];
+                          pointValueMinor: number;
+                          referralRewardMinor: number;
+                          referralRewardCategoryKeys: string[];
+                          referralLogChannelId: string | null;
+                          referralThankYouTemplate: string;
+                          referralSubmissionTemplate: string;
+                        };
+                      };
+                      if (result.config) {
+                        setPaidLogChannelId(normalizeDiscordId(result.config.paidLogChannelId));
+                        setSelectedStaffRoleIds(normalizeDiscordIdList(result.config.staffRoleIds));
+                        setDefaultCurrency(result.config.defaultCurrency || DEFAULT_CURRENCY);
+                        setTipEnabled(Boolean(result.config.tipEnabled));
+                        setPointsEarnCategoryKeys(
+                          Array.isArray(result.config.pointsEarnCategoryKeys)
+                            ? result.config.pointsEarnCategoryKeys
+                                .map((value) => normalizeCategoryKey(value))
+                                .filter(Boolean)
+                            : [],
+                        );
+                        setPointsRedeemCategoryKeys(
+                          Array.isArray(result.config.pointsRedeemCategoryKeys)
+                            ? result.config.pointsRedeemCategoryKeys
+                                .map((value) => normalizeCategoryKey(value))
+                                .filter(Boolean)
+                            : [],
+                        );
+                        setPointValueMajor(
+                          formatPointValueMinorToMajor(result.config.pointValueMinor),
+                        );
+                        const nextReferralRewardMajor = formatMinorToMajor(
+                          result.config.referralRewardMinor,
+                        );
+                        setReferralRewardMajor(nextReferralRewardMajor);
+                        setReferralRewardCategoryKeys(
+                          Array.isArray(result.config.referralRewardCategoryKeys)
+                            ? result.config.referralRewardCategoryKeys
+                                .map((value) => normalizeCategoryKey(value))
+                                .filter(Boolean)
+                            : [],
+                        );
+                        setReferralLogChannelId(
+                          normalizeDiscordId(result.config.referralLogChannelId),
+                        );
+                        setReferralThankYouTemplate(
+                          result.config.referralThankYouTemplate ||
+                            DEFAULT_REFERRAL_THANK_YOU_TEMPLATE,
+                        );
+                        setReferralSubmissionTemplate(
+                          result.config.referralSubmissionTemplate ||
+                            DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
+                        );
                       }
-
-                      await refreshProducts();
-                      setCategoryBuilderName(normalizedCategory);
-                      resetProductBuilder({ keepCategory: normalizedCategory });
-                      return { mode: editingProductId ? 'updated' : 'created' };
+                      return result;
                     })
                   }
                 >
-                  {editingProductId ? 'Update Product' : 'Create Product'}
+                  Save Server Settings
+                </Button>
+              </CardContent>
+            ) : null}
+          </Card>
+
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <DashboardSectionHeader
+              sectionId="payments"
+              isOpen={openDashboardSections.includes('payments')}
+              onToggle={toggleDashboardSection}
+              icon={Wallet}
+              title="Payment Setup"
+              description="Merchant wallet, checkout domain, callback secret, and optional crypto gateway settings."
+              summaryItems={paymentSummaryItems}
+              action={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Payment Setup"
+                  onClick={() =>
+                    runDashboardTutorial({ markSeen: true, startAtStepId: 'wallet-address' })
+                  }
+                >
+                  <Info className="size-4" />
+                </Button>
+              }
+            />
+            {openDashboardSections.includes('payments') ? (
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="wallet-address">Merchant Wallet Address (Polygon)</Label>
+                  <Input
+                    id="wallet-address"
+                    value={voodooMerchantWalletAddress}
+                    onChange={(event) => setVoodooMerchantWalletAddress(event.target.value)}
+                    placeholder="0x..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="checkout-domain">Checkout Domain</Label>
+                  <Input
+                    id="checkout-domain"
+                    value={voodooCheckoutDomain}
+                    onChange={(event) => setVoodooCheckoutDomain(event.target.value)}
+                    placeholder="checkout.voodoo-pay.uk"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="callback-secret">Callback Secret (optional override)</Label>
+                  <Input
+                    id="callback-secret"
+                    type="password"
+                    value={voodooCallbackSecret}
+                    onChange={(event) => setVoodooCallbackSecret(event.target.value)}
+                    placeholder="Leave blank to auto-generate or keep existing"
+                  />
+                </div>
+
+                <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/35 p-3">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="voodoo-crypto-enabled"
+                      checked={voodooCryptoGatewayEnabled}
+                      onCheckedChange={(checked) => setVoodooCryptoGatewayEnabled(checked === true)}
+                    />
+                    <div>
+                      <Label htmlFor="voodoo-crypto-enabled">
+                        Enable Hosted Multi-Coin Crypto Checkout
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        When enabled, checkout message shows both `Pay` and `Pay with Crypto`
+                        buttons.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="voodoo-crypto-add-fees"
+                      checked={voodooCryptoAddFees}
+                      onCheckedChange={(checked) => setVoodooCryptoAddFees(checked === true)}
+                    />
+                    <div>
+                      <Label htmlFor="voodoo-crypto-add-fees">Customer Pays Blockchain Fees</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Adds estimated network fee flag to hosted checkout (`add_fees=1`).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="crypto-wallet-btc">BTC Wallet</Label>
+                      <Input
+                        id="crypto-wallet-btc"
+                        value={voodooCryptoWallets.btc}
+                        onChange={(event) => setVoodooCryptoWallet('btc', event.target.value)}
+                        placeholder="Bitcoin wallet address"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="crypto-wallet-ltc">LTC Wallet</Label>
+                      <Input
+                        id="crypto-wallet-ltc"
+                        value={voodooCryptoWallets.ltc}
+                        onChange={(event) => setVoodooCryptoWallet('ltc', event.target.value)}
+                        placeholder="Litecoin wallet address"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="crypto-wallet-evm">ETH / EVM Wallet</Label>
+                      <Input
+                        id="crypto-wallet-evm"
+                        value={voodooCryptoWallets.evm}
+                        onChange={(event) => setVoodooCryptoWallet('evm', event.target.value)}
+                        placeholder="EVM wallet (ETH, Polygon, Arbitrum, BSC...)"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="crypto-wallet-bch">BCH Wallet</Label>
+                      <Input
+                        id="crypto-wallet-bch"
+                        value={voodooCryptoWallets.bitcoincash}
+                        onChange={(event) =>
+                          setVoodooCryptoWallet('bitcoincash', event.target.value)
+                        }
+                        placeholder="Bitcoin Cash wallet address"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="crypto-wallet-doge">DOGE Wallet</Label>
+                      <Input
+                        id="crypto-wallet-doge"
+                        value={voodooCryptoWallets.doge}
+                        onChange={(event) => setVoodooCryptoWallet('doge', event.target.value)}
+                        placeholder="Dogecoin wallet address"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="crypto-wallet-trx">TRX / TRC20 Wallet</Label>
+                      <Input
+                        id="crypto-wallet-trx"
+                        value={voodooCryptoWallets.trc20}
+                        onChange={(event) => setVoodooCryptoWallet('trc20', event.target.value)}
+                        placeholder="TRC20 wallet address"
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <Label htmlFor="crypto-wallet-sol">SOL Wallet</Label>
+                      <Input
+                        id="crypto-wallet-sol"
+                        value={voodooCryptoWallets.solana}
+                        onChange={(event) => setVoodooCryptoWallet('solana', event.target.value)}
+                        placeholder="Solana wallet address"
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    className={cn(
+                      'rounded-md border px-3 py-2 text-xs',
+                      voodooCryptoGatewayEnabled
+                        ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
+                        : 'border-amber-400/40 bg-amber-500/10 text-amber-200',
+                    )}
+                  >
+                    {voodooCryptoGatewayEnabled
+                      ? 'Crypto gateway is enabled. At least one wallet must be configured before save.'
+                      : 'Crypto gateway is currently disabled for this server.'}
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  data-tutorial="save-voodoo"
+                  disabled={state.loading || !serverReady}
+                  onClick={() =>
+                    runAction(async () => {
+                      const context = requireWorkspaceAndServer({ requireBot: true });
+                      await ensureGuildLinked(context.workspaceId, context.discordServerId);
+                      const normalizedCheckoutDomain =
+                        normalizeCheckoutDomainInput(voodooCheckoutDomain);
+                      if (!normalizedCheckoutDomain) {
+                        throw new Error('Checkout domain is required.');
+                      }
+
+                      const payload: {
+                        tenantId: string;
+                        merchantWalletAddress: string;
+                        checkoutDomain: string;
+                        callbackSecret?: string;
+                        cryptoGatewayEnabled: boolean;
+                        cryptoAddFees: boolean;
+                        cryptoWallets: VoodooCryptoWallets;
+                      } = {
+                        tenantId: context.workspaceId,
+                        merchantWalletAddress: voodooMerchantWalletAddress,
+                        checkoutDomain: normalizedCheckoutDomain,
+                        cryptoGatewayEnabled: voodooCryptoGatewayEnabled,
+                        cryptoAddFees: voodooCryptoAddFees,
+                        cryptoWallets: {
+                          evm: voodooCryptoWallets.evm.trim(),
+                          btc: voodooCryptoWallets.btc.trim(),
+                          bitcoincash: voodooCryptoWallets.bitcoincash.trim(),
+                          ltc: voodooCryptoWallets.ltc.trim(),
+                          doge: voodooCryptoWallets.doge.trim(),
+                          trc20: voodooCryptoWallets.trc20.trim(),
+                          solana: voodooCryptoWallets.solana.trim(),
+                        },
+                      };
+
+                      if (voodooCallbackSecret.trim()) {
+                        payload.callbackSecret = voodooCallbackSecret.trim();
+                      }
+
+                      const result = (await apiCall(
+                        `/api/guilds/${context.discordServerId}/integrations/voodoopay`,
+                        'PUT',
+                        payload,
+                      )) as {
+                        webhookUrl: string;
+                        tenantWebhookKey: string;
+                        callbackSecretGenerated?: string | null;
+                      };
+
+                      setVoodooWebhookUrl(result.webhookUrl);
+                      setVoodooWebhookKey(result.tenantWebhookKey);
+                      setAutoGeneratedCallbackSecret(result.callbackSecretGenerated ?? '');
+                      setVoodooCallbackSecret('');
+                      await hydrateContextData();
+                      return result;
+                    })
+                  }
+                >
+                  Save Voodoo Pay Integration
                 </Button>
 
-                {editingProductId ? (
-                  <Button type="button" variant="outline" className="sm:flex-1" onClick={() => resetProductBuilder()}>
-                    Cancel Edit
-                  </Button>
+                {voodooWebhookUrl ? (
+                  <div
+                    data-tutorial="voodoo-webhook"
+                    className="rounded-lg border border-border/60 bg-secondary/35 p-3 text-sm"
+                  >
+                    <p className="font-medium">Webhook URL</p>
+                    <p className="mt-1 break-all text-muted-foreground">{voodooWebhookUrl}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Webhook Key: {voodooWebhookKey}
+                    </p>
+                  </div>
                 ) : null}
-              </div>
-            </CardContent>
+
+                {autoGeneratedCallbackSecret ? (
+                  <div className="rounded-lg border border-amber-300/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                    <p className="font-medium">Auto-generated Callback Secret</p>
+                    <p className="mt-1 break-all font-mono text-xs">
+                      {autoGeneratedCallbackSecret}
+                    </p>
+                    <p className="mt-2 text-xs text-amber-100/80">
+                      Save this value in your Voodoo Pay callback settings if your gateway account
+                      requires a callback secret.
+                    </p>
+                  </div>
+                ) : null}
+              </CardContent>
+            ) : null}
+          </Card>
+        </section>
+        <section className="grid gap-4">
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <DashboardSectionHeader
+              sectionId="coupons"
+              isOpen={openDashboardSections.includes('coupons')}
+              onToggle={toggleDashboardSection}
+              icon={Wallet}
+              title="Coupons"
+              description="Create fixed discounts and optionally scope them to products or price variations."
+              summaryItems={couponSummaryItems}
+              action={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Coupons"
+                  onClick={() =>
+                    runDashboardTutorial({ markSeen: true, startAtStepId: 'coupons-refresh' })
+                  }
+                >
+                  <Info className="size-4" />
+                </Button>
+              }
+            />
+            {openDashboardSections.includes('coupons') ? (
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    {coupons.length} coupon(s) configured for this server.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    data-tutorial="coupons-refresh"
+                    disabled={state.loading || !serverReady}
+                    onClick={() =>
+                      runAction(async () => {
+                        const refreshed = await refreshCoupons();
+                        return { couponCount: refreshed.length };
+                      })
+                    }
+                  >
+                    Refresh Coupons
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  {coupons.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No coupons yet for this server.</p>
+                  ) : (
+                    coupons.map((coupon) => (
+                      <div
+                        key={coupon.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/35 px-3 py-2 text-sm"
+                      >
+                        <div>
+                          <p className="font-medium">{coupon.code}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Discount: {(coupon.discountMinor / 100).toFixed(2)} {DEFAULT_CURRENCY} -{' '}
+                            {coupon.active ? 'Active' : 'Inactive'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Scope:{' '}
+                            {coupon.allowedProductIds.length === 0 &&
+                            coupon.allowedVariantIds.length === 0
+                              ? 'All products and variations'
+                              : `${coupon.allowedProductIds.length} product(s), ${coupon.allowedVariantIds.length} variation(s)`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadCouponIntoBuilder(coupon)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() =>
+                              runAction(async () => {
+                                const context = requireWorkspaceAndServer({ requireBot: true });
+                                const confirmed = window.confirm(`Delete coupon "${coupon.code}"?`);
+                                if (!confirmed) {
+                                  return { cancelled: true };
+                                }
+
+                                await apiCall(
+                                  `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons/${encodeURIComponent(coupon.id)}?tenantId=${encodeURIComponent(context.workspaceId)}`,
+                                  'DELETE',
+                                );
+                                await refreshCoupons();
+                                if (editingCouponId === coupon.id) {
+                                  resetCouponBuilder();
+                                }
+
+                                return { deletedCouponId: coupon.id };
+                              })
+                            }
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <Separator />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="coupon-code">Coupon Code</Label>
+                    <Input
+                      id="coupon-code"
+                      value={couponCodeInput}
+                      onChange={(event) => setCouponCodeInput(event.target.value.toUpperCase())}
+                      placeholder="SAVE10"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="coupon-discount">Discount Amount (GBP)</Label>
+                    <Input
+                      id="coupon-discount"
+                      value={couponDiscountInput}
+                      onChange={(event) => setCouponDiscountInput(event.target.value)}
+                      placeholder="5.00"
+                    />
+                  </div>
+                </div>
+
+                <div className="inline-flex items-center gap-2">
+                  <Checkbox
+                    id="coupon-active"
+                    checked={couponActiveInput}
+                    onCheckedChange={(checked) => setCouponActiveInput(checked === true)}
+                  />
+                  <Label
+                    htmlFor="coupon-active"
+                    className="text-sm font-normal text-muted-foreground"
+                  >
+                    Coupon active
+                  </Label>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div
+                    className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3"
+                    data-tutorial="coupon-product-scope"
+                  >
+                    <Label className="text-sm">Product Scope (optional)</Label>
+                    {couponProductOptions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No products available yet.</p>
+                    ) : (
+                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                        {couponProductOptions.map((product) => (
+                          <label
+                            key={product.productId}
+                            className="flex items-center gap-2 text-xs text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={couponAllowedProductIdsInput.includes(product.productId)}
+                              onCheckedChange={() =>
+                                toggleIdList(product.productId, setCouponAllowedProductIdsInput)
+                              }
+                            />
+                            <span>{product.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    className="space-y-2 rounded-md border border-border/60 bg-secondary/25 p-3"
+                    data-tutorial="coupon-variant-scope"
+                  >
+                    <Label className="text-sm">Variation Scope (optional)</Label>
+                    {couponVariantOptions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No variations available yet.</p>
+                    ) : (
+                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                        {couponVariantOptions.map((variant) => (
+                          <label
+                            key={variant.variantId}
+                            className="flex items-center gap-2 text-xs text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={couponAllowedVariantIdsInput.includes(variant.variantId)}
+                              onCheckedChange={() =>
+                                toggleIdList(variant.variantId, setCouponAllowedVariantIdsInput)
+                              }
+                            />
+                            <span>{variant.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave both scope lists empty to let this coupon work on all products and
+                  variations.
+                </p>
+
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    data-tutorial="save-coupon"
+                    disabled={state.loading || !serverReady}
+                    className="sm:flex-1"
+                    onClick={() =>
+                      runAction(async () => {
+                        const context = requireWorkspaceAndServer({ requireBot: true });
+                        await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                        const normalizedCode = couponCodeInput.trim().toUpperCase();
+                        if (!normalizedCode) {
+                          throw new Error('Coupon code is required.');
+                        }
+
+                        const discountMinor = parsePriceToMinor(couponDiscountInput);
+                        const validCouponProductIds = new Set(
+                          couponProductOptions.map((product) => product.productId),
+                        );
+                        const validCouponVariantIds = new Set(
+                          couponVariantOptions.map((variant) => variant.variantId),
+                        );
+                        const payload = {
+                          tenantId: context.workspaceId,
+                          coupon: {
+                            code: normalizedCode,
+                            discountMinor,
+                            active: couponActiveInput,
+                            allowedProductIds: couponAllowedProductIdsInput.filter((id) =>
+                              validCouponProductIds.has(id),
+                            ),
+                            allowedVariantIds: couponAllowedVariantIdsInput.filter((id) =>
+                              validCouponVariantIds.has(id),
+                            ),
+                          },
+                        };
+
+                        if (editingCouponId) {
+                          await apiCall(
+                            `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons/${encodeURIComponent(editingCouponId)}`,
+                            'PATCH',
+                            payload,
+                          );
+                        } else {
+                          await apiCall(
+                            `/api/guilds/${encodeURIComponent(context.discordServerId)}/coupons`,
+                            'POST',
+                            payload,
+                          );
+                        }
+
+                        await refreshCoupons();
+                        resetCouponBuilder();
+
+                        return {
+                          mode: editingCouponId ? 'updated' : 'created',
+                          code: normalizedCode,
+                        };
+                      })
+                    }
+                  >
+                    {editingCouponId ? 'Update Coupon' : 'Create Coupon'}
+                  </Button>
+                  {editingCouponId ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="sm:flex-1"
+                      onClick={() => resetCouponBuilder()}
+                    >
+                      Cancel Edit
+                    </Button>
+                  ) : null}
+                </div>
+              </CardContent>
+            ) : null}
+          </Card>
+        </section>
+        <section className="grid gap-4">
+          <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur">
+            <DashboardSectionHeader
+              sectionId="catalog"
+              isOpen={openDashboardSections.includes('catalog')}
+              onToggle={toggleDashboardSection}
+              icon={Globe}
+              title="Catalog Builder"
+              description="Create categories, shared checkout questions, products, and price options in one guided flow."
+              summaryItems={catalogSummaryItems}
+              action={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Show tutorial info for Catalog Builder"
+                  onClick={() =>
+                    runDashboardTutorial({ markSeen: true, startAtStepId: 'products-refresh' })
+                  }
+                >
+                  <Info className="size-4" />
+                </Button>
+              }
+            />
+            {openDashboardSections.includes('catalog') ? (
+              <CardContent className="space-y-4">
+                <div className="flex items-start gap-3 rounded-2xl border border-border/60 bg-secondary/20 p-4 text-sm text-muted-foreground">
+                  <Layers3 className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <p>
+                    Merchants can now work one block at a time. Review the catalog, set category
+                    questions once, then finish product details and price options without the whole
+                    builder staying open.
+                  </p>
+                </div>
+                <CatalogStepPanel
+                  sectionId="overview"
+                  isOpen={openCatalogSections.includes('overview')}
+                  onToggle={toggleCatalogSection}
+                  stepLabel="01"
+                  title="Review Existing Products"
+                  description="Refresh the live catalog and jump into edits without opening the full builder."
+                  summaryItems={catalogOverviewSummaryItems}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Existing Products
+                      </h3>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        data-tutorial="products-refresh"
+                        disabled={productsLoading || !serverReady}
+                        onClick={() =>
+                          runAction(async () => {
+                            const refreshed = await refreshProducts();
+                            return { productCount: refreshed.length };
+                          })
+                        }
+                      >
+                        {productsLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                        Refresh
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {products.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No products yet for this server.
+                        </p>
+                      ) : (
+                        products.map((product) => (
+                          <div
+                            key={product.id}
+                            className="rounded-lg border border-border/60 bg-secondary/35 px-3 py-3 text-sm"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="font-medium">{product.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {product.category} • {product.active ? 'Active' : 'Inactive'} •{' '}
+                                  {product.variants.length} price option(s)
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => loadProductIntoBuilder(product)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() =>
+                                    runAction(async () => {
+                                      const context = requireWorkspaceAndServer({
+                                        requireBot: true,
+                                      });
+                                      const confirmed = window.confirm(
+                                        `Delete product "${product.name}"?`,
+                                      );
+                                      if (!confirmed) {
+                                        return { cancelled: true };
+                                      }
+
+                                      await apiCall(
+                                        `/api/guilds/${encodeURIComponent(context.discordServerId)}/products/${encodeURIComponent(product.id)}?tenantId=${encodeURIComponent(context.workspaceId)}`,
+                                        'DELETE',
+                                      );
+
+                                      await refreshProducts();
+                                      if (editingProductId === product.id) {
+                                        resetProductBuilder();
+                                      }
+                                      return { deletedProductId: product.id };
+                                    })
+                                  }
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </CatalogStepPanel>
+
+                <CatalogStepPanel
+                  sectionId="category"
+                  isOpen={openCatalogSections.includes('category')}
+                  onToggle={toggleCatalogSection}
+                  stepLabel="02"
+                  title="Category & questions"
+                  description="Set the category once, then keep the shared checkout questions consistent for every product inside it."
+                  summaryItems={categoryStepSummaryItems}
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Create Category + Questions
+                      </h3>
+                      <Badge variant="outline">{questions.length} question(s)</Badge>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="category-builder-existing">Pick Existing Category</Label>
+                        <select
+                          id="category-builder-existing"
+                          className={nativeSelectClass}
+                          value={selectedExistingCategoryForBuilder}
+                          onChange={(event) => {
+                            const nextCategory = event.target.value;
+                            setCategoryBuilderName(nextCategory);
+                            if (nextCategory) {
+                              setProductCategory(nextCategory);
+                            }
+                          }}
+                        >
+                          <option value="">Select category</option>
+                          {categorySelectOptions.map((category) => (
+                            <option key={category} value={category}>
+                              {category}
+                            </option>
+                          ))}
+                        </select>
+                        <Label htmlFor="category-builder-name">Or Type New Category</Label>
+                        <Input
+                          id="category-builder-name"
+                          value={categoryBuilderName}
+                          onChange={(event) => setCategoryBuilderName(event.target.value)}
+                          placeholder="Renew Subscription"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Questions are shared by category. Add them once here, then reuse for all
+                          products in that category.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => loadQuestionsForCategory(categoryBuilderName)}
+                        >
+                          Load Existing Category Questions
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setQuestions(getDefaultQuestions());
+                            setQuestionKeyInput('');
+                            setQuestionLabelInput('');
+                            setQuestionTypeInput('short_text');
+                            setQuestionRequiredInput(true);
+                            setQuestionSensitiveInput(false);
+                          }}
+                        >
+                          Reset Question Draft
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-border/60 bg-secondary/20 p-3">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="category-rename-to">Rename Category To</Label>
+                          <Input
+                            id="category-rename-to"
+                            value={categoryRenameTo}
+                            onChange={(event) => setCategoryRenameTo(event.target.value)}
+                            placeholder="New category name"
+                          />
+                        </div>
+                        <div className="flex flex-col justify-end gap-2 sm:flex-row">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={
+                              state.loading ||
+                              !serverReady ||
+                              !categoryBuilderName.trim() ||
+                              !categoryRenameTo.trim()
+                            }
+                            onClick={() =>
+                              runAction(async () => {
+                                const context = requireWorkspaceAndServer({ requireBot: true });
+                                await ensureGuildLinked(
+                                  context.workspaceId,
+                                  context.discordServerId,
+                                );
+
+                                const sourceCategory = categoryBuilderName.trim();
+                                const targetCategory = categoryRenameTo.trim();
+                                if (!sourceCategory) {
+                                  throw new Error('Select a category to rename first.');
+                                }
+                                if (!targetCategory) {
+                                  throw new Error('Enter a new category name.');
+                                }
+
+                                const payload = (await apiCall(
+                                  `/api/guilds/${encodeURIComponent(context.discordServerId)}/categories`,
+                                  'PATCH',
+                                  {
+                                    tenantId: context.workspaceId,
+                                    category: sourceCategory,
+                                    newCategory: targetCategory,
+                                  },
+                                )) as { updatedProducts?: number };
+
+                                const nextProducts = await refreshProducts();
+                                setCategoryBuilderName(targetCategory);
+                                setCategoryRenameTo('');
+
+                                if (
+                                  normalizeCategoryKey(productCategory) ===
+                                  normalizeCategoryKey(sourceCategory)
+                                ) {
+                                  setProductCategory(targetCategory);
+                                }
+
+                                if (
+                                  editingProductId &&
+                                  !nextProducts.some((product) => product.id === editingProductId)
+                                ) {
+                                  resetProductBuilder({ keepCategory: targetCategory });
+                                }
+
+                                return {
+                                  renamedCategory: sourceCategory,
+                                  newCategory: targetCategory,
+                                  updatedProducts: payload.updatedProducts ?? 0,
+                                };
+                              })
+                            }
+                          >
+                            Rename Category
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            disabled={state.loading || !serverReady || !categoryBuilderName.trim()}
+                            onClick={() =>
+                              runAction(async () => {
+                                const context = requireWorkspaceAndServer({ requireBot: true });
+                                await ensureGuildLinked(
+                                  context.workspaceId,
+                                  context.discordServerId,
+                                );
+
+                                const categoryToDelete = categoryBuilderName.trim();
+                                if (!categoryToDelete) {
+                                  throw new Error('Select a category to delete first.');
+                                }
+
+                                const confirmed = window.confirm(
+                                  `Delete category \"${categoryToDelete}\" and ALL products in it? This cannot be undone.`,
+                                );
+                                if (!confirmed) {
+                                  return { cancelled: true };
+                                }
+
+                                const payload = (await apiCall(
+                                  `/api/guilds/${encodeURIComponent(context.discordServerId)}/categories`,
+                                  'DELETE',
+                                  {
+                                    tenantId: context.workspaceId,
+                                    category: categoryToDelete,
+                                  },
+                                )) as { deletedProducts?: number };
+
+                                const nextProducts = await refreshProducts();
+                                const nextCategories = Array.from(
+                                  new Set(
+                                    nextProducts
+                                      .map((product) => product.category.trim())
+                                      .filter((category) => Boolean(category)),
+                                  ),
+                                ).sort((a, b) => a.localeCompare(b));
+
+                                const nextCategory = nextCategories[0] ?? '';
+                                setCategoryBuilderName(nextCategory || 'Accounts');
+                                setCategoryRenameTo('');
+                                if (
+                                  normalizeCategoryKey(productCategory) ===
+                                  normalizeCategoryKey(categoryToDelete)
+                                ) {
+                                  setProductCategory(nextCategory || 'Accounts');
+                                }
+
+                                if (
+                                  editingProductId &&
+                                  !nextProducts.some((product) => product.id === editingProductId)
+                                ) {
+                                  setQuestions(getDefaultQuestions());
+                                  resetProductBuilder({ keepCategory: nextCategory || 'Accounts' });
+                                }
+
+                                return {
+                                  deletedCategory: categoryToDelete,
+                                  deletedProducts: payload.deletedProducts ?? 0,
+                                };
+                              })
+                            }
+                          >
+                            Delete Category
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Renaming updates all products in the category. Deleting removes all products
+                        in that category.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2" data-tutorial="question-list">
+                      {questions.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No questions yet.</p>
+                      ) : (
+                        questions.map((question, index) => {
+                          const isLockedEmailQuestion =
+                            question.key.trim().toLowerCase() === REQUIRED_EMAIL_QUESTION_KEY;
+                          return (
+                            <div
+                              key={`${question.key}-${index}`}
+                              className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                            >
+                              <div>
+                                <p className="text-sm font-medium">{question.label}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {question.fieldType} -{' '}
+                                  {question.required ? 'Required' : 'Optional'} -{' '}
+                                  {question.sensitive ? 'Sensitive' : 'Not sensitive'}
+                                  {isLockedEmailQuestion ? ' - System field (locked)' : ''}
+                                </p>
+                              </div>
+                              {isLockedEmailQuestion ? (
+                                <Badge variant="outline">Locked</Badge>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() => removeQuestion(index)}
+                                >
+                                  <X className="size-4" />
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="question-key">Question Key</Label>
+                        <Input
+                          id="question-key"
+                          value={questionKeyInput}
+                          onChange={(event) => setQuestionKeyInput(event.target.value)}
+                          placeholder="username"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="question-label">Question Label</Label>
+                        <Input
+                          id="question-label"
+                          value={questionLabelInput}
+                          onChange={(event) => setQuestionLabelInput(event.target.value)}
+                          placeholder="What is your email?"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="question-type">Input Type</Label>
+                        <select
+                          id="question-type"
+                          className={nativeSelectClass}
+                          value={questionTypeInput}
+                          onChange={(event) =>
+                            setQuestionTypeInput(event.target.value as FieldType)
+                          }
+                        >
+                          <option value="short_text">Short text</option>
+                          <option value="long_text">Long text</option>
+                          <option value="email">Email</option>
+                          <option value="number">Number</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 self-end">
+                        <Checkbox
+                          id="question-required"
+                          checked={questionRequiredInput}
+                          onCheckedChange={(checked) => setQuestionRequiredInput(checked === true)}
+                        />
+                        <Label
+                          htmlFor="question-required"
+                          className="text-sm font-normal text-muted-foreground"
+                        >
+                          Required
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2 self-end">
+                        <Checkbox
+                          id="question-sensitive"
+                          checked={questionSensitiveInput}
+                          onCheckedChange={(checked) => setQuestionSensitiveInput(checked === true)}
+                        />
+                        <Label
+                          htmlFor="question-sensitive"
+                          className="text-sm font-normal text-muted-foreground"
+                        >
+                          Sensitive
+                        </Label>
+                      </div>
+                    </div>
+
+                    <Button type="button" variant="outline" onClick={addQuestion}>
+                      <Plus className="size-4" />
+                      Add Question
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      data-tutorial="save-category-questions"
+                      disabled={state.loading || !serverReady}
+                      onClick={() =>
+                        runAction(async () => {
+                          const context = requireWorkspaceAndServer({ requireBot: true });
+                          await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                          const normalizedCategory = categoryBuilderName.trim();
+                          if (!normalizedCategory) {
+                            throw new Error('Category name is required before saving questions.');
+                          }
+
+                          const template = categoryTemplateByKey.get(
+                            normalizeCategoryKey(normalizedCategory),
+                          );
+                          if (!template) {
+                            throw new Error(
+                              'Create at least one product in this category first. New products in that category will then reuse these questions automatically.',
+                            );
+                          }
+
+                          const preparedQuestions = prepareQuestionsForApi();
+                          await apiCall(
+                            `/api/guilds/${encodeURIComponent(context.discordServerId)}/forms/${encodeURIComponent(template.productId)}`,
+                            'PUT',
+                            {
+                              tenantId: context.workspaceId,
+                              formFields: preparedQuestions,
+                            },
+                          );
+
+                          await refreshProducts();
+                          setCategoryBuilderName(normalizedCategory);
+                          setProductCategory(normalizedCategory);
+                          return { savedCategoryQuestionsFor: normalizedCategory };
+                        })
+                      }
+                    >
+                      Save Category Questions
+                    </Button>
+                  </div>
+                </CatalogStepPanel>
+
+                <CatalogStepPanel
+                  sectionId="product"
+                  isOpen={openCatalogSections.includes('product')}
+                  onToggle={toggleCatalogSection}
+                  stepLabel="03"
+                  title="Product details"
+                  description="Choose the category, set the product name, and decide if this listing should be active right away."
+                  summaryItems={productStepSummaryItems}
+                >
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Create / Edit Product
+                    </h3>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="product-category">Product Category</Label>
+                        <select
+                          id="product-category"
+                          className={nativeSelectClass}
+                          value={productCategory}
+                          onChange={(event) => setProductCategory(event.target.value)}
+                        >
+                          <option value="">Select category</option>
+                          {categorySelectOptions.map((category) => (
+                            <option key={category} value={category}>
+                              {category}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setProductCategory(categoryBuilderName.trim())}
+                            disabled={!categoryBuilderName.trim()}
+                          >
+                            Use Category Builder Name
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Pick an existing category from the list, or create a new one from the
+                          section above.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="product-name">Product Name</Label>
+                        <Input
+                          id="product-name"
+                          value={productName}
+                          onChange={(event) => setProductName(event.target.value)}
+                          placeholder="Starter Account"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="product-description">Description (optional)</Label>
+                      <Textarea
+                        id="product-description"
+                        value={productDescription}
+                        onChange={(event) => setProductDescription(event.target.value)}
+                        placeholder="Optional product details"
+                        className="min-h-24"
+                      />
+                    </div>
+
+                    <div className="inline-flex items-center gap-2">
+                      <Checkbox
+                        id="product-active"
+                        checked={productActive}
+                        onCheckedChange={(checked) => setProductActive(checked === true)}
+                      />
+                      <Label
+                        htmlFor="product-active"
+                        className="text-sm font-normal text-muted-foreground"
+                      >
+                        Product active
+                      </Label>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Final save happens in Step 04 after at least one price option is added.
+                    </p>
+                  </div>
+                </CatalogStepPanel>
+
+                <CatalogStepPanel
+                  sectionId="pricing"
+                  isOpen={openCatalogSections.includes('pricing')}
+                  onToggle={toggleCatalogSection}
+                  stepLabel="04"
+                  title="Price options"
+                  description="Add the variations customers choose at checkout, then save the full product from here."
+                  summaryItems={pricingStepSummaryItems}
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Price Options (GBP)
+                      </h3>
+                      <Badge variant="outline">{variants.length} option(s)</Badge>
+                    </div>
+
+                    <div className="space-y-2">
+                      {variants.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No price options yet.</p>
+                      ) : (
+                        variants.map((variant, index) => (
+                          <div
+                            key={`${variant.label}-${index}`}
+                            className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/35 px-3 py-2"
+                          >
+                            <p className="text-sm">
+                              {variant.label}: {variant.priceMajor} {variant.currency} (Referral:{' '}
+                              {variant.referralRewardMajor} {variant.currency})
+                            </p>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => editPriceOption(index)}
+                              >
+                                <Pencil className="size-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => removePriceOption(index)}
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="variant-label">Price Label</Label>
+                        <Input
+                          id="variant-label"
+                          value={variantLabelInput}
+                          onChange={(event) => setVariantLabelInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="variant-price">Price (major unit)</Label>
+                        <Input
+                          id="variant-price"
+                          value={variantPriceInput}
+                          onChange={(event) => setVariantPriceInput(event.target.value)}
+                          placeholder="9.99"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="variant-referral-reward">
+                          Referral Reward (major unit)
+                        </Label>
+                        <Input
+                          id="variant-referral-reward"
+                          value={variantReferralRewardInput}
+                          onChange={(event) => setVariantReferralRewardInput(event.target.value)}
+                          placeholder={referralRewardMajor || DEFAULT_REFERRAL_REWARD_MAJOR}
+                        />
+                      </div>
+                    </div>
+
+                    <Button type="button" variant="outline" onClick={addPriceOption}>
+                      <Plus className="size-4" />
+                      {editingVariantIndex === null ? 'Add Price Option' : 'Save Price Option'}
+                    </Button>
+                    {editingVariantIndex !== null ? (
+                      <Button type="button" variant="outline" onClick={cancelPriceOptionEdit}>
+                        Cancel Variant Edit
+                      </Button>
+                    ) : null}
+
+                    <div className="flex flex-col gap-2 pt-2 sm:flex-row">
+                      <Button
+                        type="button"
+                        data-tutorial="save-product"
+                        disabled={state.loading || !serverReady}
+                        className="sm:flex-1"
+                        onClick={() =>
+                          runAction(async () => {
+                            const context = requireWorkspaceAndServer({ requireBot: true });
+                            await ensureGuildLinked(context.workspaceId, context.discordServerId);
+
+                            if (variants.length === 0) {
+                              throw new Error('Add at least one price option.');
+                            }
+
+                            const normalizedCategory = productCategory.trim();
+                            const normalizedName = productName.trim();
+                            const normalizedDescription = productDescription.trim();
+
+                            if (!normalizedCategory) {
+                              throw new Error('Product category is required.');
+                            }
+
+                            if (!normalizedName) {
+                              throw new Error('Product name is required.');
+                            }
+
+                            const normalizedCategoryKey = normalizeCategoryKey(normalizedCategory);
+                            const categoryAlreadyExists = existingCategories.some(
+                              (category) =>
+                                normalizeCategoryKey(category) === normalizedCategoryKey,
+                            );
+
+                            const editingProduct = editingProductId
+                              ? (products.find((product) => product.id === editingProductId) ??
+                                null)
+                              : null;
+                            if (
+                              editingProduct &&
+                              normalizeCategoryKey(editingProduct.category) !==
+                                normalizedCategoryKey
+                            ) {
+                              throw new Error(
+                                'Changing category on an existing product is blocked to keep category questions consistent. Create a new product in the target category instead.',
+                              );
+                            }
+
+                            const preparedVariants = variants.map((variant) => ({
+                              label: variant.label.trim(),
+                              priceMinor: parsePriceToMinor(variant.priceMajor),
+                              referralRewardMinor: parsePriceToMinor(variant.referralRewardMajor),
+                              currency: DEFAULT_CURRENCY,
+                            }));
+
+                            let preparedQuestions: QuestionDraft[] = [];
+                            if (!categoryAlreadyExists) {
+                              if (
+                                normalizeCategoryKey(categoryBuilderName) !== normalizedCategoryKey
+                              ) {
+                                throw new Error(
+                                  'For a new category, set the same category name in "Create Category + Questions" first.',
+                                );
+                              }
+
+                              preparedQuestions = prepareQuestionsForApi();
+                            }
+
+                            const productPayload = {
+                              category: normalizedCategory,
+                              name: normalizedName,
+                              description: normalizedDescription,
+                              active: productActive,
+                              variants: preparedVariants,
+                            };
+
+                            if (editingProductId) {
+                              await apiCall(
+                                `/api/guilds/${encodeURIComponent(context.discordServerId)}/products/${encodeURIComponent(editingProductId)}`,
+                                'PATCH',
+                                {
+                                  tenantId: context.workspaceId,
+                                  product: productPayload,
+                                },
+                              );
+                            } else {
+                              await apiCall(
+                                `/api/guilds/${context.discordServerId}/products`,
+                                'POST',
+                                {
+                                  tenantId: context.workspaceId,
+                                  product: productPayload,
+                                  formFields: preparedQuestions,
+                                },
+                              );
+                            }
+
+                            await refreshProducts();
+                            setCategoryBuilderName(normalizedCategory);
+                            resetProductBuilder({ keepCategory: normalizedCategory });
+                            return { mode: editingProductId ? 'updated' : 'created' };
+                          })
+                        }
+                      >
+                        {editingProductId ? 'Update Product' : 'Create Product'}
+                      </Button>
+
+                      {editingProductId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="sm:flex-1"
+                          onClick={() => resetProductBuilder()}
+                        >
+                          Cancel Edit
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </CatalogStepPanel>
+              </CardContent>
+            ) : null}
           </Card>
           {isSuperAdmin ? (
-            <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur" data-tutorial="super-admin-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Shield className="size-4 text-primary" />
-                  <span>Super Admin</span>
+            <Card
+              className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur"
+              data-tutorial="super-admin-card"
+            >
+              <DashboardSectionHeader
+                sectionId="super-admin"
+                isOpen={openDashboardSections.includes('super-admin')}
+                onToggle={toggleDashboardSection}
+                icon={Shield}
+                title="Super Admin"
+                description="Global operations only visible to super-admin sessions."
+                summaryItems={superAdminSummaryItems}
+                action={
                   <Button
                     type="button"
                     size="icon-sm"
                     variant="ghost"
-                    className="ml-auto text-muted-foreground hover:text-foreground"
+                    className="text-muted-foreground hover:text-foreground"
                     aria-label="Show tutorial info for Super Admin"
-                    onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'super-admin-card' })}
+                    onClick={() =>
+                      runDashboardTutorial({ markSeen: true, startAtStepId: 'super-admin-card' })
+                    }
                   >
                     <Info className="size-4" />
                   </Button>
-                </CardTitle>
-                <CardDescription>Global operations only visible to super-admin sessions.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="global-bot-token">Global Bot Token</Label>
-                  <Input
-                    id="global-bot-token"
-                    value={botToken}
-                    onChange={(event) => setBotToken(event.target.value)}
-                    type="password"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  disabled={state.loading}
-                  onClick={() =>
-                    runAction(() => {
-                      if (!botToken.trim()) {
-                        throw new Error('Bot token is required.');
-                      }
-
-                      return apiCall('/api/admin/bot-token', 'POST', { token: botToken.trim() });
-                    })
-                  }
-                >
-                  Rotate Bot Token
-                </Button>
-
-                <Separator />
-
-                <div className="flex flex-col gap-2">
+                }
+              />
+              {openDashboardSections.includes('super-admin') ? (
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="global-bot-token">Global Bot Token</Label>
+                    <Input
+                      id="global-bot-token"
+                      value={botToken}
+                      onChange={(event) => setBotToken(event.target.value)}
+                      type="password"
+                    />
+                  </div>
                   <Button
                     type="button"
-                    variant="outline"
-                    data-tutorial="super-admin-list-tenants"
                     disabled={state.loading}
-                    onClick={() => runAction(() => apiCall('/api/admin/tenants'))}
+                    onClick={() =>
+                      runAction(() => {
+                        if (!botToken.trim()) {
+                          throw new Error('Bot token is required.');
+                        }
+
+                        return apiCall('/api/admin/bot-token', 'POST', { token: botToken.trim() });
+                      })
+                    }
                   >
-                    List All Tenants
+                    Rotate Bot Token
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    data-tutorial="super-admin-list-users"
-                    disabled={state.loading}
-                    onClick={() => runAction(() => apiCall('/api/admin/users'))}
-                  >
-                    List All Users
-                  </Button>
-                </div>
-              </CardContent>
+
+                  <Separator />
+
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      data-tutorial="super-admin-list-tenants"
+                      disabled={state.loading}
+                      onClick={() => runAction(() => apiCall('/api/admin/tenants'))}
+                    >
+                      List All Tenants
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      data-tutorial="super-admin-list-users"
+                      disabled={state.loading}
+                      onClick={() => runAction(() => apiCall('/api/admin/users'))}
+                    >
+                      List All Users
+                    </Button>
+                  </div>
+                </CardContent>
+              ) : null}
             </Card>
           ) : null}
         </section>
 
-        <Card className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur" data-tutorial="latest-action">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Activity className="size-4 text-primary" />
-              <span>Latest Action</span>
+        <Card
+          className="border-border/70 bg-card/75 shadow-lg shadow-black/10 backdrop-blur"
+          data-tutorial="latest-action"
+        >
+          <DashboardSectionHeader
+            sectionId="latest-action"
+            isOpen={openDashboardSections.includes('latest-action')}
+            onToggle={toggleDashboardSection}
+            icon={Activity}
+            title="Latest Action"
+            description="Real-time result from your last dashboard API call."
+            summaryItems={latestActionSummaryItems}
+            action={
               <Button
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                className="ml-auto text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground"
                 aria-label="Show tutorial info for Latest Action"
-                onClick={() => runDashboardTutorial({ markSeen: true, startAtStepId: 'latest-action' })}
+                onClick={() =>
+                  runDashboardTutorial({ markSeen: true, startAtStepId: 'latest-action' })
+                }
               >
                 <Info className="size-4" />
               </Button>
-            </CardTitle>
-            <CardDescription>Real-time result from your last dashboard API call.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {state.loading ? (
-              <div className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Processing request...
-              </div>
-            ) : null}
+            }
+          />
+          {openDashboardSections.includes('latest-action') ? (
+            <CardContent className="space-y-3">
+              {state.loading ? (
+                <div className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Processing request...
+                </div>
+              ) : null}
 
-            {state.error ? (
-              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                <AlertCircle className="mt-0.5 size-4" />
-                <span>{state.error}</span>
-              </div>
-            ) : null}
+              {state.error ? (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <AlertCircle className="mt-0.5 size-4" />
+                  <span>{state.error}</span>
+                </div>
+              ) : null}
 
-            {state.response ? (
-              <div className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-                <p className="mb-2 inline-flex items-center gap-2 text-emerald-200">
-                  <CheckCircle2 className="size-4" />
-                  Request succeeded
-                </p>
-                <pre className="whitespace-pre-wrap text-xs leading-relaxed text-emerald-100/90">{state.response}</pre>
-              </div>
-            ) : null}
+              {state.response ? (
+                <div className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                  <p className="mb-2 inline-flex items-center gap-2 text-emerald-200">
+                    <CheckCircle2 className="size-4" />
+                    Request succeeded
+                  </p>
+                  <pre className="whitespace-pre-wrap text-xs leading-relaxed text-emerald-100/90">
+                    {state.response}
+                  </pre>
+                </div>
+              ) : null}
 
-            {!state.loading && !state.error && !state.response ? (
-              <p className="text-sm text-muted-foreground">No actions yet in this session.</p>
-            ) : null}
-          </CardContent>
+              {!state.loading && !state.error && !state.response ? (
+                <p className="text-sm text-muted-foreground">No actions yet in this session.</p>
+              ) : null}
+            </CardContent>
+          ) : null}
         </Card>
       </div>
     </main>
   );
 }
-
