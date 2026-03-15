@@ -32,6 +32,7 @@ function createRepositoryWithMockDb(mockDb: MockDb): NukeRepository {
 describe('NukeRepository lock lease handling', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('treats a renewed lock as valid when MySQL truncates milliseconds from lease_until', async () => {
@@ -54,7 +55,8 @@ describe('NukeRepository lock lease handling', () => {
     };
 
     const repository = createRepositoryWithMockDb(mockDb);
-    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now.getTime());
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
 
     await expect(
       repository.renewLockLease({
@@ -66,7 +68,6 @@ describe('NukeRepository lock lease handling', () => {
 
     expect(update).toHaveBeenCalledTimes(1);
     expect(mockDb.query.channelNukeLocks.findFirst).toHaveBeenCalledTimes(1);
-    dateNowSpy.mockRestore();
   });
 
   it('rejects a renewed lock when the stored lease is already expired', async () => {
@@ -89,7 +90,8 @@ describe('NukeRepository lock lease handling', () => {
     };
 
     const repository = createRepositoryWithMockDb(mockDb);
-    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now.getTime());
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
 
     await expect(
       repository.renewLockLease({
@@ -98,7 +100,5 @@ describe('NukeRepository lock lease handling', () => {
         leaseUntil: requestedLeaseUntil,
       }),
     ).resolves.toBe(false);
-
-    dateNowSpy.mockRestore();
   });
 });

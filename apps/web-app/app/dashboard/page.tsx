@@ -589,7 +589,7 @@ function DashboardQuickStepButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'min-w-[15rem] snap-start rounded-[1.5rem] border p-4 text-left transition duration-150 md:min-w-0',
+        'shrink-0 min-w-[15rem] snap-start rounded-[1.5rem] border p-4 text-left transition duration-150 md:min-w-0',
         active
           ? 'border-primary/45 bg-background/95 shadow-lg shadow-primary/10'
           : 'border-border/60 bg-card/75 hover:border-primary/30 hover:bg-background/90',
@@ -2135,12 +2135,12 @@ export default function DashboardPage() {
             <CardHeader className="p-4 pb-0 sm:p-5 sm:pb-0">
               <CardTitle className="text-lg">Setup Flow</CardTitle>
               <CardDescription>
-                Use this as a simple checklist. Tap a step to jump straight to the section you
-                want.
+                Use this as a simple checklist. Swipe sideways on mobile, or tap a step to jump
+                straight to the section you want.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4 pt-4 sm:p-5 sm:pt-4">
-              <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1 xl:grid xl:grid-cols-5 xl:overflow-visible">
+              <div className="dashboard-step-strip -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 xl:grid xl:grid-cols-5 xl:overflow-visible">
                 {primaryDashboardSteps.map((step) => (
                   <DashboardQuickStepButton
                     key={step.sectionId}
