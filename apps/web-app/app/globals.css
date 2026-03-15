@@ -124,25 +124,6 @@
   }
 }
 
-.dashboard-step-strip {
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  touch-action: pan-y;
-  user-select: none;
-}
-
-.dashboard-step-card {
-  touch-action: pan-y;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.dashboard-step-strip::-webkit-scrollbar {
-  display: none;
-}
-
 .driver-overlay,
 .driver-overlay-animated {
   z-index: 3300 !important;

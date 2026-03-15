@@ -24,7 +24,6 @@ import {
 import Image from 'next/image';
 import {
   type ComponentType,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -590,7 +589,7 @@ function DashboardQuickStepButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'dashboard-step-card shrink-0 min-w-[15rem] snap-start rounded-[1.5rem] border p-4 text-left transition duration-150 md:min-w-0',
+        'w-full rounded-[1.5rem] border p-4 text-left transition duration-150',
         active
           ? 'border-primary/45 bg-background/95 shadow-lg shadow-primary/10'
           : 'border-border/60 bg-card/75 hover:border-primary/30 hover:bg-background/90',
@@ -639,15 +638,6 @@ function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
 }
 
 export default function DashboardPage() {
-  const setupFlowStripRef = useRef<HTMLDivElement | null>(null);
-  const setupFlowStripDragStateRef = useRef<{
-    pointerId: number | null;
-    startX: number;
-    startY: number;
-    scrollLeft: number;
-    horizontalDrag: boolean | null;
-  } | null>(null);
-  const suppressSetupFlowClickRef = useRef(false);
   const [tenantId, setTenantId] = useState('');
   const [guildId, setGuildId] = useState('');
   const [myTenants, setMyTenants] = useState<TenantSummary[]>([]);
@@ -1050,160 +1040,6 @@ export default function DashboardPage() {
     },
     [focusDashboardSection],
   );
-
-  const handleSetupFlowPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === 'touch') {
-      return;
-    }
-
-    if (event.pointerType === 'mouse' && event.button !== 0) {
-      return;
-    }
-
-    setupFlowStripDragStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      scrollLeft: event.currentTarget.scrollLeft,
-      horizontalDrag: null,
-    };
-    suppressSetupFlowClickRef.current = false;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }, []);
-
-  const handleSetupFlowPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const dragState = setupFlowStripDragStateRef.current;
-    if (event.pointerType === 'touch' || !dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - dragState.startX;
-    const deltaY = event.clientY - dragState.startY;
-
-    if (dragState.horizontalDrag === null) {
-      if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
-        return;
-      }
-
-      dragState.horizontalDrag = Math.abs(deltaX) > Math.abs(deltaY);
-    }
-
-    if (!dragState.horizontalDrag) {
-      return;
-    }
-
-    suppressSetupFlowClickRef.current = true;
-    event.preventDefault();
-    event.currentTarget.scrollLeft = dragState.scrollLeft - deltaX;
-  }, []);
-
-  const resetSetupFlowDragState = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const dragState = setupFlowStripDragStateRef.current;
-    if (event.pointerType === 'touch' || !dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch {
-      // Ignore stale pointer capture release attempts.
-    }
-
-    setupFlowStripDragStateRef.current = null;
-    window.setTimeout(() => {
-      suppressSetupFlowClickRef.current = false;
-    }, 0);
-  }, []);
-
-  const handleSetupFlowClickCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!suppressSetupFlowClickRef.current) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
-
-  useEffect(() => {
-    const element = setupFlowStripRef.current;
-    if (!element) {
-      return;
-    }
-
-    const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        return;
-      }
-
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
-      }
-
-      setupFlowStripDragStateRef.current = {
-        pointerId: null,
-        startX: touch.clientX,
-        startY: touch.clientY,
-        scrollLeft: element.scrollLeft,
-        horizontalDrag: null,
-      };
-      suppressSetupFlowClickRef.current = false;
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const dragState = setupFlowStripDragStateRef.current;
-      if (!dragState || event.touches.length !== 1) {
-        return;
-      }
-
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
-      }
-
-      const deltaX = touch.clientX - dragState.startX;
-      const deltaY = touch.clientY - dragState.startY;
-
-      if (dragState.horizontalDrag === null) {
-        if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
-          return;
-        }
-
-        dragState.horizontalDrag = Math.abs(deltaX) > Math.abs(deltaY);
-      }
-
-      if (!dragState.horizontalDrag) {
-        return;
-      }
-
-      suppressSetupFlowClickRef.current = true;
-      event.preventDefault();
-      element.scrollLeft = dragState.scrollLeft - deltaX;
-    };
-
-    const handleTouchEnd = () => {
-      if (!setupFlowStripDragStateRef.current) {
-        return;
-      }
-
-      setupFlowStripDragStateRef.current = null;
-      window.setTimeout(() => {
-        suppressSetupFlowClickRef.current = false;
-      }, 0);
-    };
-
-    element.addEventListener('touchstart', handleTouchStart, { passive: true });
-    element.addEventListener('touchmove', handleTouchMove, { passive: false });
-    element.addEventListener('touchend', handleTouchEnd, { passive: true });
-    element.addEventListener('touchcancel', handleTouchEnd, { passive: true });
-
-    return () => {
-      element.removeEventListener('touchstart', handleTouchStart);
-      element.removeEventListener('touchmove', handleTouchMove);
-      element.removeEventListener('touchend', handleTouchEnd);
-      element.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, []);
 
   const focusTutorialStep = useCallback(
     (stepId: string) => {
@@ -2299,20 +2135,12 @@ export default function DashboardPage() {
             <CardHeader className="p-4 pb-0 sm:p-5 sm:pb-0">
               <CardTitle className="text-lg">Setup Flow</CardTitle>
               <CardDescription>
-                Use this as a simple checklist. Swipe sideways on mobile, or tap a step to jump
-                straight to the section you want.
+                Use this as a simple checklist. On mobile the steps stack vertically, so you can
+                tap the next section directly without swiping.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4 pt-4 sm:p-5 sm:pt-4">
-              <div
-                ref={setupFlowStripRef}
-                className="dashboard-step-strip -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 xl:grid xl:grid-cols-5 xl:overflow-visible"
-                onClickCapture={handleSetupFlowClickCapture}
-                onPointerCancel={resetSetupFlowDragState}
-                onPointerDown={handleSetupFlowPointerDown}
-                onPointerMove={handleSetupFlowPointerMove}
-                onPointerUp={resetSetupFlowDragState}
-              >
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 {primaryDashboardSteps.map((step) => (
                   <DashboardQuickStepButton
                     key={step.sectionId}
