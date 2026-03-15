@@ -590,7 +590,7 @@ function DashboardQuickStepButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'shrink-0 min-w-[15rem] snap-start rounded-[1.5rem] border p-4 text-left transition duration-150 md:min-w-0',
+        'dashboard-step-card shrink-0 min-w-[15rem] snap-start rounded-[1.5rem] border p-4 text-left transition duration-150 md:min-w-0',
         active
           ? 'border-primary/45 bg-background/95 shadow-lg shadow-primary/10'
           : 'border-border/60 bg-card/75 hover:border-primary/30 hover:bg-background/90',
@@ -639,8 +639,9 @@ function toQuestionDrafts(fields: ProductFormFieldRecord[]): QuestionDraft[] {
 }
 
 export default function DashboardPage() {
+  const setupFlowStripRef = useRef<HTMLDivElement | null>(null);
   const setupFlowStripDragStateRef = useRef<{
-    pointerId: number;
+    pointerId: number | null;
     startX: number;
     startY: number;
     scrollLeft: number;
@@ -1051,6 +1052,10 @@ export default function DashboardPage() {
   );
 
   const handleSetupFlowPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') {
+      return;
+    }
+
     if (event.pointerType === 'mouse' && event.button !== 0) {
       return;
     }
@@ -1068,7 +1073,7 @@ export default function DashboardPage() {
 
   const handleSetupFlowPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const dragState = setupFlowStripDragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
+    if (event.pointerType === 'touch' || !dragState || dragState.pointerId !== event.pointerId) {
       return;
     }
 
@@ -1094,7 +1099,7 @@ export default function DashboardPage() {
 
   const resetSetupFlowDragState = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const dragState = setupFlowStripDragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
+    if (event.pointerType === 'touch' || !dragState || dragState.pointerId !== event.pointerId) {
       return;
     }
 
@@ -1117,6 +1122,87 @@ export default function DashboardPage() {
 
     event.preventDefault();
     event.stopPropagation();
+  }, []);
+
+  useEffect(() => {
+    const element = setupFlowStripRef.current;
+    if (!element) {
+      return;
+    }
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+
+      setupFlowStripDragStateRef.current = {
+        pointerId: null,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        scrollLeft: element.scrollLeft,
+        horizontalDrag: null,
+      };
+      suppressSetupFlowClickRef.current = false;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const dragState = setupFlowStripDragStateRef.current;
+      if (!dragState || event.touches.length !== 1) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+
+      const deltaX = touch.clientX - dragState.startX;
+      const deltaY = touch.clientY - dragState.startY;
+
+      if (dragState.horizontalDrag === null) {
+        if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
+          return;
+        }
+
+        dragState.horizontalDrag = Math.abs(deltaX) > Math.abs(deltaY);
+      }
+
+      if (!dragState.horizontalDrag) {
+        return;
+      }
+
+      suppressSetupFlowClickRef.current = true;
+      event.preventDefault();
+      element.scrollLeft = dragState.scrollLeft - deltaX;
+    };
+
+    const handleTouchEnd = () => {
+      if (!setupFlowStripDragStateRef.current) {
+        return;
+      }
+
+      setupFlowStripDragStateRef.current = null;
+      window.setTimeout(() => {
+        suppressSetupFlowClickRef.current = false;
+      }, 0);
+    };
+
+    element.addEventListener('touchstart', handleTouchStart, { passive: true });
+    element.addEventListener('touchmove', handleTouchMove, { passive: false });
+    element.addEventListener('touchend', handleTouchEnd, { passive: true });
+    element.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+
+    return () => {
+      element.removeEventListener('touchstart', handleTouchStart);
+      element.removeEventListener('touchmove', handleTouchMove);
+      element.removeEventListener('touchend', handleTouchEnd);
+      element.removeEventListener('touchcancel', handleTouchEnd);
+    };
   }, []);
 
   const focusTutorialStep = useCallback(
@@ -2219,6 +2305,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="p-4 pt-4 sm:p-5 sm:pt-4">
               <div
+                ref={setupFlowStripRef}
                 className="dashboard-step-strip -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 xl:grid xl:grid-cols-5 xl:overflow-visible"
                 onClickCapture={handleSetupFlowClickCapture}
                 onPointerCancel={resetSetupFlowDragState}
