@@ -2,18 +2,9 @@ import { AppError, OrderRepository } from '@voodoo/core';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-import { parseCheckoutRedirectMethod, resolveCheckoutRedirectUrl } from '@/lib/checkout-redirect';
+import { parseCheckoutRedirectMethod, resolveCheckoutRedirectUrl } from '../../../lib/checkout-redirect';
 
 const orderRepository = new OrderRepository();
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 export async function GET(
   request: NextRequest,
@@ -45,29 +36,9 @@ export async function GET(
       return NextResponse.json({ error: 'Checkout URL unavailable for this session' }, { status: 404 });
     }
 
-    const safeUrl = escapeHtml(targetUrl);
-    const jsUrl = JSON.stringify(targetUrl);
-    const html = [
-      '<!doctype html>',
-      '<html lang="en">',
-      '<head>',
-      '  <meta charset="utf-8" />',
-      '  <meta name="viewport" content="width=device-width, initial-scale=1" />',
-      `  <meta http-equiv="refresh" content="0;url=${safeUrl}" />`,
-      '  <title>Redirecting to Checkout</title>',
-      '</head>',
-      '<body>',
-      '  <p>Redirecting to checkout...</p>',
-      `  <p>If nothing happens, <a href="${safeUrl}" rel="noreferrer">continue here</a>.</p>`,
-      `  <script>window.location.replace(${jsUrl});</script>`,
-      '</body>',
-      '</html>',
-    ].join('\n');
-
-    return new NextResponse(html, {
-      status: 200,
+    return NextResponse.redirect(targetUrl, {
+      status: 307,
       headers: {
-        'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
       },
     });
