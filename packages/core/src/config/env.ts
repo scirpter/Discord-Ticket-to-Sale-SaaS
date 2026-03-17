@@ -105,9 +105,7 @@ export function getEnv(): AppEnv {
   const parsed = envSchema.parse(process.env);
   cachedEnv = {
     ...parsed,
-    superAdminDiscordIds: parsed.SUPER_ADMIN_DISCORD_IDS.split(',')
-      .map((id) => id.trim())
-      .filter(Boolean),
+    superAdminDiscordIds: parseDiscordIdList(parsed.SUPER_ADMIN_DISCORD_IDS),
   };
 
   return cachedEnv;
@@ -115,4 +113,11 @@ export function getEnv(): AppEnv {
 
 export function resetEnvForTests(): void {
   cachedEnv = null;
+}
+
+function parseDiscordIdList(value: string): string[] {
+  return value
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
 }

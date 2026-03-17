@@ -201,6 +201,7 @@ SESSION_SECRET=LONG_RANDOM_STRING_MIN_32_CHARS
 ENCRYPTION_KEY=LONG_RANDOM_STRING_MIN_32_CHARS
 CHECKOUT_SIGNING_SECRET=LONG_RANDOM_STRING_MIN_32_CHARS
 
+# Super admin Discord IDs can run /nuke grant, /nuke revoke, and /nuke authorized.
 SUPER_ADMIN_DISCORD_IDS=123456789012345678
 BOT_PUBLIC_URL=https://voodoo.example.com
 DISCORD_TEST_GUILD_ID=
@@ -488,4 +489,10 @@ Expected:
   - Pull the latest code and redeploy the worker build
   - Restart `voodoo-nuke`
   - This symptom was caused by MySQL timestamp precision truncating the stored lock lease
+
+- `/nuke` says the worker is locked for this server:
+  - The server has one or more granted `/nuke` users in the database
+  - Use the Discord account listed in `SUPER_ADMIN_DISCORD_IDS`
+  - Run `/nuke authorized` to inspect the current server allowlist
+  - Run `/nuke grant user:@someone` or `/nuke revoke user:@someone` to change access
 

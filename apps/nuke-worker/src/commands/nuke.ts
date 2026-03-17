@@ -5,7 +5,15 @@ import {
   type AutocompleteInteraction,
   type ChatInputCommandInteraction,
 } from 'discord.js';
-import { AppError, NukeService, TenantRepository, logger } from '@voodoo/core';
+import {
+  AppError,
+  type ChannelNukeAuthorizedUserSummary,
+  type ChannelNukeScheduleSummary,
+  getEnv,
+  NukeService,
+  TenantRepository,
+  logger,
+} from '@voodoo/core';
 import { deferEphemeralReply, sendEphemeralReply } from '../utils/replies.js';
 import { getTimezoneAutocompleteChoices } from './nuke-timezones.js';
 
@@ -67,6 +75,18 @@ function checkInteractionPermissions(interaction: ChatInputCommandInteraction): 
   return { ok: true };
 }
 
+function isSuperAdminUser(discordUserId: string): boolean {
+  return getEnv().superAdminDiscordIds.includes(discordUserId);
+}
+
+function getNukeCommandLockedMessage(): string {
+  return 'This nuke worker is locked for this server. A super admin must grant your Discord ID access before you can use `/nuke` commands.';
+}
+
+function getSuperAdminOnlyAccessMessage(): string {
+  return 'Only the configured super admin Discord ID can manage `/nuke` access.';
+}
+
 type NukeExecutionResult = {
   status: 'success' | 'partial' | 'duplicate';
   oldChannelId: string;
@@ -80,6 +100,37 @@ function buildNukeResultMessage(result: NukeExecutionResult): string {
     result.message,
     `Old Channel: \`${result.oldChannelId}\``,
     result.newChannelId ? `New Channel: \`${result.newChannelId}\`` : 'New Channel: (none)',
+  ].join('\n');
+}
+
+export function buildScheduleStatusMessage(schedule: ChannelNukeScheduleSummary): string {
+  return [
+    'Current daily nuke schedule for this channel:',
+    `Status: ${schedule.enabled ? 'Enabled' : 'Disabled'}`,
+    `Time: ${schedule.localTimeHhMm}`,
+    `Timezone: ${schedule.timezone}`,
+    `Next run (UTC): ${schedule.nextRunAtUtc}`,
+    `Last run (UTC): ${schedule.lastRunAtUtc ?? 'Never'}`,
+    `Last local run date: ${schedule.lastLocalRunDate ?? 'Never'}`,
+    `Consecutive failures: ${schedule.consecutiveFailures}`,
+    `Schedule ID: \`${schedule.scheduleId}\``,
+  ].join('\n');
+}
+
+export function buildAuthorizedUsersMessage(
+  authorizedUsers: ChannelNukeAuthorizedUserSummary[],
+): string {
+  if (authorizedUsers.length === 0) {
+    return [
+      'No extra `/nuke` access entries exist for this server.',
+      'When the list is empty, `/nuke` falls back to normal `Manage Channels` or `Administrator` permissions.',
+    ].join('\n');
+  }
+
+  return [
+    'Authorized `/nuke` users for this server:',
+    ...authorizedUsers.map((user) => `<@${user.discordUserId}> (\`${user.discordUserId}\`)`),
+    'With one or more entries present, only listed users plus super admins can use `/nuke`.',
   ].join('\n');
 }
 
@@ -165,6 +216,28 @@ export const nukeCommand = {
         ),
     )
     .addSubcommand((subcommand) =>
+      subcommand.setName('status').setDescription('Show daily nuke schedule for this channel'),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand.setName('authorized').setDescription('List Discord users allowed to use /nuke here'),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('grant')
+        .setDescription('Grant /nuke access to a Discord user for this server')
+        .addUserOption((option) =>
+          option.setName('user').setDescription('Discord user to authorize').setRequired(true),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('revoke')
+        .setDescription('Revoke /nuke access from a Discord user for this server')
+        .addUserOption((option) =>
+          option.setName('user').setDescription('Discord user to remove').setRequired(true),
+        ),
+    )
+    .addSubcommand((subcommand) =>
       subcommand.setName('disable').setDescription('Disable daily nuke schedule for this channel'),
     )
     .addSubcommand((subcommand) =>
@@ -197,6 +270,120 @@ export const nukeCommand = {
       }
 
       const subcommand = interaction.options.getSubcommand(true);
+      const isSuperAdmin = isSuperAdminUser(interaction.user.id);
+
+      if (subcommand === 'authorized') {
+        if (!isSuperAdmin) {
+          await sendEphemeralReply(interaction, getSuperAdminOnlyAccessMessage());
+          return;
+        }
+
+        const result = await nukeService.listAuthorizedUsers({
+          tenantId: tenant.tenantId,
+          guildId,
+        });
+
+        if (result.isErr()) {
+          await sendEphemeralReply(interaction, mapNukeError(result.error));
+          return;
+        }
+
+        await sendEphemeralReply(interaction, buildAuthorizedUsersMessage(result.value));
+        return;
+      }
+
+      if (subcommand === 'grant') {
+        if (!isSuperAdmin) {
+          await sendEphemeralReply(interaction, getSuperAdminOnlyAccessMessage());
+          return;
+        }
+
+        const targetUser = interaction.options.getUser('user', true);
+        const result = await nukeService.grantUserAccess({
+          tenantId: tenant.tenantId,
+          guildId,
+          discordUserId: targetUser.id,
+          grantedByDiscordUserId: interaction.user.id,
+        });
+
+        if (result.isErr()) {
+          await sendEphemeralReply(interaction, mapNukeError(result.error));
+          return;
+        }
+
+        await sendEphemeralReply(
+          interaction,
+          result.value.created
+            ? `Granted \`/nuke\` access for <@${targetUser.id}> in this server.`
+            : `<@${targetUser.id}> already had \`/nuke\` access in this server.`,
+        );
+        return;
+      }
+
+      if (subcommand === 'revoke') {
+        if (!isSuperAdmin) {
+          await sendEphemeralReply(interaction, getSuperAdminOnlyAccessMessage());
+          return;
+        }
+
+        const targetUser = interaction.options.getUser('user', true);
+        const result = await nukeService.revokeUserAccess({
+          tenantId: tenant.tenantId,
+          guildId,
+          discordUserId: targetUser.id,
+        });
+
+        if (result.isErr()) {
+          await sendEphemeralReply(interaction, mapNukeError(result.error));
+          return;
+        }
+
+        await sendEphemeralReply(
+          interaction,
+          result.value.revoked
+            ? `Revoked \`/nuke\` access for <@${targetUser.id}> in this server.`
+            : `No extra \`/nuke\` access entry exists for <@${targetUser.id}> in this server.`,
+        );
+        return;
+      }
+
+      if (!isSuperAdmin) {
+        const accessState = await nukeService.getCommandAccessState({
+          tenantId: tenant.tenantId,
+          guildId,
+          discordUserId: interaction.user.id,
+        });
+
+        if (accessState.isErr()) {
+          await sendEphemeralReply(interaction, mapNukeError(accessState.error));
+          return;
+        }
+
+        if (accessState.value.locked && !accessState.value.allowed) {
+          await sendEphemeralReply(interaction, getNukeCommandLockedMessage());
+          return;
+        }
+      }
+
+      if (subcommand === 'status') {
+        const result = await nukeService.getChannelSchedule({
+          tenantId: tenant.tenantId,
+          guildId,
+          channelId,
+        });
+
+        if (result.isErr()) {
+          await sendEphemeralReply(interaction, mapNukeError(result.error));
+          return;
+        }
+
+        await sendEphemeralReply(
+          interaction,
+          result.value ? buildScheduleStatusMessage(result.value) : 'No daily nuke schedule exists for this channel.',
+        );
+        return;
+      }
+
       if (subcommand === 'schedule') {
         const timeHhMm = interaction.options.getString('time', true);
         const timezone = interaction.options.getString('timezone', true);

@@ -5,7 +5,11 @@ import { ulid } from 'ulid';
 import { getEnv } from '../config/env.js';
 import { AppError } from '../domain/errors.js';
 import { logger } from '../infra/logger.js';
-import { NukeRepository, type ChannelNukeScheduleRecord } from '../repositories/nuke-repository.js';
+import {
+  NukeRepository,
+  type ChannelNukeAuthorizedUserRecord,
+  type ChannelNukeScheduleRecord,
+} from '../repositories/nuke-repository.js';
 import {
   assertValidTimezone,
   buildScheduledNukeIdempotencyKey,
@@ -37,12 +41,170 @@ const MAX_SCHEDULE_FAILURES = 5;
 const LOCK_LEASE_MS = 60_000;
 const LOCK_HEARTBEAT_MS = 15_000;
 
+export type ChannelNukeScheduleSummary = {
+  scheduleId: string;
+  channelId: string;
+  enabled: boolean;
+  localTimeHhMm: string;
+  timezone: string;
+  nextRunAtUtc: string;
+  lastRunAtUtc: string | null;
+  lastLocalRunDate: string | null;
+  consecutiveFailures: number;
+};
+
+export type ChannelNukeAuthorizedUserSummary = {
+  authorizationId: string;
+  discordUserId: string;
+  grantedByDiscordUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NukeCommandAccessState = {
+  locked: boolean;
+  allowed: boolean;
+  authorizedUserCount: number;
+};
+
+function mapAuthorizedUserSummary(
+  authorizedUser: ChannelNukeAuthorizedUserRecord,
+): ChannelNukeAuthorizedUserSummary {
+  return {
+    authorizationId: authorizedUser.id,
+    discordUserId: authorizedUser.discordUserId,
+    grantedByDiscordUserId: authorizedUser.grantedByDiscordUserId,
+    createdAt: authorizedUser.createdAt.toISOString(),
+    updatedAt: authorizedUser.updatedAt.toISOString(),
+  };
+}
+
 export class NukeService {
   private readonly env = getEnv();
   private readonly nukeRepository = new NukeRepository();
   private readonly workerOwnerId = ulid().toLowerCase();
   private schedulerTimer: NodeJS.Timeout | null = null;
   private schedulerTickInFlight = false;
+
+  public async getChannelSchedule(input: {
+    tenantId: string;
+    guildId: string;
+    channelId: string;
+  }): Promise<Result<ChannelNukeScheduleSummary | null, AppError>> {
+    try {
+      const schedule = await this.nukeRepository.getScheduleByChannel({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        channelId: input.channelId,
+      });
+
+      if (!schedule) {
+        return ok(null);
+      }
+
+      return ok({
+        scheduleId: schedule.id,
+        channelId: schedule.channelId,
+        enabled: schedule.enabled,
+        localTimeHhMm: schedule.localTimeHhmm,
+        timezone: schedule.timezone,
+        nextRunAtUtc: schedule.nextRunAtUtc.toISOString(),
+        lastRunAtUtc: schedule.lastRunAtUtc?.toISOString() ?? null,
+        lastLocalRunDate: schedule.lastLocalRunDate,
+        consecutiveFailures: schedule.consecutiveFailures,
+      });
+    } catch (error) {
+      return err(toNukeAppError(error));
+    }
+  }
+
+  public async getCommandAccessState(input: {
+    tenantId: string;
+    guildId: string;
+    discordUserId: string;
+  }): Promise<Result<NukeCommandAccessState, AppError>> {
+    try {
+      const authorizedUsers = await this.nukeRepository.listAuthorizedUsers({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+
+      return ok({
+        locked: authorizedUsers.length > 0,
+        allowed: authorizedUsers.some((user) => user.discordUserId === input.discordUserId),
+        authorizedUserCount: authorizedUsers.length,
+      });
+    } catch (error) {
+      return err(toNukeAppError(error));
+    }
+  }
+
+  public async listAuthorizedUsers(input: {
+    tenantId: string;
+    guildId: string;
+  }): Promise<Result<ChannelNukeAuthorizedUserSummary[], AppError>> {
+    try {
+      const authorizedUsers = await this.nukeRepository.listAuthorizedUsers({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+
+      return ok(authorizedUsers.map(mapAuthorizedUserSummary));
+    } catch (error) {
+      return err(toNukeAppError(error));
+    }
+  }
+
+  public async grantUserAccess(input: {
+    tenantId: string;
+    guildId: string;
+    discordUserId: string;
+    grantedByDiscordUserId: string;
+  }): Promise<
+    Result<
+      {
+        authorizationId: string;
+        discordUserId: string;
+        created: boolean;
+      },
+      AppError
+    >
+  > {
+    try {
+      const granted = await this.nukeRepository.upsertAuthorizedUser({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        discordUserId: input.discordUserId,
+        grantedByDiscordUserId: input.grantedByDiscordUserId,
+      });
+
+      return ok({
+        authorizationId: granted.record.id,
+        discordUserId: granted.record.discordUserId,
+        created: granted.created,
+      });
+    } catch (error) {
+      return err(toNukeAppError(error));
+    }
+  }
+
+  public async revokeUserAccess(input: {
+    tenantId: string;
+    guildId: string;
+    discordUserId: string;
+  }): Promise<Result<{ revoked: boolean }, AppError>> {
+    try {
+      const revoked = await this.nukeRepository.revokeAuthorizedUser({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        discordUserId: input.discordUserId,
+      });
+
+      return ok({ revoked });
+    } catch (error) {
+      return err(toNukeAppError(error));
+    }
+  }
 
   public async setDailySchedule(input: {
     tenantId: string;

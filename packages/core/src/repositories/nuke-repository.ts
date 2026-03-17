@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
 import {
+  channelNukeAuthorizedUsers,
   channelNukeLocks,
   channelNukeRuns,
   channelNukeSchedules,
@@ -27,6 +28,16 @@ export type ChannelNukeScheduleRecord = {
   updatedAt: Date;
 };
 
+export type ChannelNukeAuthorizedUserRecord = {
+  id: string;
+  tenantId: string;
+  guildId: string;
+  discordUserId: string;
+  grantedByDiscordUserId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 const LOCK_LEASE_TIMESTAMP_TOLERANCE_MS = 999;
 
 function mapScheduleRow(row: typeof channelNukeSchedules.$inferSelect): ChannelNukeScheduleRecord {
@@ -43,6 +54,20 @@ function mapScheduleRow(row: typeof channelNukeSchedules.$inferSelect): ChannelN
     lastLocalRunDate: row.lastLocalRunDate ?? null,
     consecutiveFailures: row.consecutiveFailures,
     updatedByDiscordUserId: row.updatedByDiscordUserId ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapAuthorizedUserRow(
+  row: typeof channelNukeAuthorizedUsers.$inferSelect,
+): ChannelNukeAuthorizedUserRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    guildId: row.guildId,
+    discordUserId: row.discordUserId,
+    grantedByDiscordUserId: row.grantedByDiscordUserId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -76,6 +101,22 @@ function hasMatchingActiveLockLease(input: {
 
 export class NukeRepository {
   private readonly db = getDb();
+
+  private async getAuthorizedUserByDiscordId(input: {
+    tenantId: string;
+    guildId: string;
+    discordUserId: string;
+  }): Promise<ChannelNukeAuthorizedUserRecord | null> {
+    const row = await this.db.query.channelNukeAuthorizedUsers.findFirst({
+      where: and(
+        eq(channelNukeAuthorizedUsers.tenantId, input.tenantId),
+        eq(channelNukeAuthorizedUsers.guildId, input.guildId),
+        eq(channelNukeAuthorizedUsers.discordUserId, input.discordUserId),
+      ),
+    });
+
+    return row ? mapAuthorizedUserRow(row) : null;
+  }
 
   public async getScheduleByChannel(input: {
     tenantId: string;
@@ -162,6 +203,78 @@ export class NukeRepository {
         updatedAt: new Date(),
       })
       .where(eq(channelNukeSchedules.id, existing.id));
+    return true;
+  }
+
+  public async listAuthorizedUsers(input: {
+    tenantId: string;
+    guildId: string;
+  }): Promise<ChannelNukeAuthorizedUserRecord[]> {
+    const rows = await this.db.query.channelNukeAuthorizedUsers.findMany({
+      where: and(
+        eq(channelNukeAuthorizedUsers.tenantId, input.tenantId),
+        eq(channelNukeAuthorizedUsers.guildId, input.guildId),
+      ),
+      orderBy: (table, { asc }) => [asc(table.createdAt)],
+    });
+
+    return rows.map(mapAuthorizedUserRow);
+  }
+
+  public async upsertAuthorizedUser(input: {
+    tenantId: string;
+    guildId: string;
+    discordUserId: string;
+    grantedByDiscordUserId: string;
+  }): Promise<{ created: boolean; record: ChannelNukeAuthorizedUserRecord }> {
+    const existing = await this.getAuthorizedUserByDiscordId(input);
+    const now = new Date();
+
+    if (existing) {
+      await this.db
+        .update(channelNukeAuthorizedUsers)
+        .set({
+          grantedByDiscordUserId: input.grantedByDiscordUserId,
+          updatedAt: now,
+        })
+        .where(eq(channelNukeAuthorizedUsers.id, existing.id));
+    } else {
+      await this.db.insert(channelNukeAuthorizedUsers).values({
+        id: ulid(),
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        discordUserId: input.discordUserId,
+        grantedByDiscordUserId: input.grantedByDiscordUserId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const record = await this.getAuthorizedUserByDiscordId(input);
+    if (!record) {
+      throw new Error('Failed to upsert nuke authorized user');
+    }
+
+    return {
+      created: !existing,
+      record,
+    };
+  }
+
+  public async revokeAuthorizedUser(input: {
+    tenantId: string;
+    guildId: string;
+    discordUserId: string;
+  }): Promise<boolean> {
+    const existing = await this.getAuthorizedUserByDiscordId(input);
+    if (!existing) {
+      return false;
+    }
+
+    await this.db
+      .delete(channelNukeAuthorizedUsers)
+      .where(eq(channelNukeAuthorizedUsers.id, existing.id));
+
     return true;
   }
 

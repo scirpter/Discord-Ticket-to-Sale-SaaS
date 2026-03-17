@@ -147,10 +147,16 @@ Copy `.env.example` to `.env` and fill values.
 
 - Runs from separate worker/token (`apps/nuke-worker`).
 - `/nuke schedule time:<HH:mm> timezone:<IANA>` sets daily nuke for the current channel.
+- `/nuke status` shows the current daily nuke schedule for the current channel.
 - Creating a schedule during the target minute now queues that same minute immediately instead of rolling the first run to the next day.
 - The timezone field supports autocomplete, with `Europe/London` pinned to the top of the suggestions.
 - `/nuke disable` disables daily nuke for the current channel.
 - `/nuke now confirm:NUKE` clones current channel and deletes original channel immediately.
+- `/nuke authorized` lists the extra Discord user IDs allowed to use `/nuke` in the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/nuke grant user:<@user>` grants `/nuke` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/nuke revoke user:<@user>` revokes `/nuke` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- When no extra `/nuke` access entries exist for a server, `/nuke` falls back to normal `Manage Channels` or `Administrator` permissions.
+- As soon as a server has one or more granted `/nuke` users, `/nuke` becomes locked to those granted users plus the configured `SUPER_ADMIN_DISCORD_IDS`.
 - Manual `/nuke now` posts the final result into the replacement channel after a successful delete so the command does not fail when the original channel no longer exists.
 - The nuke worker now polls due schedules immediately on startup and retries channel creation without an explicit `position` if Discord rejects the first clone request.
 - Nuke lock renewal now tolerates MySQL second-level timestamp precision so scheduled and manual nukes do not fail with `Nuke lock could not be renewed.` on otherwise healthy setups.
