@@ -69,6 +69,86 @@ export type SaleCheckoutOption = {
   url: string;
 };
 
+type HostedCheckoutQueryParam = {
+  key: string;
+  value: string;
+  preserveProviderEncoding?: boolean;
+};
+
+function buildHostedCheckoutUrl(input: {
+  checkoutBaseUrl: string;
+  path: string;
+  params: HostedCheckoutQueryParam[];
+}): string {
+  const checkoutUrl = new URL(input.path, input.checkoutBaseUrl);
+  const query = input.params
+    .map((param) => {
+      const trimmedValue = param.value.trim();
+      const encodedValue = param.preserveProviderEncoding ? trimmedValue : encodeURIComponent(trimmedValue);
+      return `${param.key}=${encodedValue}`;
+    })
+    .join('&');
+
+  return query.length > 0 ? `${checkoutUrl.origin}${checkoutUrl.pathname}?${query}` : `${checkoutUrl.origin}${checkoutUrl.pathname}`;
+}
+
+export function buildVoodooPayHostedCheckoutUrl(input: {
+  checkoutBaseUrl: string;
+  address: string;
+  amount: string;
+  currency: string;
+  checkoutDomain: string;
+  vdToken: string;
+  orderSessionId: string;
+  email: string;
+  ipnToken?: string | null;
+}): string {
+  return buildHostedCheckoutUrl({
+    checkoutBaseUrl: input.checkoutBaseUrl,
+    path: '/pay.php',
+    params: [
+      {
+        key: 'address',
+        value: input.address,
+        preserveProviderEncoding: true,
+      },
+      {
+        key: 'amount',
+        value: input.amount,
+      },
+      {
+        key: 'currency',
+        value: input.currency,
+      },
+      {
+        key: 'domain',
+        value: input.checkoutDomain,
+      },
+      {
+        key: 'vd_token',
+        value: input.vdToken,
+      },
+      {
+        key: 'vd_order_session_id',
+        value: input.orderSessionId,
+      },
+      {
+        key: 'email',
+        value: input.email,
+      },
+      ...(input.ipnToken && input.ipnToken.trim().length > 0
+        ? [
+            {
+              key: 'ipn_token',
+              value: input.ipnToken,
+              preserveProviderEncoding: true,
+            },
+          ]
+        : []),
+    ],
+  });
+}
+
 export function buildVoodooPayHostedCryptoCheckoutUrl(input: {
   checkoutDomain: string;
   paymentToken: string;
@@ -800,7 +880,6 @@ export class SaleService {
         );
       }
 
-      const checkoutUrl = new URL('/pay.php', this.env.VOODOO_PAY_CHECKOUT_BASE_URL);
       const checkoutDomain = normalizeCheckoutDomain(input.integration.checkoutDomain);
       if (checkoutDomain.length === 0) {
         return err(
@@ -811,25 +890,25 @@ export class SaleService {
           ),
         );
       }
-      checkoutUrl.searchParams.set('address', walletPayload.address_in);
-      checkoutUrl.searchParams.set('amount', (input.totalMinor / 100).toFixed(2));
-      checkoutUrl.searchParams.set('currency', input.currency);
-      checkoutUrl.searchParams.set('domain', checkoutDomain);
-      checkoutUrl.searchParams.set('vd_token', input.token);
-      checkoutUrl.searchParams.set('vd_order_session_id', input.orderSessionId);
-
       const customerEmail = this.resolveCheckoutEmail({
         answers: input.answers,
         customerDiscordUserId: input.customerDiscordUserId,
         orderSessionId: input.orderSessionId,
       });
-      checkoutUrl.searchParams.set('email', customerEmail);
 
-      if (typeof walletPayload.ipn_token === 'string' && walletPayload.ipn_token.length > 0) {
-        checkoutUrl.searchParams.set('ipn_token', walletPayload.ipn_token);
-      }
-
-      return ok(checkoutUrl.toString());
+      return ok(
+        buildVoodooPayHostedCheckoutUrl({
+          checkoutBaseUrl: this.env.VOODOO_PAY_CHECKOUT_BASE_URL,
+          address: walletPayload.address_in,
+          amount: (input.totalMinor / 100).toFixed(2),
+          currency: input.currency,
+          checkoutDomain,
+          vdToken: input.token,
+          orderSessionId: input.orderSessionId,
+          email: customerEmail,
+          ipnToken: typeof walletPayload.ipn_token === 'string' ? walletPayload.ipn_token : null,
+        }),
+      );
     } catch (error) {
       return err(fromUnknownError(error, 'VOODOO_PAY_CHECKOUT_FAILED'));
     }

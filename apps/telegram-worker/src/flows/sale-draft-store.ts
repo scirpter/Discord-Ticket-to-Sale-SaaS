@@ -69,7 +69,7 @@ export type SaleDraft = {
 
 const draftStore = new Map<string, SaleDraft>();
 
-export const SALE_DRAFT_TTL_MS = 60 * 60 * 1000;
+export const SALE_DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
 
 function createDraftId(): string {
   return crypto.randomBytes(8).toString('hex');

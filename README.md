@@ -115,6 +115,7 @@ Copy `.env.example` to `.env` and fill values.
 - Bot creates `order_session` and posts payment buttons in the ticket (`Pay`, and optionally `Pay with Crypto`).
 - Checkout amount now reflects basket total minus coupon plus tip.
 - Telegram `/sale` now starts in the linked group and immediately moves the sensitive sale flow into a private DM with the selected customer.
+- Telegram DM sale drafts now stay active for 6 hours and refresh their expiry as the customer moves through the private flow.
 - Dashboard Voodoo integration now supports Hosted Multi-Coin mode with enable/disable toggle and wallet inputs.
 - Hosted Multi-Coin wallet mapping:
   - BTC -> `btc`
@@ -125,6 +126,7 @@ Copy `.env.example` to `.env` and fill values.
   - TRX -> `trc20`
   - SOL -> `solana`
 - Checkout URL now always includes the `email` query parameter (from answers, or a safe fallback email when missing).
+- Hosted Voodoo Pay checkout URLs now preserve provider-issued encoded wallet fields for both standard pay and hosted crypto links.
 - Voodoo Pay callbacks accept query/form/json payloads, and paid logs fall back to the ticket channel if paid-log channel delivery fails.
 - Woo webhook confirms payment (`processing`/`completed`).
 - Voodoo Pay callback endpoint can also finalize paid orders.
