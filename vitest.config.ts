@@ -6,6 +6,7 @@ export default defineConfig({
       'packages/core/tests/**/*.test.ts',
       'apps/web-app/**/*.test.ts',
       'apps/bot-worker/**/*.test.ts',
+      'apps/telegram-worker/**/*.test.ts',
     ],
     environment: 'node',
     coverage: {

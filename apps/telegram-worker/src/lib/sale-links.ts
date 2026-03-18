@@ -22,6 +22,7 @@ export function buildTelegramCheckoutRedirectUrl(input: {
   method: TelegramCheckoutMethod;
 }): string {
   const url = new URL(`/checkout/${input.orderSessionId}`, input.botPublicUrl);
+  url.searchParams.set('source', 'telegram');
   if (input.method === 'crypto') {
     url.searchParams.set('method', 'crypto');
   }

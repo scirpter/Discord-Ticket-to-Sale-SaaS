@@ -25,7 +25,7 @@ vi.mock('@voodoo/core', () => {
   };
 });
 
-import { GET } from './route';
+import { GET, POST } from './route';
 
 describe('checkout redirect route', () => {
   beforeEach(() => {
@@ -49,7 +49,7 @@ describe('checkout redirect route', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('returns a single redirect to the crypto checkout URL when requested', async () => {
+  it('renders a Telegram handoff page instead of immediately launching checkout', async () => {
     getOrderSessionById.mockResolvedValue({
       checkoutTokenExpiresAt: new Date(Date.now() + 60_000),
       status: 'pending_payment',
@@ -57,9 +57,34 @@ describe('checkout redirect route', () => {
       checkoutUrlCrypto: 'https://checkout.voodoo-pay.uk/crypto/hosted.php?payment_token=crypto-token',
     });
 
-    const response = await GET(new NextRequest('https://voodoopaybot.online/checkout/01ABC?method=crypto'), {
-      params: Promise.resolve({ orderSessionId: '01ABC' }),
+    const response = await GET(
+      new NextRequest('https://voodoopaybot.online/checkout/01ABC?source=telegram&method=crypto'),
+      {
+        params: Promise.resolve({ orderSessionId: '01ABC' }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(await response.text()).toContain('Continue to Crypto Checkout');
+  });
+
+  it('launches the crypto checkout URL when the Telegram handoff form is submitted', async () => {
+    getOrderSessionById.mockResolvedValue({
+      checkoutTokenExpiresAt: new Date(Date.now() + 60_000),
+      status: 'pending_payment',
+      checkoutUrl: 'https://checkout.voodoo-pay.uk/pay.php?vd_token=pay-token',
+      checkoutUrlCrypto: 'https://checkout.voodoo-pay.uk/crypto/hosted.php?payment_token=crypto-token',
     });
+
+    const response = await POST(
+      new NextRequest('https://voodoopaybot.online/checkout/01ABC?source=telegram&method=crypto', {
+        method: 'POST',
+      }),
+      {
+        params: Promise.resolve({ orderSessionId: '01ABC' }),
+      },
+    );
 
     expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(

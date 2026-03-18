@@ -26,7 +26,7 @@ describe('sale-links', () => {
         orderSessionId: '01ABC',
         method: 'crypto',
       }),
-    ).toBe('https://voodoopaybot.online/checkout/01ABC?method=crypto');
+    ).toBe('https://voodoopaybot.online/checkout/01ABC?source=telegram&method=crypto');
   });
 
   it('parses a sale deep-link payload and rejects unrelated values', () => {
