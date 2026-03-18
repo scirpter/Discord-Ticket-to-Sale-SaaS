@@ -7,7 +7,7 @@ import {
   type SaleCheckoutOption,
   toTelegramScopedId,
 } from '@voodoo/core';
-import { type Api, type Context, InlineKeyboard } from 'grammy';
+import { type Api, type Context, InlineKeyboard, InputFile } from 'grammy';
 
 import {
   clearSaleDraftsForChat,
@@ -21,9 +21,12 @@ import {
 } from '../flows/sale-draft-store.js';
 import {
   buildTelegramBotDeepLink,
-  buildTelegramCheckoutRedirectUrl,
   parseTelegramSaleStartPayload,
 } from '../lib/sale-links.js';
+import {
+  buildTelegramCheckoutButtonLabel,
+  buildTelegramCheckoutCopyPayloads,
+} from '../lib/checkout-links.js';
 import {
   formatTelegramUserLabel,
   getLinkedStoreForChat,
@@ -197,46 +200,58 @@ async function rebuildFormFieldsFromBasket(draft: SaleDraft): Promise<SaleDraftF
 async function sendCheckoutMessage(input: {
   api: Api;
   draft: SaleDraft;
-  checkoutOptions?: SaleCheckoutOption[];
+  checkoutOptions: SaleCheckoutOption[];
+  checkoutUrl: string;
   orderSessionId: string;
 }): Promise<void> {
   const options =
-    input.checkoutOptions && input.checkoutOptions.length > 0
+    input.checkoutOptions.length > 0
       ? input.checkoutOptions
-      : [{ method: 'pay' as const, label: 'Pay', url: buildTelegramCheckoutRedirectUrl({
-        botPublicUrl: env.BOT_PUBLIC_URL,
-        orderSessionId: input.orderSessionId,
-        method: 'pay',
-      }) }];
-  const redirectOptions = options.map((option) => ({
-    label: option.label,
-    url: buildTelegramCheckoutRedirectUrl({
-      botPublicUrl: env.BOT_PUBLIC_URL,
-      orderSessionId: input.orderSessionId,
-      method: option.method,
-    }),
-  }));
+      : [{ method: 'pay' as const, label: 'Pay', url: input.checkoutUrl }];
   await input.api.sendMessage(
     getControlChatId(input.draft),
     [
       `Sale created for ${input.draft.customerLabel}.`,
       `Order Session: ${input.orderSessionId}`,
       'Choose payment method below.',
+      'Telegram now uses the exact provider checkout URL here, with no web wrapper.',
+      'If Telegram opens it incorrectly, long-press the payment button and copy the link into Chrome or Safari.',
       '',
       'Paid and fulfilled status updates will be posted in the linked Telegram group. This may take up to 30 minutes. Do NOT pay again.',
     ].join('\n'),
     {
       reply_markup: buildKeyboard(
-        redirectOptions.map((option, index) => ({
-          label:
-            redirectOptions.length === 1 && index === 0
-              ? 'Click Here To Pay'
-              : option.label,
+        options.map((option, index) => ({
+          label: buildTelegramCheckoutButtonLabel({
+            label: option.label,
+            index,
+            total: options.length,
+          }),
           url: option.url,
         })),
       ),
     },
   );
+
+  const copyPayloads = buildTelegramCheckoutCopyPayloads(options);
+  for (const payload of copyPayloads) {
+    if (payload.kind === 'message') {
+      await input.api.sendMessage(getControlChatId(input.draft), payload.text, {
+        link_preview_options: {
+          is_disabled: true,
+        },
+      });
+      continue;
+    }
+
+    await input.api.sendDocument(
+      getControlChatId(input.draft),
+      new InputFile(Buffer.from(payload.text, 'utf8'), payload.fileName),
+      {
+        caption: payload.caption,
+      },
+    );
+  }
 }
 
 async function finalizeDraft(input: { api: Api; draft: SaleDraft }): Promise<void> {
@@ -271,6 +286,7 @@ async function finalizeDraft(input: { api: Api; draft: SaleDraft }): Promise<voi
     api: input.api,
     draft: input.draft,
     checkoutOptions: created.value.checkoutOptions,
+    checkoutUrl: created.value.checkoutUrl,
     orderSessionId: created.value.orderSessionId,
   });
   await editDraftMessage({
