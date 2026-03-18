@@ -4,6 +4,8 @@ import {
   buildTelegramBotDeepLink,
   buildTelegramCheckoutRedirectUrl,
   normalizeTelegramBotUsername,
+  parseTelegramPointsStartPayload,
+  parseTelegramReferStartPayload,
   parseTelegramSaleStartPayload,
 } from './sale-links.js';
 
@@ -32,5 +34,12 @@ describe('sale-links', () => {
   it('parses a sale deep-link payload and rejects unrelated values', () => {
     expect(parseTelegramSaleStartPayload('sale_deadbeefdeadbeef')).toBe('deadbeefdeadbeef');
     expect(parseTelegramSaleStartPayload('connect_deadbeefdeadbeef')).toBeNull();
+  });
+
+  it('parses points and referral deep-link payloads', () => {
+    expect(parseTelegramPointsStartPayload('points_deadbeefdeadbeef')).toBe('deadbeefdeadbeef');
+    expect(parseTelegramReferStartPayload('refer_deadbeefdeadbeef')).toBe('deadbeefdeadbeef');
+    expect(parseTelegramPointsStartPayload('sale_deadbeefdeadbeef')).toBeNull();
+    expect(parseTelegramReferStartPayload('points_deadbeefdeadbeef')).toBeNull();
   });
 });

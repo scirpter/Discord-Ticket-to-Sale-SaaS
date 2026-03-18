@@ -30,12 +30,24 @@ export function buildTelegramCheckoutRedirectUrl(input: {
   return url.toString();
 }
 
-export function parseTelegramSaleStartPayload(payload: string): string | null {
+function parseTelegramStartPayload(payload: string, prefix: string): string | null {
   const normalized = payload.trim();
-  if (!normalized.startsWith('sale_')) {
+  if (!normalized.startsWith(prefix)) {
     return null;
   }
 
-  const draftId = normalized.slice('sale_'.length).trim();
+  const draftId = normalized.slice(prefix.length).trim();
   return /^[a-f0-9]{16}$/u.test(draftId) ? draftId : null;
+}
+
+export function parseTelegramSaleStartPayload(payload: string): string | null {
+  return parseTelegramStartPayload(payload, 'sale_');
+}
+
+export function parseTelegramPointsStartPayload(payload: string): string | null {
+  return parseTelegramStartPayload(payload, 'points_');
+}
+
+export function parseTelegramReferStartPayload(payload: string): string | null {
+  return parseTelegramStartPayload(payload, 'refer_');
 }

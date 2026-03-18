@@ -99,7 +99,7 @@ Copy `.env.example` to `.env` and fill values.
 ## Ticket Sale Flow
 
 - Staff runs `/sale` in any server channel where they have required permissions.
-- Sale drafts stay active for 1 hour and refresh their expiry as staff move through the flow.
+- Sale drafts stay active for 1 hour on Discord and refresh their expiry as staff move through the flow.
 - Bot shows category -> product -> variant flow with Back buttons on selection steps.
 - After variant selection, bot supports basket flow (`Add More Products` or continue).
 - Coupon step is optional; entered code is validated against server coupon settings and selected basket item scope.
@@ -116,6 +116,8 @@ Copy `.env.example` to `.env` and fill values.
 - Checkout amount now reflects basket total minus coupon plus tip.
 - Telegram `/sale` now starts in the linked group and immediately moves the sensitive sale flow into a private DM with the selected customer.
 - Telegram DM sale drafts now stay active for 6 hours and refresh their expiry as the customer moves through the private flow.
+- Telegram `/points` now hands off from the linked group into a private DM before collecting the customer email or showing the balance.
+- Telegram `/refer` now hands off from the linked group into a private DM before collecting either email address.
 - Dashboard Voodoo integration now supports Hosted Multi-Coin mode with enable/disable toggle and wallet inputs.
 - Hosted Multi-Coin wallet mapping:
   - BTC -> `btc`
@@ -138,6 +140,7 @@ Copy `.env.example` to `.env` and fill values.
 - `/points email:<address>` returns store-scoped points balance for that email.
 - Response is ephemeral so only the requester can see it, even in public channels.
 - Points are scoped to the connected workspace + Discord server (no cross-merchant sharing).
+- Telegram `/points` starts in the linked group but asks for the email and returns the balance only in the requester's DM with the bot.
 
 ## Referral Command
 
@@ -147,6 +150,7 @@ Copy `.env.example` to `.env` and fill values.
 - First valid referral claim for a customer email wins.
 - Successful `/refer` reply is private (ephemeral) and customizable via server settings.
 - Owner/staff can monitor submission and payout outcomes via referral log channel.
+- Telegram `/refer` starts in the linked group but collects both email addresses and returns the result only in the requester's DM with the bot.
 
 ## Nuke Command
 

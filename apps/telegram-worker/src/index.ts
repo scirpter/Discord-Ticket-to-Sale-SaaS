@@ -3,8 +3,16 @@ import { Bot } from 'grammy';
 
 import { handleConnectCommand } from './commands/connect.js';
 import { handlePaidOrderFulfillmentCallback } from './commands/paid-order-fulfillment.js';
-import { handlePointsCommand, handlePendingPointsMessage } from './commands/points.js';
-import { handleReferCommand, handlePendingReferMessage } from './commands/refer.js';
+import {
+  handlePointsCommand,
+  handlePendingPointsMessage,
+  handlePointsStartCommand,
+} from './commands/points.js';
+import {
+  handleReferCommand,
+  handlePendingReferMessage,
+  handleReferStartCommand,
+} from './commands/refer.js';
 import {
   handleSaleCallbackQuery,
   handleSaleCommand,
@@ -28,6 +36,12 @@ bot.command('start', async (ctx) => {
   if (await handleSaleStartCommand(ctx)) {
     return;
   }
+  if (await handlePointsStartCommand(ctx)) {
+    return;
+  }
+  if (await handleReferStartCommand(ctx)) {
+    return;
+  }
 
   await ctx.reply(
     [
@@ -35,8 +49,8 @@ bot.command('start', async (ctx) => {
       'Commands:',
       '/connect <token> - Link this Telegram group to a dashboard store',
       '/sale - Start the sale in the group, then continue privately in DM',
-      '/points - Check a customer points balance',
-      '/refer - Submit a referral from this linked group',
+      '/points - Start a private points lookup from the linked group',
+      '/refer - Start a private referral submission from the linked group',
     ].join('\n'),
   );
 });
@@ -74,8 +88,8 @@ void bot.api
   .setMyCommands([
     { command: 'connect', description: 'Link this Telegram group to a dashboard store' },
     { command: 'sale', description: 'Start the sale in the group, then continue in DM' },
-    { command: 'points', description: 'Check a customer points balance' },
-    { command: 'refer', description: 'Submit a referral from this linked group' },
+    { command: 'points', description: 'Check customer points privately in DM' },
+    { command: 'refer', description: 'Submit a referral privately in DM' },
   ])
   .catch((error) => {
     logger.warn({ err: error }, 'failed to register Telegram commands');

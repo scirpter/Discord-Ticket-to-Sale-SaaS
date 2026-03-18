@@ -1,11 +1,22 @@
-import { ReferralService, TenantRepository, toTelegramScopedId } from '@voodoo/core';
-import type { Context } from 'grammy';
+import { getEnv, ReferralService, TenantRepository, toTelegramScopedId } from '@voodoo/core';
+import { InlineKeyboard, type Context } from 'grammy';
 
+import {
+  createTelegramPrivateHandoff,
+  getTelegramPrivateHandoff,
+  removeTelegramPrivateHandoff,
+} from '../flows/private-handoff-store.js';
+import {
+  buildTelegramBotDeepLink,
+  parseTelegramReferStartPayload,
+} from '../lib/sale-links.js';
 import {
   formatTelegramUserLabel,
   getLinkedStoreForChat,
+  isTelegramGroupChat,
 } from '../lib/telegram.js';
 
+const env = getEnv();
 const tenantRepository = new TenantRepository();
 const referralService = new ReferralService();
 const DEFAULT_REFERRAL_SUBMISSION_TEMPLATE =
@@ -16,13 +27,11 @@ type PendingReferral =
       step: 'referrer_email';
       tenantId: string;
       guildId: string;
-      chatTitle: string;
     }
   | {
       step: 'referred_email';
       tenantId: string;
       guildId: string;
-      chatTitle: string;
       referrerEmail: string;
     };
 
@@ -30,6 +39,10 @@ const pendingReferrals = new Map<string, PendingReferral>();
 
 function getReferralKey(chatId: number | string, userId: number): string {
   return `${chatId}:${userId}`;
+}
+
+function isTelegramPrivateChat(chatType: string | undefined): boolean {
+  return chatType === 'private';
 }
 
 function renderSubmissionTemplate(input: {
@@ -75,28 +88,65 @@ function formatSubmissionOutcomeMessage(input: {
   return 'Referral blocked: your email and the new customer email cannot be the same.';
 }
 
-function formatReferralSubmissionLog(input: {
-  submitterLabel: string;
-  chatTitle: string;
-  referrerEmail: string;
-  referredEmail: string;
-  status: 'accepted' | 'duplicate' | 'self_blocked';
-}): string {
-  const safeReferrer = input.referrerEmail.replace(/`/g, "'");
-  const safeReferred = input.referredEmail.replace(/`/g, "'");
+export async function handleReferStartCommand(ctx: Context): Promise<boolean> {
+  if (!ctx.chat || !ctx.from || !isTelegramPrivateChat(ctx.chat.type)) {
+    return false;
+  }
 
-  return [
-    'Referral Submission',
-    `Chat: ${input.chatTitle}`,
-    `Submitter: ${input.submitterLabel}`,
-    `Referrer Email: ${safeReferrer}`,
-    `Referred Email: ${safeReferred}`,
-    `Result: ${input.status}`,
-  ].join('\n');
+  const payload =
+    'match' in ctx && typeof (ctx as Context & { match?: unknown }).match === 'string'
+      ? ((ctx as Context & { match?: string }).match ?? '').trim()
+      : '';
+  const handoffId = parseTelegramReferStartPayload(payload);
+  if (!handoffId) {
+    return false;
+  }
+
+  const handoff = getTelegramPrivateHandoff(handoffId);
+  if (!handoff || handoff.kind !== 'refer') {
+    await ctx.reply('This referral link expired. Run /refer again in the Telegram group.');
+    return true;
+  }
+
+  if (handoff.requesterTelegramUserId !== toTelegramScopedId(String(ctx.from.id))) {
+    await ctx.reply('This private referral link is only valid for the person who started it.');
+    return true;
+  }
+
+  removeTelegramPrivateHandoff(handoff.id);
+  pendingReferrals.set(getReferralKey(ctx.chat.id, ctx.from.id), {
+    step: 'referrer_email',
+    tenantId: handoff.tenantId,
+    guildId: handoff.guildId,
+  });
+
+  await ctx.reply('Private referral started. Send your email as your next message.');
+  return true;
 }
 
 export async function handleReferCommand(ctx: Context): Promise<void> {
   if (!ctx.chat || !ctx.from) {
+    return;
+  }
+
+  if (isTelegramPrivateChat(ctx.chat.type)) {
+    const pending = pendingReferrals.get(getReferralKey(ctx.chat.id, ctx.from.id));
+    if (!pending) {
+      await ctx.reply('Start /refer in a linked Telegram group first. The bot will then continue privately here.');
+      return;
+    }
+
+    if (pending.step === 'referrer_email') {
+      await ctx.reply('Send your email as your next message to begin the referral submission.');
+      return;
+    }
+
+    await ctx.reply('Now send the new customer email as your next message.');
+    return;
+  }
+
+  if (!isTelegramGroupChat(ctx.chat.type)) {
+    await ctx.reply('Use /refer inside a linked Telegram group. The bot will continue in DM.');
     return;
   }
 
@@ -106,18 +156,33 @@ export async function handleReferCommand(ctx: Context): Promise<void> {
     return;
   }
 
-  pendingReferrals.set(getReferralKey(ctx.chat.id, ctx.from.id), {
-    step: 'referrer_email',
+  const handoff = createTelegramPrivateHandoff({
+    kind: 'refer',
     tenantId: linkedStore.tenantId,
     guildId: linkedStore.guildId,
+    requesterTelegramUserId: toTelegramScopedId(String(ctx.from.id)),
     chatTitle: linkedStore.chatTitle,
   });
 
-  await ctx.reply('Send your email as your next message to begin the referral submission.');
+  let continueUrl: string;
+  try {
+    continueUrl = buildTelegramBotDeepLink(env.TELEGRAM_BOT_USERNAME, `refer_${handoff.id}`);
+  } catch (error) {
+    removeTelegramPrivateHandoff(handoff.id);
+    await ctx.reply(error instanceof Error ? error.message : 'TELEGRAM_BOT_USERNAME is required for private referrals.');
+    return;
+  }
+
+  await ctx.reply(
+    'Referrals are handled in DM so only you can see the email addresses you submit.',
+    {
+      reply_markup: new InlineKeyboard().url('Continue in DM', continueUrl),
+    },
+  );
 }
 
 export async function handlePendingReferMessage(ctx: Context): Promise<boolean> {
-  if (!ctx.chat || !ctx.from || !ctx.message || !('text' in ctx.message)) {
+  if (!ctx.chat || !ctx.from || !ctx.message || !('text' in ctx.message) || !isTelegramPrivateChat(ctx.chat.type)) {
     return false;
   }
 
@@ -173,16 +238,6 @@ export async function handlePendingReferMessage(ctx: Context): Promise<boolean> 
       successTemplate: config?.referralSubmissionTemplate,
       referrerEmail,
       referredEmail,
-    }),
-  );
-
-  await ctx.reply(
-    formatReferralSubmissionLog({
-      submitterLabel,
-      chatTitle: pending.chatTitle,
-      referrerEmail,
-      referredEmail,
-      status: created.value.status,
     }),
   );
 
