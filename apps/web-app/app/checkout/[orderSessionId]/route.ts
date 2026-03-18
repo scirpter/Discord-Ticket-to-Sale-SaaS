@@ -16,11 +16,12 @@ function escapeHtml(value: string): string {
 }
 
 function buildTelegramLaunchPage(input: {
-  actionUrl: string;
+  targetUrl: string;
   buttonLabel: string;
   heading: string;
 }): string {
-  const safeActionUrl = escapeHtml(input.actionUrl);
+  const safeTargetUrl = escapeHtml(input.targetUrl);
+  const jsTargetUrl = JSON.stringify(input.targetUrl);
   const safeButtonLabel = escapeHtml(input.buttonLabel);
   const safeHeading = escapeHtml(input.heading);
 
@@ -46,11 +47,11 @@ function buildTelegramLaunchPage(input: {
     '    <section>',
     `      <h1>${safeHeading}</h1>`,
     '      <p>Telegram may pre-open checkout links. Tap once below to launch the live checkout session.</p>',
-    `      <form method="post" action="${safeActionUrl}">`,
-    `        <button type="submit">${safeButtonLabel}</button>`,
-    '      </form>',
+    `      <button type="button" id="checkout-launch">${safeButtonLabel}</button>`,
+    `      <noscript><p style="margin-top: 12px;"><a href="${safeTargetUrl}" rel="noreferrer">Open checkout</a></p></noscript>`,
     '    </section>',
     '  </main>',
+    `  <script>document.getElementById('checkout-launch')?.addEventListener('click', () => { window.location.assign(${jsTargetUrl}); });</script>`,
     '</body>',
     '</html>',
   ].join('\n');
@@ -100,11 +101,6 @@ function handleRouteError(error: unknown): NextResponse {
   return NextResponse.json({ error: 'Unexpected error' }, { status: 500 });
 }
 
-function buildLaunchActionUrl(request: NextRequest): string {
-  const query = request.nextUrl.searchParams.toString();
-  return query.length > 0 ? `${request.nextUrl.pathname}?${query}` : request.nextUrl.pathname;
-}
-
 function buildCheckoutRedirectResponse(targetUrl: string, status = 307): NextResponse {
   return NextResponse.redirect(targetUrl, {
     status,
@@ -126,7 +122,7 @@ export async function GET(
     }
 
     const html = buildTelegramLaunchPage({
-      actionUrl: buildLaunchActionUrl(request),
+      targetUrl,
       buttonLabel: method === 'crypto' ? 'Continue to Crypto Checkout' : 'Continue to Checkout',
       heading: method === 'crypto' ? 'Crypto Checkout Ready' : 'Checkout Ready',
     });
