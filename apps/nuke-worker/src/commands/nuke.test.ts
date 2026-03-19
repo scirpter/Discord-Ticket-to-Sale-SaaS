@@ -17,6 +17,7 @@ type InteractionMocks = {
   deferReply: ReturnType<typeof vi.fn>;
   editReply: ReturnType<typeof vi.fn>;
   reply: ReturnType<typeof vi.fn>;
+  userSend: ReturnType<typeof vi.fn>;
 };
 
 function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; value: T } {
@@ -29,14 +30,24 @@ function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; va
 
 function createInteractionMock(input?: {
   userId?: string;
-  subcommand?: 'authorized' | 'grant' | 'revoke' | 'status' | 'schedule' | 'disable' | 'now';
+  subcommand?:
+    | 'authorized'
+    | 'grant'
+    | 'revoke'
+    | 'status'
+    | 'schedule'
+    | 'disable'
+    | 'now'
+    | 'delete';
   targetUserId?: string;
+  confirmText?: string;
 }): InteractionMocks {
   const deferReply = vi.fn(async () => {
     interaction.deferred = true;
   });
   const editReply = vi.fn(async () => undefined);
   const reply = vi.fn(async () => undefined);
+  const userSend = vi.fn(async () => undefined);
 
   const interaction = {
     appPermissions: { has: vi.fn().mockReturnValue(true) },
@@ -53,13 +64,19 @@ function createInteractionMock(input?: {
     inGuild: vi.fn().mockReturnValue(true),
     memberPermissions: { has: vi.fn().mockReturnValue(true) },
     options: {
-      getString: vi.fn(),
+      getString: vi.fn((name: string) => {
+        if (name === 'confirm') {
+          return input?.confirmText ?? 'NUKE';
+        }
+
+        return null;
+      }),
       getSubcommand: vi.fn().mockReturnValue(input?.subcommand ?? 'status'),
       getUser: vi.fn().mockReturnValue({ id: input?.targetUserId ?? 'user-2' }),
     },
     replied: false,
     reply,
-    user: { id: input?.userId ?? 'user-1' },
+    user: { id: input?.userId ?? 'user-1', send: userSend },
   } as unknown as ChatInputCommandInteraction & { deferred: boolean };
 
   return {
@@ -67,6 +84,7 @@ function createInteractionMock(input?: {
     deferReply,
     editReply,
     reply,
+    userSend,
   };
 }
 
@@ -258,6 +276,50 @@ describe('nuke command helpers', () => {
       expect.objectContaining({
         content: 'Granted `/nuke` access for <@user-3> in this server.',
       }),
+    );
+  });
+
+  it('deletes the current channel without creating a replacement when /nuke delete is confirmed', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(TenantRepository.prototype, 'getTenantByGuildId').mockResolvedValue({
+      tenantId: 'tenant-1',
+    } as Awaited<ReturnType<TenantRepository['getTenantByGuildId']>>);
+    vi.spyOn(NukeService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: true,
+        allowed: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<NukeService['getCommandAccessState']>>,
+    );
+    vi.spyOn(NukeService.prototype, 'runDeleteNow').mockResolvedValue(
+      createOkResult({
+        status: 'success',
+        oldChannelId: 'channel-1',
+        newChannelId: null,
+        oldChannelDeleted: true,
+        message:
+          'Channel deleted successfully. No replacement channel was created. Any stored nuke schedule for this channel was disabled.',
+      }) as Awaited<ReturnType<NukeService['runDeleteNow']>>,
+    );
+
+    const { interaction, editReply, userSend } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'delete',
+      confirmText: 'DELETE',
+    });
+
+    await nukeCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          'Deleting this channel now without creating a replacement. If it succeeds, I will DM you the result because this channel will be gone.',
+      }),
+    );
+    expect(userSend).toHaveBeenCalledWith(
+      expect.stringContaining('New Channel: (none)'),
     );
   });
 });

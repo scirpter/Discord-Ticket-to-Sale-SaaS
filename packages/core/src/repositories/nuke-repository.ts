@@ -454,7 +454,7 @@ export class NukeRepository {
   public async markRunSuccess(input: {
     runId: string;
     oldChannelId: string;
-    newChannelId: string;
+    newChannelId: string | null;
   }): Promise<void> {
     await this.db
       .update(channelNukeRuns)

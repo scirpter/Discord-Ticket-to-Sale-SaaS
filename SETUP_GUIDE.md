@@ -496,4 +496,5 @@ Expected:
   - Run `/nuke authorized` to inspect the current server allowlist
   - Run `/nuke grant user:@someone` to activate the server for the first allowed user
   - Run `/nuke revoke user:@someone` to remove an allowed user later
+  - After activation, `/nuke delete confirm:DELETE` permanently removes the current channel without making a replacement channel
 

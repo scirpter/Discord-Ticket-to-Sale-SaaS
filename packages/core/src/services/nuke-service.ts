@@ -40,6 +40,7 @@ type DiscordChannelPayload = {
 const MAX_SCHEDULE_FAILURES = 5;
 const LOCK_LEASE_MS = 60_000;
 const LOCK_HEARTBEAT_MS = 15_000;
+type NukeExecutionMode = 'replace' | 'delete_only';
 
 export type ChannelNukeScheduleSummary = {
   scheduleId: string;
@@ -338,6 +339,47 @@ export class NukeService {
         tenantId: input.tenantId,
         guildId: input.guildId,
         channelId: input.channelId,
+        mode: 'replace',
+        triggerType: 'manual',
+        schedule: null,
+        actorDiscordUserId: input.actorDiscordUserId,
+        idempotencyKey,
+      });
+
+      return ok(result);
+    } catch (error) {
+      return err(toNukeAppError(error));
+    }
+  }
+
+  public async runDeleteNow(input: {
+    tenantId: string;
+    guildId: string;
+    channelId: string;
+    actorDiscordUserId: string;
+    reason: 'manual';
+    idempotencyKey?: string;
+  }): Promise<
+    Result<
+      {
+        status: 'success' | 'partial' | 'duplicate';
+        oldChannelId: string;
+        newChannelId: string | null;
+        oldChannelDeleted: boolean;
+        message: string;
+      },
+      AppError
+    >
+  > {
+    try {
+      const idempotencyKey =
+        input.idempotencyKey?.trim() ||
+        `${input.guildId}:${input.channelId}:delete:${Math.floor(Date.now() / 1000)}`;
+      const result = await this.executeNuke({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+        channelId: input.channelId,
+        mode: 'delete_only',
         triggerType: 'manual',
         schedule: null,
         actorDiscordUserId: input.actorDiscordUserId,
@@ -374,6 +416,7 @@ export class NukeService {
             tenantId: schedule.tenantId,
             guildId: schedule.guildId,
             channelId: schedule.channelId,
+            mode: 'replace',
             triggerType: 'scheduled',
             schedule,
             actorDiscordUserId: null,
@@ -404,6 +447,7 @@ export class NukeService {
     tenantId: string;
     guildId: string;
     channelId: string;
+    mode: NukeExecutionMode;
     triggerType: 'scheduled' | 'manual' | 'retry';
     schedule: ChannelNukeScheduleRecord | null;
     actorDiscordUserId: string | null;
@@ -518,6 +562,77 @@ export class NukeService {
       }
       assertLockLease();
       await refreshLockLease();
+
+      if (input.mode === 'delete_only') {
+        await this.deleteChannel(input.channelId);
+        assertLockLease();
+        await refreshLockLease();
+
+        try {
+          await this.nukeRepository.disableScheduleByChannel({
+            tenantId: input.tenantId,
+            guildId: input.guildId,
+            channelId: input.channelId,
+            updatedByDiscordUserId: input.actorDiscordUserId ?? 'system',
+          });
+
+          await this.nukeRepository.markRunSuccess({
+            runId,
+            oldChannelId: input.channelId,
+            newChannelId: null,
+          });
+        } catch (error) {
+          logger.error(
+            {
+              err: error,
+              tenantId: input.tenantId,
+              guildId: input.guildId,
+              oldChannelId: input.channelId,
+              runId,
+            },
+            'delete-only nuke bookkeeping failed after deleting the channel',
+          );
+
+          try {
+            await this.nukeRepository.markRunPartial({
+              runId,
+              oldChannelId: input.channelId,
+              newChannelId: null,
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : 'Delete-only nuke bookkeeping failed after channel deletion',
+            });
+          } catch (markPartialError) {
+            logger.error(
+              {
+                err: markPartialError,
+                runId,
+                oldChannelId: input.channelId,
+              },
+              'failed to mark delete-only nuke run partial after bookkeeping error',
+            );
+          }
+
+          return {
+            status: 'partial',
+            oldChannelId: input.channelId,
+            newChannelId: null,
+            oldChannelDeleted: true,
+            message:
+              'Channel was deleted, but disabling its stored nuke schedule failed. Please check logs before reusing this server setup.',
+          };
+        }
+
+        return {
+          status: 'success',
+          oldChannelId: input.channelId,
+          newChannelId: null,
+          oldChannelDeleted: true,
+          message:
+            'Channel deleted successfully. No replacement channel was created. Any stored nuke schedule for this channel was disabled.',
+        };
+      }
 
       const clonedChannel = await this.cloneChannel(sourceChannel);
       assertLockLease();

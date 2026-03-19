@@ -149,32 +149,30 @@ async function sendManualNukeCompletionNotice(
   interaction: ChatInputCommandInteraction,
   result: NukeExecutionResult,
 ): Promise<void> {
-  if (!result.newChannelId) {
-    return;
-  }
-
   const content = [
     `<@${interaction.user.id}> ${result.message}`,
     `Old Channel: \`${result.oldChannelId}\``,
-    `New Channel: <#${result.newChannelId}>`,
+    result.newChannelId ? `New Channel: <#${result.newChannelId}>` : 'New Channel: (none)',
   ].join('\n');
 
-  try {
-    const replacementChannel = await interaction.client.channels.fetch(result.newChannelId);
-    if (replacementChannel?.isTextBased() && 'send' in replacementChannel) {
-      await replacementChannel.send({ content });
-      return;
+  if (result.newChannelId) {
+    try {
+      const replacementChannel = await interaction.client.channels.fetch(result.newChannelId);
+      if (replacementChannel?.isTextBased() && 'send' in replacementChannel) {
+        await replacementChannel.send({ content });
+        return;
+      }
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          guildId: interaction.guildId,
+          oldChannelId: result.oldChannelId,
+          newChannelId: result.newChannelId,
+        },
+        'failed to post nuke completion notice in replacement channel',
+      );
     }
-  } catch (error) {
-    logger.warn(
-      {
-        err: error,
-        guildId: interaction.guildId,
-        oldChannelId: result.oldChannelId,
-        newChannelId: result.newChannelId,
-      },
-      'failed to post nuke completion notice in replacement channel',
-    );
   }
 
   try {
@@ -249,6 +247,17 @@ export const nukeCommand = {
           option
             .setName('confirm')
             .setDescription('Type NUKE to confirm')
+            .setRequired(true),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('delete')
+        .setDescription('Delete this channel immediately without creating a replacement')
+        .addStringOption((option) =>
+          option
+            .setName('confirm')
+            .setDescription('Type DELETE to confirm permanent channel deletion')
             .setRequired(true),
         ),
     ),
@@ -465,6 +474,41 @@ export const nukeCommand = {
         }
 
         if (result.value.oldChannelDeleted && result.value.newChannelId) {
+          await sendManualNukeCompletionNotice(interaction, result.value);
+          return;
+        }
+
+        await sendEphemeralReply(interaction, buildNukeResultMessage(result.value));
+        return;
+      }
+
+      if (subcommand === 'delete') {
+        const confirm = interaction.options.getString('confirm', true).trim();
+        if (confirm !== 'DELETE') {
+          await sendEphemeralReply(interaction, 'Confirmation failed. Use `confirm: DELETE` to proceed.');
+          return;
+        }
+
+        await sendEphemeralReply(
+          interaction,
+          'Deleting this channel now without creating a replacement. If it succeeds, I will DM you the result because this channel will be gone.',
+        );
+
+        const result = await nukeService.runDeleteNow({
+          tenantId: tenant.tenantId,
+          guildId,
+          channelId,
+          actorDiscordUserId: interaction.user.id,
+          reason: 'manual',
+          idempotencyKey: interaction.id,
+        });
+
+        if (result.isErr()) {
+          await sendEphemeralReply(interaction, mapNukeError(result.error));
+          return;
+        }
+
+        if (result.value.oldChannelDeleted) {
           await sendManualNukeCompletionNotice(interaction, result.value);
           return;
         }

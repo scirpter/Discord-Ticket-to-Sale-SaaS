@@ -122,4 +122,86 @@ describe('NukeService access control', () => {
       authorizedUserCount: 1,
     });
   });
+
+  it('can delete a channel without cloning and disables any stored schedule for that channel', async () => {
+    const service = new NukeService();
+    const repository = (
+      service as unknown as {
+        nukeRepository: {
+          tryAcquireLock: (input: unknown) => Promise<boolean>;
+          renewLockLease: (input: unknown) => Promise<boolean>;
+          createRun: (input: unknown) => Promise<{ created: boolean; runId: string }>;
+          markRunStarted: (runId: string) => Promise<void>;
+          disableScheduleByChannel: (input: unknown) => Promise<boolean>;
+          markRunSuccess: (input: unknown) => Promise<void>;
+          releaseLock: (input: unknown) => Promise<void>;
+        };
+        fetchChannel: (channelId: string) => Promise<unknown>;
+        cloneChannel: (channel: unknown) => Promise<unknown>;
+        deleteChannel: (channelId: string) => Promise<void>;
+      }
+    ).nukeRepository;
+    const serviceForSpy = service as unknown as {
+      fetchChannel: (channelId: string) => Promise<unknown>;
+      cloneChannel: (channel: unknown) => Promise<unknown>;
+      deleteChannel: (channelId: string) => Promise<void>;
+    };
+
+    vi.spyOn(repository, 'tryAcquireLock').mockResolvedValue(true);
+    vi.spyOn(repository, 'renewLockLease').mockResolvedValue(true);
+    vi.spyOn(repository, 'createRun').mockResolvedValue({ created: true, runId: 'run-1' });
+    vi.spyOn(repository, 'markRunStarted').mockResolvedValue(undefined);
+    const disableScheduleByChannelSpy = vi
+      .spyOn(repository, 'disableScheduleByChannel')
+      .mockResolvedValue(true);
+    const markRunSuccessSpy = vi.spyOn(repository, 'markRunSuccess').mockResolvedValue(undefined);
+    vi.spyOn(repository, 'releaseLock').mockResolvedValue(undefined);
+    vi.spyOn(serviceForSpy, 'fetchChannel').mockResolvedValue({
+      id: 'channel-1',
+      guild_id: 'guild-1',
+      name: 'general',
+      type: 0,
+      parent_id: null,
+    });
+    const cloneChannelSpy = vi.spyOn(serviceForSpy, 'cloneChannel').mockResolvedValue({
+      id: 'unused',
+    });
+    const deleteChannelSpy = vi.spyOn(serviceForSpy, 'deleteChannel').mockResolvedValue(undefined);
+
+    const result = await service.runDeleteNow({
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+      actorDiscordUserId: 'user-1',
+      reason: 'manual',
+      idempotencyKey: 'delete-1',
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+
+    expect(deleteChannelSpy).toHaveBeenCalledWith('channel-1');
+    expect(cloneChannelSpy).not.toHaveBeenCalled();
+    expect(disableScheduleByChannelSpy).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+      updatedByDiscordUserId: 'user-1',
+    });
+    expect(markRunSuccessSpy).toHaveBeenCalledWith({
+      runId: 'run-1',
+      oldChannelId: 'channel-1',
+      newChannelId: null,
+    });
+    expect(result.value).toEqual({
+      status: 'success',
+      oldChannelId: 'channel-1',
+      newChannelId: null,
+      oldChannelDeleted: true,
+      message:
+        'Channel deleted successfully. No replacement channel was created. Any stored nuke schedule for this channel was disabled.',
+    });
+  });
 });
