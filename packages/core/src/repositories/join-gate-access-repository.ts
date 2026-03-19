@@ -32,16 +32,15 @@ export class JoinGateAccessRepository {
   private readonly db = getDb();
 
   private async getAuthorizedUserByDiscordId(input: {
-    tenantId: string;
     guildId: string;
     discordUserId: string;
   }): Promise<JoinGateAuthorizedUserRecord | null> {
     const row = await this.db.query.joinGateAuthorizedUsers.findFirst({
       where: and(
-        eq(joinGateAuthorizedUsers.tenantId, input.tenantId),
         eq(joinGateAuthorizedUsers.guildId, input.guildId),
         eq(joinGateAuthorizedUsers.discordUserId, input.discordUserId),
       ),
+      orderBy: (table, { desc }) => [desc(table.updatedAt), desc(table.createdAt)],
     });
 
     return row ? mapAuthorizedUserRow(row) : null;
@@ -52,14 +51,21 @@ export class JoinGateAccessRepository {
     guildId: string;
   }): Promise<JoinGateAuthorizedUserRecord[]> {
     const rows = await this.db.query.joinGateAuthorizedUsers.findMany({
-      where: and(
-        eq(joinGateAuthorizedUsers.tenantId, input.tenantId),
-        eq(joinGateAuthorizedUsers.guildId, input.guildId),
-      ),
-      orderBy: (table, { asc }) => [asc(table.createdAt)],
+      where: eq(joinGateAuthorizedUsers.guildId, input.guildId),
+      orderBy: (table, { desc }) => [desc(table.updatedAt), desc(table.createdAt)],
     });
 
-    return rows.map(mapAuthorizedUserRow);
+    const dedupedByDiscordUserId = new Map<string, JoinGateAuthorizedUserRecord>();
+    for (const row of rows) {
+      const mapped = mapAuthorizedUserRow(row);
+      if (!dedupedByDiscordUserId.has(mapped.discordUserId)) {
+        dedupedByDiscordUserId.set(mapped.discordUserId, mapped);
+      }
+    }
+
+    return [...dedupedByDiscordUserId.values()].sort((left, right) =>
+      left.createdAt.getTime() - right.createdAt.getTime(),
+    );
   }
 
   public async upsertAuthorizedUser(input: {
@@ -68,13 +74,18 @@ export class JoinGateAccessRepository {
     discordUserId: string;
     grantedByDiscordUserId: string;
   }): Promise<{ created: boolean; record: JoinGateAuthorizedUserRecord }> {
-    const existing = await this.getAuthorizedUserByDiscordId(input);
+    const existing = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
     const now = new Date();
 
     if (existing) {
       await this.db
         .update(joinGateAuthorizedUsers)
         .set({
+          tenantId: input.tenantId,
+          guildId: input.guildId,
           grantedByDiscordUserId: input.grantedByDiscordUserId,
           updatedAt: now,
         })
@@ -91,7 +102,10 @@ export class JoinGateAccessRepository {
       });
     }
 
-    const record = await this.getAuthorizedUserByDiscordId(input);
+    const record = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
     if (!record) {
       throw new Error('Failed to upsert join-gate authorized user');
     }
@@ -107,14 +121,22 @@ export class JoinGateAccessRepository {
     guildId: string;
     discordUserId: string;
   }): Promise<boolean> {
-    const existing = await this.getAuthorizedUserByDiscordId(input);
+    const existing = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
     if (!existing) {
       return false;
     }
 
     await this.db
       .delete(joinGateAuthorizedUsers)
-      .where(eq(joinGateAuthorizedUsers.id, existing.id));
+      .where(
+        and(
+          eq(joinGateAuthorizedUsers.guildId, input.guildId),
+          eq(joinGateAuthorizedUsers.discordUserId, input.discordUserId),
+        ),
+      );
 
     return true;
   }
