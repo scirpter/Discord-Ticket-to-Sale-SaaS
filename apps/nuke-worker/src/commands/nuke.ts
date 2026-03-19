@@ -80,7 +80,7 @@ function isSuperAdminUser(discordUserId: string): boolean {
 }
 
 function getNukeCommandLockedMessage(): string {
-  return 'This nuke worker is locked for this server. A super admin must grant your Discord ID access before you can use `/nuke` commands.';
+  return 'This nuke worker is locked for this server. A super admin must activate this server by granting your Discord ID access before you can use `/nuke` commands.';
 }
 
 function getSuperAdminOnlyAccessMessage(): string {
@@ -122,15 +122,16 @@ export function buildAuthorizedUsersMessage(
 ): string {
   if (authorizedUsers.length === 0) {
     return [
-      'No extra `/nuke` access entries exist for this server.',
-      'When the list is empty, `/nuke` falls back to normal `Manage Channels` or `Administrator` permissions.',
+      'This server is not activated for `/nuke` yet.',
+      'When the list is empty, only users in `SUPER_ADMIN_DISCORD_IDS` can manage activation.',
+      'Use `/nuke grant user:@someone` to activate this server for the first allowed user.',
     ].join('\n');
   }
 
   return [
     'Authorized `/nuke` users for this server:',
     ...authorizedUsers.map((user) => `<@${user.discordUserId}> (\`${user.discordUserId}\`)`),
-    'With one or more entries present, only listed users plus super admins can use `/nuke`.',
+    'Only listed users plus super admins can use `/nuke` in this server.',
   ].join('\n');
 }
 

@@ -166,8 +166,9 @@ Copy `.env.example` to `.env` and fill values.
 - `/nuke authorized` lists the extra Discord user IDs allowed to use `/nuke` in the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/nuke grant user:<@user>` grants `/nuke` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/nuke revoke user:<@user>` revokes `/nuke` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
-- When no extra `/nuke` access entries exist for a server, `/nuke` falls back to normal `Manage Channels` or `Administrator` permissions.
-- As soon as a server has one or more granted `/nuke` users, `/nuke` becomes locked to those granted users plus the configured `SUPER_ADMIN_DISCORD_IDS`.
+- `/nuke` is now default-deny for every server. Until a super admin grants at least one Discord user, regular members cannot use it even if they have `Manage Channels`.
+- Super admins listed in `SUPER_ADMIN_DISCORD_IDS` can always run `/nuke authorized`, `/nuke grant`, and `/nuke revoke` to activate or manage a server.
+- Once a server has granted `/nuke` users, only those granted users plus the configured `SUPER_ADMIN_DISCORD_IDS` can use `/nuke`.
 - Manual `/nuke now` posts the final result into the replacement channel after a successful delete so the command does not fail when the original channel no longer exists.
 - The nuke worker now polls due schedules immediately on startup and retries channel creation without an explicit `position` if Discord rejects the first clone request.
 - Nuke lock renewal now tolerates MySQL second-level timestamp precision so scheduled and manual nukes do not fail with `Nuke lock could not be renewed.` on otherwise healthy setups.

@@ -179,7 +179,7 @@ describe('nuke command helpers', () => {
     expect(editReply).toHaveBeenCalledWith(
       expect.objectContaining({
         content:
-          'This nuke worker is locked for this server. A super admin must grant your Discord ID access before you can use `/nuke` commands.',
+          'This nuke worker is locked for this server. A super admin must activate this server by granting your Discord ID access before you can use `/nuke` commands.',
       }),
     );
   });

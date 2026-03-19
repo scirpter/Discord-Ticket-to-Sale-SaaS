@@ -491,8 +491,9 @@ Expected:
   - This symptom was caused by MySQL timestamp precision truncating the stored lock lease
 
 - `/nuke` says the worker is locked for this server:
-  - The server has one or more granted `/nuke` users in the database
+  - `/nuke` is now default-deny for every server until a super admin activates it
   - Use the Discord account listed in `SUPER_ADMIN_DISCORD_IDS`
   - Run `/nuke authorized` to inspect the current server allowlist
-  - Run `/nuke grant user:@someone` or `/nuke revoke user:@someone` to change access
+  - Run `/nuke grant user:@someone` to activate the server for the first allowed user
+  - Run `/nuke revoke user:@someone` to remove an allowed user later
 

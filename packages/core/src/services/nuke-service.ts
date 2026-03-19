@@ -130,7 +130,7 @@ export class NukeService {
       });
 
       return ok({
-        locked: authorizedUsers.length > 0,
+        locked: true,
         allowed: authorizedUsers.some((user) => user.discordUserId === input.discordUserId),
         authorizedUserCount: authorizedUsers.length,
       });

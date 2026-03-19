@@ -63,7 +63,7 @@ describe('NukeService access control', () => {
     vi.restoreAllMocks();
   });
 
-  it('treats an empty authorized-user list as unlocked', async () => {
+  it('treats an empty authorized-user list as locked until a super admin activates the server', async () => {
     const service = new NukeService();
     const repository = (service as unknown as { nukeRepository: { listAuthorizedUsers: (input: unknown) => Promise<unknown[]> } })
       .nukeRepository;
@@ -82,7 +82,7 @@ describe('NukeService access control', () => {
     }
 
     expect(result.value).toEqual({
-      locked: false,
+      locked: true,
       allowed: false,
       authorizedUserCount: 0,
     });
