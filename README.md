@@ -4,7 +4,7 @@ Multi-tenant Discord + Telegram bot stack with a web dashboard for ticket-based 
 
 ## Stack
 
-- Node.js `24.13.0`
+- Node.js `24.13.1`
 - `discord.js@14.25.1`
 - `next@16.1.6`
 - MySQL + Drizzle ORM
@@ -15,6 +15,7 @@ Multi-tenant Discord + Telegram bot stack with a web dashboard for ticket-based 
 - `apps/web-app`: Next.js dashboard + REST/webhook API routes.
 - `apps/bot-worker`: Discord interaction worker with `/sale`, `/points`, and component/modal flows.
 - `apps/telegram-worker`: Telegram group worker with `/connect`, `/sale`, `/points`, `/refer`, and paid-order fulfillment callbacks.
+- `apps/join-gate-worker`: separate-token Discord worker for new-member verification, email matching, and private verification ticket creation.
 - `apps/nuke-worker`: separate-token Discord worker for `/nuke` scheduling and channel nukes.
 - `packages/core`: shared domain/config/security/services/repositories.
 - `drizzle/migrations`: SQL migrations.
@@ -23,6 +24,8 @@ Multi-tenant Discord + Telegram bot stack with a web dashboard for ticket-based 
 
 - `DISCORD_TOKEN`
 - `DISCORD_CLIENT_ID`
+- `JOIN_GATE_DISCORD_TOKEN`
+- `JOIN_GATE_DISCORD_CLIENT_ID`
 - `TELEGRAM_BOT_TOKEN`
 - `DATABASE_URL`
 
@@ -53,8 +56,27 @@ Copy `.env.example` to `.env` and fill values.
 - Build: `pnpm build`
 - Migrate: `pnpm migrate`
 - Deploy slash commands: `pnpm deploy:commands`
+- Deploy sales bot slash commands only: `pnpm deploy:commands:bot`
+- Deploy join-gate slash commands only: `pnpm deploy:commands:join-gate`
 - Deploy nuke slash commands: `pnpm deploy:commands:nuke`
-- Deploy both command sets: `pnpm deploy:commands:all`
+- Deploy all Discord command sets: `pnpm deploy:commands:all`
+
+## Join Gate Verification
+
+- `apps/join-gate-worker` is a separate Discord application/token dedicated to first-join verification.
+- Enable the privileged Discord intents `Server Members Intent` and `Message Content Intent` for the join-gate application before deploying it.
+- New members are prompted in DM first; if DMs are closed, they use the configured fallback verify channel panel instead.
+- Server settings now include join-gate controls for:
+  - fallback verify channel
+  - verified role
+  - private verification ticket category
+  - current-customer lookup channel
+  - new-customer/referral lookup channel
+- The join-gate worker indexes emails from the two configured lookup channels, opens a private staff/member ticket on a confirmed match, grants the verified role, and kicks after 3 failed email attempts.
+- Run `/join-gate install` after configuring the fallback channel to post or refresh the verification panel.
+- Run `/join-gate sync` after changing lookup channel history to rebuild the email index immediately.
+- Run `/join-gate status` to confirm missing configuration, missing permissions, and current indexed email counts.
+- Restrict the rest of the server so `@everyone` only sees the fallback verify area, while the configured verified role and staff roles can see the normal channels.
 
 ## OAuth + Dashboard
 
@@ -79,6 +101,7 @@ Copy `.env.example` to `.env` and fill values.
 - Dashboard navigation now keeps regular merchant work in a one-section-at-a-time flow so mobile setup feels less crowded.
 - Dashboard now opens with a mobile-first setup flow strip and compact current-context card so merchants can jump straight to Workspace, Sales, Payments, Coupons, or Catalog without scanning the whole page.
 - Dashboard navigation now uses collapsible section cards, and catalog management uses four guided step panels so merchants can review products, manage category questions, edit product details, and handle variations without keeping the full builder open at once.
+- Server settings now include join-gate configuration for first-join verification, lookup channels, verified-role unlock, and verification ticket routing.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Server settings now include rewards configuration:
   - `point value` (minor currency based)

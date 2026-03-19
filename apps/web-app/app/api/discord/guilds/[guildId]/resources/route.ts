@@ -11,6 +11,7 @@ const env = getEnv();
 const DISCORD_PERMISSION_ADMINISTRATOR = 1n << 3n;
 const DISCORD_PERMISSION_MANAGE_GUILD = 1n << 5n;
 const DISCORD_TEXT_CHANNEL_TYPES = new Set([0, 5]);
+const DISCORD_CATEGORY_CHANNEL_TYPE = 4;
 
 function hasManageGuildPermissions(guild: OAuthDiscordGuild): boolean {
   if (guild.owner) {
@@ -89,6 +90,7 @@ export async function GET(
           name: selectedGuild.name,
         },
         channels: [],
+        categoryChannels: [],
         roles: [],
       });
     }
@@ -144,6 +146,14 @@ export async function GET(
         name: channel.name,
         type: channel.type,
       }));
+    const categoryChannels = rawChannels
+      .filter((channel) => channel.type === DISCORD_CATEGORY_CHANNEL_TYPE)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .map((channel) => ({
+        id: channel.id,
+        name: channel.name,
+        type: channel.type,
+      }));
 
     const roles = rawRoles
       .filter((role) => role.id !== guildId && !role.managed)
@@ -163,6 +173,7 @@ export async function GET(
         name: selectedGuild.name,
       },
       channels,
+      categoryChannels,
       roles,
     });
   } catch (error) {

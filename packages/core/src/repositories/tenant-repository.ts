@@ -13,6 +13,8 @@ import {
   productFormFields,
   products,
   productVariants,
+  joinGateEmailIndex,
+  joinGateMembers,
   referralClaims,
   telegramChatLinks,
   tenantGuilds,
@@ -49,6 +51,12 @@ export type GuildConfigRecord = {
   referralThankYouTemplate: string;
   referralSubmissionTemplate: string;
   ticketMetadataKey: string;
+    joinGateEnabled?: boolean;
+    joinGateFallbackChannelId?: string | null;
+    joinGateVerifiedRoleId?: string | null;
+    joinGateTicketCategoryId?: string | null;
+    joinGateCurrentLookupChannelId?: string | null;
+    joinGateNewLookupChannelId?: string | null;
 };
 
 export class TenantRepository {
@@ -239,6 +247,12 @@ export class TenantRepository {
           referralSubmissionTemplate:
             'Referral submitted successfully. We will reward points automatically after the first paid order.',
           ticketMetadataKey: 'isTicket',
+          joinGateEnabled: false,
+          joinGateFallbackChannelId: null,
+          joinGateVerifiedRoleId: null,
+          joinGateTicketCategoryId: null,
+          joinGateCurrentLookupChannelId: null,
+          joinGateNewLookupChannelId: null,
         });
       }
     });
@@ -329,6 +343,12 @@ export class TenantRepository {
       referralThankYouTemplate: row.referralThankYouTemplate,
       referralSubmissionTemplate: row.referralSubmissionTemplate,
       ticketMetadataKey: row.ticketMetadataKey,
+      joinGateEnabled: row.joinGateEnabled ?? false,
+      joinGateFallbackChannelId: row.joinGateFallbackChannelId ?? null,
+      joinGateVerifiedRoleId: row.joinGateVerifiedRoleId ?? null,
+      joinGateTicketCategoryId: row.joinGateTicketCategoryId ?? null,
+      joinGateCurrentLookupChannelId: row.joinGateCurrentLookupChannelId ?? null,
+      joinGateNewLookupChannelId: row.joinGateNewLookupChannelId ?? null,
     };
   }
 
@@ -348,12 +368,39 @@ export class TenantRepository {
     referralThankYouTemplate: string;
     referralSubmissionTemplate: string;
     ticketMetadataKey: string;
+    joinGateEnabled?: boolean;
+    joinGateFallbackChannelId?: string | null;
+    joinGateVerifiedRoleId?: string | null;
+    joinGateTicketCategoryId?: string | null;
+    joinGateCurrentLookupChannelId?: string | null;
+    joinGateNewLookupChannelId?: string | null;
   }): Promise<GuildConfigRecord> {
     const existing = await this.db.query.guildConfigs.findFirst({
       where: and(eq(guildConfigs.tenantId, input.tenantId), eq(guildConfigs.guildId, input.guildId)),
     });
 
     if (existing) {
+      const joinGateEnabled =
+        input.joinGateEnabled !== undefined ? input.joinGateEnabled : existing.joinGateEnabled;
+      const joinGateFallbackChannelId =
+        input.joinGateFallbackChannelId !== undefined
+          ? input.joinGateFallbackChannelId
+          : existing.joinGateFallbackChannelId;
+      const joinGateVerifiedRoleId =
+        input.joinGateVerifiedRoleId !== undefined ? input.joinGateVerifiedRoleId : existing.joinGateVerifiedRoleId;
+      const joinGateTicketCategoryId =
+        input.joinGateTicketCategoryId !== undefined
+          ? input.joinGateTicketCategoryId
+          : existing.joinGateTicketCategoryId;
+      const joinGateCurrentLookupChannelId =
+        input.joinGateCurrentLookupChannelId !== undefined
+          ? input.joinGateCurrentLookupChannelId
+          : existing.joinGateCurrentLookupChannelId;
+      const joinGateNewLookupChannelId =
+        input.joinGateNewLookupChannelId !== undefined
+          ? input.joinGateNewLookupChannelId
+          : existing.joinGateNewLookupChannelId;
+
       await this.db
         .update(guildConfigs)
         .set({
@@ -370,6 +417,12 @@ export class TenantRepository {
           referralThankYouTemplate: input.referralThankYouTemplate,
           referralSubmissionTemplate: input.referralSubmissionTemplate,
           ticketMetadataKey: input.ticketMetadataKey,
+          joinGateEnabled,
+          joinGateFallbackChannelId,
+          joinGateVerifiedRoleId,
+          joinGateTicketCategoryId,
+          joinGateCurrentLookupChannelId,
+          joinGateNewLookupChannelId,
           updatedAt: new Date(),
         })
         .where(eq(guildConfigs.id, existing.id));
@@ -391,9 +444,21 @@ export class TenantRepository {
         referralThankYouTemplate: input.referralThankYouTemplate,
         referralSubmissionTemplate: input.referralSubmissionTemplate,
         ticketMetadataKey: input.ticketMetadataKey,
+        joinGateEnabled,
+        joinGateFallbackChannelId,
+        joinGateVerifiedRoleId,
+        joinGateTicketCategoryId,
+        joinGateCurrentLookupChannelId,
+        joinGateNewLookupChannelId,
       };
     }
 
+    const joinGateEnabledValue = input.joinGateEnabled ?? false;
+    const joinGateFallbackChannelIdValue = input.joinGateFallbackChannelId ?? null;
+    const joinGateVerifiedRoleIdValue = input.joinGateVerifiedRoleId ?? null;
+    const joinGateTicketCategoryIdValue = input.joinGateTicketCategoryId ?? null;
+    const joinGateCurrentLookupChannelIdValue = input.joinGateCurrentLookupChannelId ?? null;
+    const joinGateNewLookupChannelIdValue = input.joinGateNewLookupChannelId ?? null;
     const id = ulid();
     await this.db.insert(guildConfigs).values({
       id,
@@ -412,6 +477,12 @@ export class TenantRepository {
       referralThankYouTemplate: input.referralThankYouTemplate,
       referralSubmissionTemplate: input.referralSubmissionTemplate,
       ticketMetadataKey: input.ticketMetadataKey,
+      joinGateEnabled: joinGateEnabledValue,
+      joinGateFallbackChannelId: joinGateFallbackChannelIdValue,
+      joinGateVerifiedRoleId: joinGateVerifiedRoleIdValue,
+      joinGateTicketCategoryId: joinGateTicketCategoryIdValue,
+      joinGateCurrentLookupChannelId: joinGateCurrentLookupChannelIdValue,
+      joinGateNewLookupChannelId: joinGateNewLookupChannelIdValue,
     });
 
     return {
@@ -431,6 +502,12 @@ export class TenantRepository {
       referralThankYouTemplate: input.referralThankYouTemplate,
       referralSubmissionTemplate: input.referralSubmissionTemplate,
       ticketMetadataKey: input.ticketMetadataKey,
+      joinGateEnabled: joinGateEnabledValue,
+      joinGateFallbackChannelId: joinGateFallbackChannelIdValue,
+      joinGateVerifiedRoleId: joinGateVerifiedRoleIdValue,
+      joinGateTicketCategoryId: joinGateTicketCategoryIdValue,
+      joinGateCurrentLookupChannelId: joinGateCurrentLookupChannelIdValue,
+      joinGateNewLookupChannelId: joinGateNewLookupChannelIdValue,
     };
   }
 
@@ -442,6 +519,8 @@ export class TenantRepository {
       await tx.delete(ordersPaid).where(eq(ordersPaid.tenantId, input.tenantId));
       await tx.delete(webhookEvents).where(eq(webhookEvents.tenantId, input.tenantId));
       await tx.delete(orderSessions).where(eq(orderSessions.tenantId, input.tenantId));
+      await tx.delete(joinGateEmailIndex).where(eq(joinGateEmailIndex.tenantId, input.tenantId));
+      await tx.delete(joinGateMembers).where(eq(joinGateMembers.tenantId, input.tenantId));
       await tx.delete(ticketChannelMetadata).where(eq(ticketChannelMetadata.tenantId, input.tenantId));
 
       await tx.delete(productFormFields).where(eq(productFormFields.tenantId, input.tenantId));

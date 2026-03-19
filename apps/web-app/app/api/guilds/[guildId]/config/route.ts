@@ -67,6 +67,12 @@ export async function PATCH(
       referralThankYouTemplate?: string;
       referralSubmissionTemplate?: string;
       ticketMetadataKey?: string;
+      joinGateEnabled?: boolean;
+      joinGateFallbackChannelId?: string | null;
+      joinGateVerifiedRoleId?: string | null;
+      joinGateTicketCategoryId?: string | null;
+      joinGateCurrentLookupChannelId?: string | null;
+      joinGateNewLookupChannelId?: string | null;
     }>(request);
 
     const result = await tenantService.updateGuildConfig(auth.session, {
@@ -91,6 +97,12 @@ export async function PATCH(
           ? body.referralSubmissionTemplate.trim()
           : DEFAULT_REFERRAL_SUBMISSION_TEMPLATE,
       ticketMetadataKey: body.ticketMetadataKey ?? 'isTicket',
+      joinGateEnabled: body.joinGateEnabled ?? false,
+      joinGateFallbackChannelId: body.joinGateFallbackChannelId ?? null,
+      joinGateVerifiedRoleId: body.joinGateVerifiedRoleId ?? null,
+      joinGateTicketCategoryId: body.joinGateTicketCategoryId ?? null,
+      joinGateCurrentLookupChannelId: body.joinGateCurrentLookupChannelId ?? null,
+      joinGateNewLookupChannelId: body.joinGateNewLookupChannelId ?? null,
     });
 
     if (result.isErr()) {

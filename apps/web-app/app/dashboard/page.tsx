@@ -100,12 +100,39 @@ type GuildResources = {
     name: string;
     type: number;
   }>;
+  categoryChannels: Array<{
+    id: string;
+    name: string;
+    type: number;
+  }>;
   roles: Array<{
     id: string;
     name: string;
     color: number;
     position: number;
   }>;
+};
+
+type GuildConfigRecord = {
+  paidLogChannelId: string | null;
+  staffRoleIds: string[];
+  defaultCurrency: string;
+  tipEnabled: boolean;
+  pointsEarnCategoryKeys: string[];
+  pointsRedeemCategoryKeys: string[];
+  pointValueMinor: number;
+  referralRewardMinor: number;
+  referralRewardCategoryKeys: string[];
+  referralLogChannelId: string | null;
+  referralThankYouTemplate: string;
+  referralSubmissionTemplate: string;
+  ticketMetadataKey?: string;
+  joinGateEnabled: boolean;
+  joinGateFallbackChannelId: string | null;
+  joinGateVerifiedRoleId: string | null;
+  joinGateTicketCategoryId: string | null;
+  joinGateCurrentLookupChannelId: string | null;
+  joinGateNewLookupChannelId: string | null;
 };
 
 type ProductVariantRecord = {
@@ -674,6 +701,12 @@ export default function DashboardPage() {
   const [selectedStaffRoleIds, setSelectedStaffRoleIds] = useState<string[]>([]);
   const [defaultCurrency, setDefaultCurrency] = useState(DEFAULT_CURRENCY);
   const [tipEnabled, setTipEnabled] = useState(false);
+  const [joinGateEnabled, setJoinGateEnabled] = useState(false);
+  const [joinGateFallbackChannelId, setJoinGateFallbackChannelId] = useState('');
+  const [joinGateVerifiedRoleId, setJoinGateVerifiedRoleId] = useState('');
+  const [joinGateTicketCategoryId, setJoinGateTicketCategoryId] = useState('');
+  const [joinGateCurrentLookupChannelId, setJoinGateCurrentLookupChannelId] = useState('');
+  const [joinGateNewLookupChannelId, setJoinGateNewLookupChannelId] = useState('');
   const [pointValueMajor, setPointValueMajor] = useState(DEFAULT_POINT_VALUE_MAJOR);
   const [referralRewardMajor, setReferralRewardMajor] = useState(DEFAULT_REFERRAL_REWARD_MAJOR);
   const [referralLogChannelId, setReferralLogChannelId] = useState('');
@@ -754,6 +787,10 @@ export default function DashboardPage() {
       botInstalled: Boolean(guildResources?.botInGuild),
       defaultCurrency,
       tipEnabled,
+      joinGateEnabled,
+      joinGateFallbackChannelId,
+      joinGateVerifiedRoleId,
+      joinGateTicketCategoryId,
       pointValueMajor,
       referralRewardMajor,
       referralRewardCategoryKeys,
@@ -765,6 +802,12 @@ export default function DashboardPage() {
       defaultCurrency,
       guildId,
       guildResources?.botInGuild,
+      joinGateCurrentLookupChannelId,
+      joinGateEnabled,
+      joinGateFallbackChannelId,
+      joinGateNewLookupChannelId,
+      joinGateTicketCategoryId,
+      joinGateVerifiedRoleId,
       myTenants,
       pointValueMajor,
       referralRewardMajor,
@@ -881,6 +924,7 @@ export default function DashboardPage() {
   const salesSummaryItems = compactSummary(
     paidLogChannelId ? 'Paid log ready' : 'Paid log pending',
     `${selectedStaffRoleIds.length} staff role${selectedStaffRoleIds.length === 1 ? '' : 's'}`,
+    joinGateEnabled ? 'Join gate on' : 'Join gate off',
     tipEnabled ? 'Tips enabled' : 'Tips off',
     referralRewardCategoryKeys.length ||
       pointsEarnCategoryKeys.length ||
@@ -1360,20 +1404,7 @@ export default function DashboardPage() {
       const configPayload = (await apiCall(
         `/api/guilds/${encodeURIComponent(selectedGuildId)}/config?tenantId=${encodeURIComponent(selectedTenantId)}`,
       )) as {
-        config?: {
-          paidLogChannelId: string | null;
-          staffRoleIds: string[];
-          defaultCurrency: string;
-          tipEnabled: boolean;
-          pointsEarnCategoryKeys: string[];
-          pointsRedeemCategoryKeys: string[];
-          pointValueMinor: number;
-          referralRewardMinor: number;
-          referralRewardCategoryKeys: string[];
-          referralLogChannelId: string | null;
-          referralThankYouTemplate: string;
-          referralSubmissionTemplate: string;
-        };
+        config?: GuildConfigRecord;
       };
 
       if (configPayload.config) {
@@ -1381,6 +1412,20 @@ export default function DashboardPage() {
         setSelectedStaffRoleIds(normalizeDiscordIdList(configPayload.config.staffRoleIds));
         setDefaultCurrency(configPayload.config.defaultCurrency || DEFAULT_CURRENCY);
         setTipEnabled(Boolean(configPayload.config.tipEnabled));
+        setJoinGateEnabled(Boolean(configPayload.config.joinGateEnabled));
+        setJoinGateFallbackChannelId(
+          normalizeDiscordId(configPayload.config.joinGateFallbackChannelId),
+        );
+        setJoinGateVerifiedRoleId(normalizeDiscordId(configPayload.config.joinGateVerifiedRoleId));
+        setJoinGateTicketCategoryId(
+          normalizeDiscordId(configPayload.config.joinGateTicketCategoryId),
+        );
+        setJoinGateCurrentLookupChannelId(
+          normalizeDiscordId(configPayload.config.joinGateCurrentLookupChannelId),
+        );
+        setJoinGateNewLookupChannelId(
+          normalizeDiscordId(configPayload.config.joinGateNewLookupChannelId),
+        );
         setPointsEarnCategoryKeys(
           Array.isArray(configPayload.config.pointsEarnCategoryKeys)
             ? configPayload.config.pointsEarnCategoryKeys
@@ -1569,6 +1614,12 @@ export default function DashboardPage() {
     setSelectedStaffRoleIds([]);
     setDefaultCurrency(DEFAULT_CURRENCY);
     setTipEnabled(false);
+    setJoinGateEnabled(false);
+    setJoinGateFallbackChannelId('');
+    setJoinGateVerifiedRoleId('');
+    setJoinGateTicketCategoryId('');
+    setJoinGateCurrentLookupChannelId('');
+    setJoinGateNewLookupChannelId('');
     setPointValueMajor(DEFAULT_POINT_VALUE_MAJOR);
     setReferralRewardMajor(DEFAULT_REFERRAL_REWARD_MAJOR);
     setReferralRewardCategoryKeys([]);
@@ -2632,6 +2683,199 @@ export default function DashboardPage() {
                 <Separator />
 
                 <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Join Gate Verification
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      New members can be DM-verified against your customer/referral lookup channels,
+                      then routed into a private staff ticket and unlocked with a verified role.
+                    </p>
+                  </div>
+
+                  <div className="inline-flex items-center gap-2">
+                    <Checkbox
+                      id="join-gate-enabled"
+                      checked={joinGateEnabled}
+                      onCheckedChange={(checked) => setJoinGateEnabled(checked === true)}
+                    />
+                    <Label
+                      htmlFor="join-gate-enabled"
+                      className="text-sm font-normal text-muted-foreground"
+                    >
+                      Enable first-join verification gate for this server
+                    </Label>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Keep normal channels hidden from `@everyone`, leave only the fallback verify area
+                    visible, and make sure the separate join-gate bot has `Server Members Intent`,
+                    `Message Content Intent`, `Manage Roles`, `Manage Channels`, and `Kick Members`.
+                  </p>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="join-gate-fallback-channel">Fallback Verify Channel</Label>
+                    <select
+                      id="join-gate-fallback-channel"
+                      className={nativeSelectClass}
+                      value={joinGateFallbackChannelId}
+                      onChange={(event) => setJoinGateFallbackChannelId(event.target.value)}
+                      disabled={
+                        !joinGateEnabled ||
+                        !serverReady ||
+                        !guildResources ||
+                        guildResources.channels.length === 0
+                      }
+                    >
+                      <option value="">
+                        {!joinGateEnabled
+                          ? 'Enable join gate first'
+                          : !serverReady
+                            ? 'Add bot to server first'
+                            : guildResources?.channels.length
+                              ? 'Select fallback verify channel'
+                              : 'No text channels available'}
+                      </option>
+                      {guildResources?.channels.map((channel) => (
+                        <option key={`join-gate-fallback-${channel.id}`} value={channel.id}>
+                          #{channel.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="join-gate-verified-role">Verified Role</Label>
+                    <select
+                      id="join-gate-verified-role"
+                      className={nativeSelectClass}
+                      value={joinGateVerifiedRoleId}
+                      onChange={(event) => setJoinGateVerifiedRoleId(event.target.value)}
+                      disabled={
+                        !joinGateEnabled ||
+                        !serverReady ||
+                        !guildResources ||
+                        guildResources.roles.length === 0
+                      }
+                    >
+                      <option value="">
+                        {!joinGateEnabled
+                          ? 'Enable join gate first'
+                          : !serverReady
+                            ? 'Add bot to server first'
+                            : guildResources?.roles.length
+                              ? 'Select verified role'
+                              : 'No selectable roles available'}
+                      </option>
+                      {guildResources?.roles.map((role) => (
+                        <option key={`join-gate-role-${role.id}`} value={role.id}>
+                          {role.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="join-gate-ticket-category">Verification Ticket Category</Label>
+                    <select
+                      id="join-gate-ticket-category"
+                      className={nativeSelectClass}
+                      value={joinGateTicketCategoryId}
+                      onChange={(event) => setJoinGateTicketCategoryId(event.target.value)}
+                      disabled={
+                        !joinGateEnabled ||
+                        !serverReady ||
+                        !guildResources ||
+                        guildResources.categoryChannels.length === 0
+                      }
+                    >
+                      <option value="">
+                        {!joinGateEnabled
+                          ? 'Enable join gate first'
+                          : !serverReady
+                            ? 'Add bot to server first'
+                            : guildResources?.categoryChannels.length
+                              ? 'Select ticket category'
+                              : 'No category channels available'}
+                      </option>
+                      {guildResources?.categoryChannels.map((channel) => (
+                        <option key={`join-gate-category-${channel.id}`} value={channel.id}>
+                          {channel.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="join-gate-current-lookup">Current Customer Lookup</Label>
+                      <select
+                        id="join-gate-current-lookup"
+                        className={nativeSelectClass}
+                        value={joinGateCurrentLookupChannelId}
+                        onChange={(event) =>
+                          setJoinGateCurrentLookupChannelId(event.target.value)
+                        }
+                        disabled={
+                          !joinGateEnabled ||
+                          !serverReady ||
+                          !guildResources ||
+                          guildResources.channels.length === 0
+                        }
+                      >
+                        <option value="">
+                          {!joinGateEnabled
+                            ? 'Enable join gate first'
+                            : !serverReady
+                              ? 'Add bot to server first'
+                              : guildResources?.channels.length
+                                ? 'Select current-customer lookup channel'
+                                : 'No text channels available'}
+                        </option>
+                        {guildResources?.channels.map((channel) => (
+                          <option key={`join-gate-current-${channel.id}`} value={channel.id}>
+                            #{channel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="join-gate-new-lookup">New Customer / Referral Lookup</Label>
+                      <select
+                        id="join-gate-new-lookup"
+                        className={nativeSelectClass}
+                        value={joinGateNewLookupChannelId}
+                        onChange={(event) => setJoinGateNewLookupChannelId(event.target.value)}
+                        disabled={
+                          !joinGateEnabled ||
+                          !serverReady ||
+                          !guildResources ||
+                          guildResources.channels.length === 0
+                        }
+                      >
+                        <option value="">
+                          {!joinGateEnabled
+                            ? 'Enable join gate first'
+                            : !serverReady
+                              ? 'Add bot to server first'
+                              : guildResources?.channels.length
+                                ? 'Select new-customer lookup channel'
+                                : 'No text channels available'}
+                        </option>
+                        {guildResources?.channels.map((channel) => (
+                          <option key={`join-gate-new-${channel.id}`} value={channel.id}>
+                            #{channel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/25 p-3">
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                     Rewards Settings
                   </h3>
@@ -2994,6 +3238,16 @@ export default function DashboardPage() {
                           staffRoleIds: normalizedStaffRoleIds,
                           defaultCurrency: DEFAULT_CURRENCY,
                           tipEnabled,
+                          joinGateEnabled,
+                          joinGateFallbackChannelId:
+                            normalizeDiscordId(joinGateFallbackChannelId) || null,
+                          joinGateVerifiedRoleId: normalizeDiscordId(joinGateVerifiedRoleId) || null,
+                          joinGateTicketCategoryId:
+                            normalizeDiscordId(joinGateTicketCategoryId) || null,
+                          joinGateCurrentLookupChannelId:
+                            normalizeDiscordId(joinGateCurrentLookupChannelId) || null,
+                          joinGateNewLookupChannelId:
+                            normalizeDiscordId(joinGateNewLookupChannelId) || null,
                           pointsEarnCategoryKeys: normalizedEarnCategoryKeys,
                           pointsRedeemCategoryKeys: normalizedRedeemCategoryKeys,
                           pointValueMinor,
@@ -3008,26 +3262,29 @@ export default function DashboardPage() {
                           ticketMetadataKey: 'isTicket',
                         },
                       )) as {
-                        config?: {
-                          paidLogChannelId: string | null;
-                          staffRoleIds: string[];
-                          defaultCurrency: string;
-                          tipEnabled: boolean;
-                          pointsEarnCategoryKeys: string[];
-                          pointsRedeemCategoryKeys: string[];
-                          pointValueMinor: number;
-                          referralRewardMinor: number;
-                          referralRewardCategoryKeys: string[];
-                          referralLogChannelId: string | null;
-                          referralThankYouTemplate: string;
-                          referralSubmissionTemplate: string;
-                        };
+                        config?: GuildConfigRecord;
                       };
                       if (result.config) {
                         setPaidLogChannelId(normalizeDiscordId(result.config.paidLogChannelId));
                         setSelectedStaffRoleIds(normalizeDiscordIdList(result.config.staffRoleIds));
                         setDefaultCurrency(result.config.defaultCurrency || DEFAULT_CURRENCY);
                         setTipEnabled(Boolean(result.config.tipEnabled));
+                        setJoinGateEnabled(Boolean(result.config.joinGateEnabled));
+                        setJoinGateFallbackChannelId(
+                          normalizeDiscordId(result.config.joinGateFallbackChannelId),
+                        );
+                        setJoinGateVerifiedRoleId(
+                          normalizeDiscordId(result.config.joinGateVerifiedRoleId),
+                        );
+                        setJoinGateTicketCategoryId(
+                          normalizeDiscordId(result.config.joinGateTicketCategoryId),
+                        );
+                        setJoinGateCurrentLookupChannelId(
+                          normalizeDiscordId(result.config.joinGateCurrentLookupChannelId),
+                        );
+                        setJoinGateNewLookupChannelId(
+                          normalizeDiscordId(result.config.joinGateNewLookupChannelId),
+                        );
                         setPointsEarnCategoryKeys(
                           Array.isArray(result.config.pointsEarnCategoryKeys)
                             ? result.config.pointsEarnCategoryKeys

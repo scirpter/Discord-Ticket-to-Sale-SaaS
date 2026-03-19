@@ -137,6 +137,12 @@ export const guildConfigs = mysqlTable(
         'Referral submitted successfully. We will reward points automatically after the first paid order.',
       ),
     ticketMetadataKey: varchar('ticket_metadata_key', { length: 64 }).notNull().default('isTicket'),
+    joinGateEnabled: boolean('join_gate_enabled').notNull().default(false),
+    joinGateFallbackChannelId: varchar('join_gate_fallback_channel_id', { length: 32 }),
+    joinGateVerifiedRoleId: varchar('join_gate_verified_role_id', { length: 32 }),
+    joinGateTicketCategoryId: varchar('join_gate_ticket_category_id', { length: 32 }),
+    joinGateCurrentLookupChannelId: varchar('join_gate_current_lookup_channel_id', { length: 32 }),
+    joinGateNewLookupChannelId: varchar('join_gate_new_lookup_channel_id', { length: 32 }),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
@@ -144,6 +150,79 @@ export const guildConfigs = mysqlTable(
     tenantGuildUnique: uniqueIndex('guild_configs_tenant_guild_uq').on(table.tenantId, table.guildId),
     tenantGuildIdx: index('guild_configs_tenant_guild_idx').on(table.tenantId, table.guildId),
     tenantCreatedIdx: index('guild_configs_tenant_created_idx').on(table.tenantId, table.createdAt),
+  }),
+);
+
+export const joinGateMembers = mysqlTable(
+  'join_gate_members',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    discordUserId: varchar('discord_user_id', { length: 32 }).notNull(),
+    status: mysqlEnum('status', ['pending', 'awaiting_email', 'matched', 'verified', 'kicked'])
+      .notNull()
+      .default('pending'),
+    selectedPath: mysqlEnum('selected_path', ['current_customer', 'new_customer']),
+    failedAttempts: int('failed_attempts').notNull().default(0),
+    verifiedEmailNormalized: varchar('verified_email_normalized', { length: 320 }),
+    verifiedEmailDisplay: varchar('verified_email_display', { length: 320 }),
+    ticketChannelId: varchar('ticket_channel_id', { length: 32 }),
+    dmStatus: mysqlEnum('dm_status', ['unknown', 'sent', 'blocked', 'failed']).notNull().default('unknown'),
+    joinedAt: timestamp('joined_at', { mode: 'date' }).defaultNow().notNull(),
+    selectedAt: timestamp('selected_at', { mode: 'date' }),
+    matchedAt: timestamp('matched_at', { mode: 'date' }),
+    verifiedAt: timestamp('verified_at', { mode: 'date' }),
+    kickedAt: timestamp('kicked_at', { mode: 'date' }),
+    dmSentAt: timestamp('dm_sent_at', { mode: 'date' }),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantGuildUserUnique: uniqueIndex('join_gate_members_tenant_guild_user_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.discordUserId,
+    ),
+    tenantGuildStatusIdx: index('join_gate_members_tenant_guild_status_idx').on(
+      table.tenantId,
+      table.guildId,
+      table.status,
+    ),
+    tenantGuildIdx: index('join_gate_members_tenant_guild_idx').on(table.tenantId, table.guildId),
+  }),
+);
+
+export const joinGateEmailIndex = mysqlTable(
+  'join_gate_email_index',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 26 }).notNull(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    lookupType: mysqlEnum('lookup_type', ['current_customer', 'new_customer']).notNull(),
+    sourceChannelId: varchar('source_channel_id', { length: 32 }).notNull(),
+    sourceMessageId: varchar('source_message_id', { length: 32 }).notNull(),
+    emailNormalized: varchar('email_normalized', { length: 320 }).notNull(),
+    emailDisplay: varchar('email_display', { length: 320 }).notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    messageEmailUnique: uniqueIndex('join_gate_email_index_tenant_guild_type_message_email_uq').on(
+      table.tenantId,
+      table.guildId,
+      table.lookupType,
+      table.sourceMessageId,
+      table.emailNormalized,
+    ),
+    lookupEmailIdx: index('join_gate_email_index_lookup_email_idx').on(
+      table.tenantId,
+      table.guildId,
+      table.lookupType,
+      table.emailNormalized,
+    ),
+    messageIdx: index('join_gate_email_index_message_idx').on(table.sourceChannelId, table.sourceMessageId),
+    tenantGuildIdx: index('join_gate_email_index_tenant_guild_idx').on(table.tenantId, table.guildId),
   }),
 );
 

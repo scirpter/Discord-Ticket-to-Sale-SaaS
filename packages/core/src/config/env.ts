@@ -5,6 +5,8 @@ import { z } from 'zod';
 const envSchema = z.object({
   DISCORD_TOKEN: z.string().min(1).default('MISSING_DISCORD_TOKEN'),
   DISCORD_CLIENT_ID: z.string().min(1).default('MISSING_DISCORD_CLIENT_ID'),
+  JOIN_GATE_DISCORD_TOKEN: z.string().default(''),
+  JOIN_GATE_DISCORD_CLIENT_ID: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_BOT_USERNAME: z.string().default(''),
   NUKE_DISCORD_TOKEN: z.string().default(''),

@@ -3,6 +3,7 @@
 import { AppError, fromUnknownError } from '../domain/errors.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
 import { UserRepository } from '../repositories/user-repository.js';
+import { validateJoinGateConfig } from './join-gate-service.js';
 import type { SessionPayload } from '../security/session-token.js';
 
 export type ActorContext = SessionPayload;
@@ -214,6 +215,12 @@ export class TenantService {
       referralThankYouTemplate: string;
       referralSubmissionTemplate: string;
       ticketMetadataKey: string;
+      joinGateEnabled?: boolean;
+      joinGateFallbackChannelId?: string | null;
+      joinGateVerifiedRoleId?: string | null;
+      joinGateTicketCategoryId?: string | null;
+      joinGateCurrentLookupChannelId?: string | null;
+      joinGateNewLookupChannelId?: string | null;
     },
   ): Promise<Result<{
     paidLogChannelId: string | null;
@@ -229,6 +236,12 @@ export class TenantService {
     referralThankYouTemplate: string;
     referralSubmissionTemplate: string;
     ticketMetadataKey: string;
+    joinGateEnabled: boolean;
+    joinGateFallbackChannelId: string | null;
+    joinGateVerifiedRoleId: string | null;
+    joinGateTicketCategoryId: string | null;
+    joinGateCurrentLookupChannelId: string | null;
+    joinGateNewLookupChannelId: string | null;
   }, AppError>> {
     try {
       const access = await this.assertTenantAccess(actor, input.tenantId, 'admin');
@@ -236,7 +249,45 @@ export class TenantService {
         return err(access.error);
       }
 
-      const config = await this.tenantRepository.upsertGuildConfig(input);
+      const existingConfig = await this.tenantRepository.getGuildConfig({
+        tenantId: input.tenantId,
+        guildId: input.guildId,
+      });
+
+      const resolvedJoinGateConfig = {
+        joinGateEnabled:
+          input.joinGateEnabled !== undefined ? input.joinGateEnabled : existingConfig?.joinGateEnabled ?? false,
+        joinGateFallbackChannelId:
+          input.joinGateFallbackChannelId !== undefined
+            ? input.joinGateFallbackChannelId
+            : existingConfig?.joinGateFallbackChannelId ?? null,
+        joinGateVerifiedRoleId:
+          input.joinGateVerifiedRoleId !== undefined
+            ? input.joinGateVerifiedRoleId
+            : existingConfig?.joinGateVerifiedRoleId ?? null,
+        joinGateTicketCategoryId:
+          input.joinGateTicketCategoryId !== undefined
+            ? input.joinGateTicketCategoryId
+            : existingConfig?.joinGateTicketCategoryId ?? null,
+        joinGateCurrentLookupChannelId:
+          input.joinGateCurrentLookupChannelId !== undefined
+            ? input.joinGateCurrentLookupChannelId
+            : existingConfig?.joinGateCurrentLookupChannelId ?? null,
+        joinGateNewLookupChannelId:
+          input.joinGateNewLookupChannelId !== undefined
+            ? input.joinGateNewLookupChannelId
+            : existingConfig?.joinGateNewLookupChannelId ?? null,
+      };
+
+      const joinGateValidation = validateJoinGateConfig(resolvedJoinGateConfig);
+      if (joinGateValidation.isErr()) {
+        return err(joinGateValidation.error);
+      }
+
+      const config = await this.tenantRepository.upsertGuildConfig({
+        ...input,
+        ...resolvedJoinGateConfig,
+      });
       return ok({
         paidLogChannelId: config.paidLogChannelId,
         staffRoleIds: config.staffRoleIds,
@@ -251,6 +302,12 @@ export class TenantService {
         referralThankYouTemplate: config.referralThankYouTemplate,
         referralSubmissionTemplate: config.referralSubmissionTemplate,
         ticketMetadataKey: config.ticketMetadataKey,
+        joinGateEnabled: config.joinGateEnabled ?? false,
+        joinGateFallbackChannelId: config.joinGateFallbackChannelId ?? null,
+        joinGateVerifiedRoleId: config.joinGateVerifiedRoleId ?? null,
+        joinGateTicketCategoryId: config.joinGateTicketCategoryId ?? null,
+        joinGateCurrentLookupChannelId: config.joinGateCurrentLookupChannelId ?? null,
+        joinGateNewLookupChannelId: config.joinGateNewLookupChannelId ?? null,
       });
     } catch (error) {
       return err(fromUnknownError(error));
@@ -276,6 +333,12 @@ export class TenantService {
         referralThankYouTemplate: string;
         referralSubmissionTemplate: string;
         ticketMetadataKey: string;
+        joinGateEnabled: boolean;
+        joinGateFallbackChannelId: string | null;
+        joinGateVerifiedRoleId: string | null;
+        joinGateTicketCategoryId: string | null;
+        joinGateCurrentLookupChannelId: string | null;
+        joinGateNewLookupChannelId: string | null;
       },
       AppError
     >
@@ -305,6 +368,12 @@ export class TenantService {
         referralThankYouTemplate: config.referralThankYouTemplate,
         referralSubmissionTemplate: config.referralSubmissionTemplate,
         ticketMetadataKey: config.ticketMetadataKey,
+        joinGateEnabled: config.joinGateEnabled ?? false,
+        joinGateFallbackChannelId: config.joinGateFallbackChannelId ?? null,
+        joinGateVerifiedRoleId: config.joinGateVerifiedRoleId ?? null,
+        joinGateTicketCategoryId: config.joinGateTicketCategoryId ?? null,
+        joinGateCurrentLookupChannelId: config.joinGateCurrentLookupChannelId ?? null,
+        joinGateNewLookupChannelId: config.joinGateNewLookupChannelId ?? null,
       });
     } catch (error) {
       return err(fromUnknownError(error));

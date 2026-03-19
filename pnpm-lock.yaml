@@ -57,6 +57,18 @@ importers:
         specifier: 14.25.1
         version: 14.25.1
 
+  apps/join-gate-worker:
+    dependencies:
+      '@voodoo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      discord.js:
+        specifier: 14.25.1
+        version: 14.25.1
+      ulid:
+        specifier: 3.0.1
+        version: 3.0.1
+
   apps/nuke-worker:
     dependencies:
       '@voodoo/core':

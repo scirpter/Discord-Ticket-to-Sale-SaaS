@@ -12,6 +12,7 @@ export default defineConfig({
       'packages/core/tests/**/*.test.ts',
       'apps/web-app/**/*.test.ts',
       'apps/bot-worker/**/*.test.ts',
+      'apps/join-gate-worker/**/*.test.ts',
       'apps/nuke-worker/**/*.test.ts',
       'apps/telegram-worker/**/*.test.ts',
     ],
