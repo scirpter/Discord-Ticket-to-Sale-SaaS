@@ -103,16 +103,15 @@ export class NukeRepository {
   private readonly db = getDb();
 
   private async getAuthorizedUserByDiscordId(input: {
-    tenantId: string;
     guildId: string;
     discordUserId: string;
   }): Promise<ChannelNukeAuthorizedUserRecord | null> {
     const row = await this.db.query.channelNukeAuthorizedUsers.findFirst({
       where: and(
-        eq(channelNukeAuthorizedUsers.tenantId, input.tenantId),
         eq(channelNukeAuthorizedUsers.guildId, input.guildId),
         eq(channelNukeAuthorizedUsers.discordUserId, input.discordUserId),
       ),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.updatedAt), orderDesc(table.createdAt)],
     });
 
     return row ? mapAuthorizedUserRow(row) : null;
@@ -211,14 +210,21 @@ export class NukeRepository {
     guildId: string;
   }): Promise<ChannelNukeAuthorizedUserRecord[]> {
     const rows = await this.db.query.channelNukeAuthorizedUsers.findMany({
-      where: and(
-        eq(channelNukeAuthorizedUsers.tenantId, input.tenantId),
-        eq(channelNukeAuthorizedUsers.guildId, input.guildId),
-      ),
-      orderBy: (table, { asc }) => [asc(table.createdAt)],
+      where: eq(channelNukeAuthorizedUsers.guildId, input.guildId),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.updatedAt), orderDesc(table.createdAt)],
     });
 
-    return rows.map(mapAuthorizedUserRow);
+    const dedupedByDiscordUserId = new Map<string, ChannelNukeAuthorizedUserRecord>();
+    for (const row of rows) {
+      const mapped = mapAuthorizedUserRow(row);
+      if (!dedupedByDiscordUserId.has(mapped.discordUserId)) {
+        dedupedByDiscordUserId.set(mapped.discordUserId, mapped);
+      }
+    }
+
+    return [...dedupedByDiscordUserId.values()].sort((left, right) =>
+      left.createdAt.getTime() - right.createdAt.getTime(),
+    );
   }
 
   public async upsertAuthorizedUser(input: {
@@ -227,13 +233,18 @@ export class NukeRepository {
     discordUserId: string;
     grantedByDiscordUserId: string;
   }): Promise<{ created: boolean; record: ChannelNukeAuthorizedUserRecord }> {
-    const existing = await this.getAuthorizedUserByDiscordId(input);
+    const existing = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
     const now = new Date();
 
     if (existing) {
       await this.db
         .update(channelNukeAuthorizedUsers)
         .set({
+          tenantId: input.tenantId,
+          guildId: input.guildId,
           grantedByDiscordUserId: input.grantedByDiscordUserId,
           updatedAt: now,
         })
@@ -250,7 +261,10 @@ export class NukeRepository {
       });
     }
 
-    const record = await this.getAuthorizedUserByDiscordId(input);
+    const record = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
     if (!record) {
       throw new Error('Failed to upsert nuke authorized user');
     }
@@ -266,14 +280,22 @@ export class NukeRepository {
     guildId: string;
     discordUserId: string;
   }): Promise<boolean> {
-    const existing = await this.getAuthorizedUserByDiscordId(input);
+    const existing = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
     if (!existing) {
       return false;
     }
 
     await this.db
       .delete(channelNukeAuthorizedUsers)
-      .where(eq(channelNukeAuthorizedUsers.id, existing.id));
+      .where(
+        and(
+          eq(channelNukeAuthorizedUsers.guildId, input.guildId),
+          eq(channelNukeAuthorizedUsers.discordUserId, input.discordUserId),
+        ),
+      );
 
     return true;
   }

@@ -92,7 +92,7 @@ describe('NukeRepository authorized user access', () => {
       .fn()
       .mockResolvedValueOnce({
         id: 'auth-1',
-        tenantId: 'tenant-1',
+        tenantId: 'tenant-old',
         guildId: 'guild-1',
         discordUserId: 'user-2',
         grantedByDiscordUserId: 'owner-1',
@@ -130,6 +130,66 @@ describe('NukeRepository authorized user access', () => {
 
     expect(result.created).toBe(false);
     expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates authorized users by Discord ID across tenant relinks for the same guild', async () => {
+    const repository = createRepositoryWithMockDb({
+      query: {
+        channelNukeAuthorizedUsers: {
+          findFirst: vi.fn(),
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: 'auth-2',
+              tenantId: 'tenant-new',
+              guildId: 'guild-1',
+              discordUserId: 'user-2',
+              grantedByDiscordUserId: 'owner-2',
+              createdAt: new Date('2026-03-17T12:10:00.000Z'),
+              updatedAt: new Date('2026-03-17T12:10:00.000Z'),
+            },
+            {
+              id: 'auth-1',
+              tenantId: 'tenant-old',
+              guildId: 'guild-1',
+              discordUserId: 'user-2',
+              grantedByDiscordUserId: 'owner-1',
+              createdAt: new Date('2026-03-17T12:00:00.000Z'),
+              updatedAt: new Date('2026-03-17T12:00:00.000Z'),
+            },
+            {
+              id: 'auth-3',
+              tenantId: 'tenant-1',
+              guildId: 'guild-1',
+              discordUserId: 'user-3',
+              grantedByDiscordUserId: 'owner-1',
+              createdAt: new Date('2026-03-17T12:20:00.000Z'),
+              updatedAt: new Date('2026-03-17T12:20:00.000Z'),
+            },
+          ]),
+        },
+      },
+      insert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    });
+
+    await expect(
+      repository.listAuthorizedUsers({
+        tenantId: 'tenant-1',
+        guildId: 'guild-1',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'auth-2',
+        discordUserId: 'user-2',
+        tenantId: 'tenant-new',
+      }),
+      expect.objectContaining({
+        id: 'auth-3',
+        discordUserId: 'user-3',
+        tenantId: 'tenant-1',
+      }),
+    ]);
   });
 
   it('returns false when revoking a Discord user that is not authorized', async () => {

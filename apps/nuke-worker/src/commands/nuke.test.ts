@@ -278,6 +278,36 @@ describe('nuke command helpers', () => {
     expect(editReply).toHaveBeenCalledWith(
       expect.objectContaining({
         content:
+          'This nuke worker is active for this server, but your Discord ID is not on the `/nuke` allowlist. A super admin must grant your Discord ID access before you can use `/nuke` commands.',
+      }),
+    );
+  });
+
+  it('tells the caller the server still needs activation when no /nuke users have been granted yet', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(TenantRepository.prototype, 'getTenantByGuildId').mockResolvedValue({
+      tenantId: 'tenant-1',
+    } as Awaited<ReturnType<TenantRepository['getTenantByGuildId']>>);
+    vi.spyOn(NukeService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: true,
+        allowed: false,
+        authorizedUserCount: 0,
+      }) as Awaited<ReturnType<NukeService['getCommandAccessState']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'status',
+    });
+
+    await nukeCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
           'This nuke worker is locked for this server. A super admin must activate this server by granting your Discord ID access before you can use `/nuke` commands.',
       }),
     );

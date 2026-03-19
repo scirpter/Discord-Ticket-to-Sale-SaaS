@@ -79,8 +79,12 @@ function isSuperAdminUser(discordUserId: string): boolean {
   return getEnv().superAdminDiscordIds.includes(discordUserId);
 }
 
-function getNukeCommandLockedMessage(): string {
-  return 'This nuke worker is locked for this server. A super admin must activate this server by granting your Discord ID access before you can use `/nuke` commands.';
+function getNukeCommandLockedMessage(authorizedUserCount: number): string {
+  if (authorizedUserCount === 0) {
+    return 'This nuke worker is locked for this server. A super admin must activate this server by granting your Discord ID access before you can use `/nuke` commands.';
+  }
+
+  return 'This nuke worker is active for this server, but your Discord ID is not on the `/nuke` allowlist. A super admin must grant your Discord ID access before you can use `/nuke` commands.';
 }
 
 function getSuperAdminOnlyAccessMessage(): string {
@@ -370,7 +374,10 @@ export const nukeCommand = {
         }
 
         if (accessState.value.locked && !accessState.value.allowed) {
-          await sendEphemeralReply(interaction, getNukeCommandLockedMessage());
+          await sendEphemeralReply(
+            interaction,
+            getNukeCommandLockedMessage(accessState.value.authorizedUserCount),
+          );
           return;
         }
       }
