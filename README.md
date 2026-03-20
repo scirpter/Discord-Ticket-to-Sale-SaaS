@@ -176,7 +176,7 @@ Copy `.env.example` to `.env` and fill values.
 - Telegram DM sale drafts now stay active for 6 hours and refresh their expiry as the customer moves through the private flow.
 - Telegram `/points` now hands off from the linked group into a private DM before collecting the customer email or showing the balance.
 - Telegram `/refer` now hands off from the linked group into a private DM before collecting either email address.
-- Telegram paid confirmations are sent to the customer in DM instead of the linked group.
+- Telegram paid confirmations are sent to the customer in DM, while Telegram-origin paid logs and payment-received status updates are also posted back into the linked Telegram group even when a Discord paid-log channel is configured.
 - Dashboard Voodoo integration now supports Hosted Multi-Coin mode with enable/disable toggle and wallet inputs.
 - Hosted Multi-Coin wallet mapping:
   - BTC -> `btc`

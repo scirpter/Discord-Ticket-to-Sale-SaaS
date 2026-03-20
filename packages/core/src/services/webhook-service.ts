@@ -882,6 +882,7 @@ export class WebhookService {
       preferredChannelId: config?.paidLogChannelId ?? null,
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
+      mirrorTelegramFallback: parsePlatformScopedId(orderSession.ticketChannelId).platform === 'telegram',
       components: buildPaidOrderFulfillmentComponents({
         paidOrderId: paidOrder.paidOrderId,
         fulfillmentStatus: 'needs_action',
@@ -1109,6 +1110,7 @@ export class WebhookService {
       preferredChannelId: config?.paidLogChannelId ?? null,
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
+      mirrorTelegramFallback: parsePlatformScopedId(orderSession.ticketChannelId).platform === 'telegram',
       components: buildPaidOrderFulfillmentComponents({
         paidOrderId: paidOrder.paidOrderId,
         fulfillmentStatus: 'needs_action',
@@ -1420,6 +1422,7 @@ export class WebhookService {
     preferredChannelId: string | null;
     fallbackChannelId: string;
     content: string;
+    mirrorTelegramFallback?: boolean;
     components?: Array<Record<string, unknown>>;
     telegramReplyMarkup?: Record<string, unknown>;
   }): Promise<void> {
@@ -1436,22 +1439,22 @@ export class WebhookService {
     const telegramBotToken = this.getTelegramBotToken();
 
     let lastError: unknown = null;
+    const deliveredChannels = new Set<string>();
     for (const channelId of uniqueChannels) {
       const scopedChannelId = parsePlatformScopedId(channelId);
 
       if (scopedChannelId.platform === 'telegram') {
         try {
-          if (!telegramBotToken) {
-            throw new AbortError('No Telegram bot token available for paid-order log message');
-          }
-
-          await postMessageToTelegramChat({
-            botToken: telegramBotToken,
-            chatId: scopedChannelId.rawId,
+          await this.postPaidLogToSingleChannel({
+            channelId,
+            botTokens: uniqueTokens,
+            telegramBotToken,
             content: input.content,
-            replyMarkup: input.telegramReplyMarkup,
+            components: input.components,
+            telegramReplyMarkup: input.telegramReplyMarkup,
           });
-          return;
+          deliveredChannels.add(channelId);
+          break;
         } catch (error) {
           lastError = error;
           logger.warn(
@@ -1474,27 +1477,113 @@ export class WebhookService {
         continue;
       }
 
-      for (const botToken of uniqueTokens) {
-        try {
-          await postMessageToDiscordChannel({
-            botToken,
+      try {
+        await this.postPaidLogToSingleChannel({
+          channelId,
+          botTokens: uniqueTokens,
+          telegramBotToken,
+          content: input.content,
+          components: input.components,
+          telegramReplyMarkup: input.telegramReplyMarkup,
+        });
+        deliveredChannels.add(channelId);
+        break;
+      } catch (error) {
+        lastError = error;
+        logger.warn(
+          {
+            provider: 'webhook-paid-log',
             channelId: scopedChannelId.rawId,
-            content: fitDiscordMessage(input.content),
-            components: input.components,
-          });
-          return;
-        } catch (error) {
-          lastError = error;
-          logger.warn(
-            {
-              provider: 'webhook-paid-log',
-              channelId: scopedChannelId.rawId,
-              platform: scopedChannelId.platform,
-              unauthorized: this.isDiscordUnauthorized(error),
-              errorMessage: error instanceof Error ? error.message : 'unknown',
-            },
-            'failed to post paid log to channel',
-          );
+            platform: scopedChannelId.platform,
+            unauthorized: this.isDiscordUnauthorized(error),
+            errorMessage: error instanceof Error ? error.message : 'unknown',
+          },
+          'failed to post paid log to channel',
+        );
+      }
+    }
+
+    if (deliveredChannels.size === 0) {
+      if (lastError instanceof Error) {
+        throw lastError;
+      }
+
+      throw new AbortError('Failed to post paid-order log message');
+    }
+
+    const fallbackScopedChannelId = parsePlatformScopedId(input.fallbackChannelId);
+    const shouldMirrorTelegramFallback =
+      input.mirrorTelegramFallback === true &&
+      fallbackScopedChannelId.platform === 'telegram' &&
+      !deliveredChannels.has(input.fallbackChannelId);
+
+    if (shouldMirrorTelegramFallback) {
+      try {
+        await this.postPaidLogToSingleChannel({
+          channelId: input.fallbackChannelId,
+          botTokens: uniqueTokens,
+          telegramBotToken,
+          content: input.content,
+          components: input.components,
+          telegramReplyMarkup: input.telegramReplyMarkup,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            provider: 'webhook-paid-log',
+            channelId: fallbackScopedChannelId.rawId,
+            platform: fallbackScopedChannelId.platform,
+            unauthorized: false,
+            errorMessage: error instanceof Error ? error.message : 'unknown',
+          },
+          'failed to mirror paid log to Telegram fallback channel',
+        );
+      }
+    }
+  }
+
+  private async postPaidLogToSingleChannel(input: {
+    channelId: string;
+    botTokens: string[];
+    telegramBotToken: string | null;
+    content: string;
+    components?: Array<Record<string, unknown>>;
+    telegramReplyMarkup?: Record<string, unknown>;
+  }): Promise<void> {
+    const scopedChannelId = parsePlatformScopedId(input.channelId);
+
+    if (scopedChannelId.platform === 'telegram') {
+      if (!input.telegramBotToken) {
+        throw new AbortError('No Telegram bot token available for paid-order log message');
+      }
+
+      await postMessageToTelegramChat({
+        botToken: input.telegramBotToken,
+        chatId: scopedChannelId.rawId,
+        content: input.content,
+        replyMarkup: input.telegramReplyMarkup,
+      });
+      return;
+    }
+
+    if (input.botTokens.length === 0) {
+      throw new AbortError('No bot token available for paid-order log message');
+    }
+
+    let lastError: unknown = null;
+    for (const botToken of input.botTokens) {
+      try {
+        await postMessageToDiscordChannel({
+          botToken,
+          channelId: scopedChannelId.rawId,
+          content: fitDiscordMessage(input.content),
+          components: input.components,
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (this.isDiscordUnauthorized(error)) {
+          continue;
         }
       }
     }
@@ -1540,6 +1629,34 @@ export class WebhookService {
           'skipping Telegram paid confirmation DM because no Telegram bot token is available',
         );
         return;
+      }
+
+      const groupMessage = [
+        'Payment received.',
+        `Order Session: ${input.orderSessionId}`,
+        `Product: ${input.productName}`,
+        `Variant: ${input.variantLabel}`,
+        `Amount: ${(input.priceMinor / 100).toFixed(2)} ${input.currency}`,
+        input.updatedPointsBalance === null
+          ? 'Updated Points Balance: unavailable'
+          : `Updated Points Balance: ${input.updatedPointsBalance} point(s)`,
+      ].join('\n');
+
+      try {
+        await postMessageToTelegramChat({
+          botToken: telegramBotToken,
+          chatId: scopedChannelId.rawId,
+          content: groupMessage,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            ticketChannelId: input.ticketChannelId,
+            customerDiscordId: input.customerDiscordId,
+          },
+          'failed to post Telegram paid confirmation to linked group',
+        );
       }
 
       const scopedCustomerId = parsePlatformScopedId(input.customerDiscordId);

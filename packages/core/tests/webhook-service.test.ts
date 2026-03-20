@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ok } from 'neverthrow';
 
+import * as discordRest from '../src/integrations/discord-rest.js';
+import * as telegramRest from '../src/integrations/telegram-rest.js';
 import type { OrderSessionRecord } from '../src/repositories/order-repository.js';
 import type { ReferralRewardResult } from '../src/services/referral-service.js';
 import { WebhookService } from '../src/services/webhook-service.js';
@@ -139,5 +141,88 @@ describe('webhook service', () => {
     expect(postReferralOutcome).toHaveBeenCalledOnce();
     expect(markWebhookProcessed).toHaveBeenCalledWith('webhook-1');
     expect(markWebhookDuplicate).not.toHaveBeenCalled();
+  });
+
+  it('mirrors paid logs to the Telegram fallback channel when a Discord paid-log channel is configured', async () => {
+    const service = new WebhookService();
+
+    const postMessageToDiscordChannel = vi
+      .spyOn(discordRest, 'postMessageToDiscordChannel')
+      .mockResolvedValue(undefined);
+    const postMessageToTelegramChat = vi
+      .spyOn(telegramRest, 'postMessageToTelegramChat')
+      .mockResolvedValue({ messageId: 123 });
+    vi.spyOn(service as any, 'getTelegramBotToken').mockReturnValue('telegram-token');
+
+    await (service as any).postPaidLogMessage({
+      botTokens: ['bot-token'],
+      preferredChannelId: '1472676447603654869',
+      fallbackChannelId: 'tg:-1003889522765',
+      content: 'Order paid',
+      mirrorTelegramFallback: true,
+      telegramReplyMarkup: { inline_keyboard: [] },
+    });
+
+    expect(postMessageToDiscordChannel).toHaveBeenCalledWith({
+      botToken: 'bot-token',
+      channelId: '1472676447603654869',
+      content: 'Order paid',
+      components: undefined,
+    });
+    expect(postMessageToTelegramChat).toHaveBeenCalledWith({
+      botToken: 'telegram-token',
+      chatId: '-1003889522765',
+      content: 'Order paid',
+      replyMarkup: { inline_keyboard: [] },
+    });
+  });
+
+  it('posts Telegram payment confirmations in the linked group and DMs the Telegram customer', async () => {
+    const service = new WebhookService();
+
+    vi.spyOn(service as any, 'getTelegramBotToken').mockReturnValue('telegram-token');
+    const postMessageToTelegramChat = vi
+      .spyOn(telegramRest, 'postMessageToTelegramChat')
+      .mockResolvedValue({ messageId: 456 });
+    const sendDirectMessageToTelegramUser = vi
+      .spyOn(telegramRest, 'sendDirectMessageToTelegramUser')
+      .mockResolvedValue({ messageId: 789 });
+
+    await (service as any).postTicketPaidConfirmation({
+      botTokens: ['bot-token'],
+      ticketChannelId: 'tg:-1003889522765',
+      customerDiscordId: 'tg:99887766',
+      orderSessionId: 'order-session-1',
+      productName: 'Renew Subscription',
+      variantLabel: '1 Month',
+      currency: 'GBP',
+      priceMinor: 1500,
+      updatedPointsBalance: 12,
+    });
+
+    expect(postMessageToTelegramChat).toHaveBeenCalledWith({
+      botToken: 'telegram-token',
+      chatId: '-1003889522765',
+      content: [
+        'Payment received.',
+        'Order Session: order-session-1',
+        'Product: Renew Subscription',
+        'Variant: 1 Month',
+        'Amount: 15.00 GBP',
+        'Updated Points Balance: 12 point(s)',
+      ].join('\n'),
+    });
+    expect(sendDirectMessageToTelegramUser).toHaveBeenCalledWith({
+      botToken: 'telegram-token',
+      userId: '99887766',
+      content: [
+        'Payment received. Thank you.',
+        'Order Session: order-session-1',
+        'Product: Renew Subscription',
+        'Variant: 1 Month',
+        'Amount: 15.00 GBP',
+        'Updated Points Balance: 12 point(s)',
+      ].join('\n'),
+    });
   });
 });
