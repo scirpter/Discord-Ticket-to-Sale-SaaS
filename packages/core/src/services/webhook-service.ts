@@ -781,7 +781,7 @@ export class WebhookService {
         ? `Tip Added: +\`${formatMinorAmount(orderSession.tipMinor, paidCurrency)}\``
         : 'Tip Added: (none)';
 
-    const paidOrderId = await this.orderRepository.createPaidOrder({
+    const paidOrder = await this.orderRepository.createPaidOrder({
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
       orderSessionId: orderSession.id,
@@ -792,7 +792,7 @@ export class WebhookService {
       paymentReference: order.number ?? null,
     });
 
-    if (!paidOrderId) {
+    if (!paidOrder.created) {
       logger.info(
         {
           provider: 'woocommerce',
@@ -801,10 +801,8 @@ export class WebhookService {
           orderSessionId: orderSession.id,
           webhookEventId: input.webhookEventId,
         },
-        'paid event ignored as duplicate',
+        'paid order record already existed; continuing webhook recovery flow',
       );
-      await this.orderRepository.markWebhookDuplicate(input.webhookEventId);
-      return;
     }
 
     await this.orderRepository.markOrderSessionPaid({
@@ -885,11 +883,11 @@ export class WebhookService {
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
       components: buildPaidOrderFulfillmentComponents({
-        paidOrderId,
+        paidOrderId: paidOrder.paidOrderId,
         fulfillmentStatus: 'needs_action',
       }),
       telegramReplyMarkup: buildPaidOrderFulfillmentTelegramReplyMarkup({
-        paidOrderId,
+        paidOrderId: paidOrder.paidOrderId,
         fulfillmentStatus: 'needs_action',
       }),
     });
@@ -1027,7 +1025,7 @@ export class WebhookService {
     const txidHash =
       paymentState.txidIn ?? paymentState.txidOut ?? paymentState.transactionId ?? '(none)';
 
-    const paidOrderId = await this.orderRepository.createPaidOrder({
+    const paidOrder = await this.orderRepository.createPaidOrder({
       tenantId: orderSession.tenantId,
       guildId: orderSession.guildId,
       orderSessionId: orderSession.id,
@@ -1038,7 +1036,7 @@ export class WebhookService {
       paymentReference,
     });
 
-    if (!paidOrderId) {
+    if (!paidOrder.created) {
       logger.info(
         {
           provider: 'voodoopay',
@@ -1047,10 +1045,8 @@ export class WebhookService {
           orderSessionId: orderSession.id,
           webhookEventId: input.webhookEventId,
         },
-        'paid event ignored as duplicate',
+        'paid order record already existed; continuing webhook recovery flow',
       );
-      await this.orderRepository.markWebhookDuplicate(input.webhookEventId);
-      return;
     }
 
     await this.orderRepository.markOrderSessionPaid({
@@ -1114,11 +1110,11 @@ export class WebhookService {
       fallbackChannelId: orderSession.ticketChannelId,
       content: message,
       components: buildPaidOrderFulfillmentComponents({
-        paidOrderId,
+        paidOrderId: paidOrder.paidOrderId,
         fulfillmentStatus: 'needs_action',
       }),
       telegramReplyMarkup: buildPaidOrderFulfillmentTelegramReplyMarkup({
-        paidOrderId,
+        paidOrderId: paidOrder.paidOrderId,
         fulfillmentStatus: 'needs_action',
       }),
     });

@@ -322,6 +322,40 @@ export class PointsRepository {
     return { account, removedPoints };
   }
 
+  public async findLedgerEventByOrderSessionAndType(input: {
+    tenantId: string;
+    guildId: string;
+    orderSessionId: string;
+    eventType: string;
+  }): Promise<PointsLedgerRecord | null> {
+    const row = await this.db.query.customerPointsLedger.findFirst({
+      where: and(
+        eq(customerPointsLedger.tenantId, input.tenantId),
+        eq(customerPointsLedger.guildId, input.guildId),
+        eq(customerPointsLedger.orderSessionId, input.orderSessionId),
+        eq(customerPointsLedger.eventType, input.eventType),
+      ),
+      orderBy: [desc(customerPointsLedger.createdAt)],
+    });
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      guildId: row.guildId,
+      emailNormalized: row.emailNormalized,
+      deltaPoints: row.deltaPoints,
+      eventType: row.eventType,
+      orderSessionId: row.orderSessionId,
+      actorUserId: row.actorUserId,
+      metadata: row.metadata,
+      createdAt: row.createdAt,
+    };
+  }
+
   public async insertLedgerEvent(input: {
     tenantId: string;
     guildId: string;

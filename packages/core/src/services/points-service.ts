@@ -419,6 +419,21 @@ export class PointsService {
         return ok(undefined);
       }
 
+      const existingConsumption = await this.pointsRepository.findLedgerEventByOrderSessionAndType({
+        tenantId: input.orderSession.tenantId,
+        guildId: input.orderSession.guildId,
+        orderSessionId: input.orderSession.id,
+        eventType: 'reservation_consumed',
+      });
+      if (existingConsumption) {
+        await this.orderRepository.setOrderSessionPointsReservationState({
+          tenantId: input.orderSession.tenantId,
+          orderSessionId: input.orderSession.id,
+          state: 'consumed',
+        });
+        return ok(undefined);
+      }
+
       await this.pointsRepository.consumeReservedPoints({
         tenantId: input.orderSession.tenantId,
         guildId: input.orderSession.guildId,
@@ -458,6 +473,38 @@ export class PointsService {
       const points = Math.max(0, Math.floor(input.points));
       if (!input.orderSession.customerEmailNormalized || points <= 0) {
         return ok(null);
+      }
+
+      const existingEarn = await this.pointsRepository.findLedgerEventByOrderSessionAndType({
+        tenantId: input.orderSession.tenantId,
+        guildId: input.orderSession.guildId,
+        orderSessionId: input.orderSession.id,
+        eventType: 'earned_from_paid_order',
+      });
+      if (existingEarn) {
+        const account = await this.pointsRepository.getAccount({
+          tenantId: input.orderSession.tenantId,
+          guildId: input.orderSession.guildId,
+          emailNormalized: input.orderSession.customerEmailNormalized,
+        });
+
+        if (!account) {
+          return ok(
+            this.toBalanceView(
+              input.orderSession.customerEmailNormalized,
+              input.orderSession.customerEmailNormalized,
+              null,
+            ),
+          );
+        }
+
+        return ok(
+          this.toBalanceView(
+            input.orderSession.customerEmailNormalized,
+            input.orderSession.customerEmailNormalized,
+            account,
+          ),
+        );
       }
 
       const account = await this.pointsRepository.addPoints({

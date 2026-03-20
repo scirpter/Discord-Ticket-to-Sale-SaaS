@@ -378,7 +378,7 @@ export class OrderRepository {
     priceMinor: number;
     currency: string;
     paymentReference: string | null;
-  }): Promise<string | null> {
+  }): Promise<{ paidOrderId: string; created: boolean }> {
     const paidOrderId = ulid();
     try {
       await this.db.insert(ordersPaid).values({
@@ -393,7 +393,10 @@ export class OrderRepository {
         paymentReference: input.paymentReference,
         updatedAt: new Date(),
       });
-      return paidOrderId;
+      return {
+        paidOrderId,
+        created: true,
+      };
     } catch (error) {
       if (
         typeof error === 'object' &&
@@ -401,7 +404,15 @@ export class OrderRepository {
         'code' in error &&
         (error as { code?: string }).code === 'ER_DUP_ENTRY'
       ) {
-        return null;
+        const existing = await this.getPaidOrderByOrderSessionId(input.orderSessionId);
+        if (!existing) {
+          throw new Error('Paid order exists but could not be loaded by order session');
+        }
+
+        return {
+          paidOrderId: existing.id,
+          created: false,
+        };
       }
 
       throw error;
@@ -411,6 +422,18 @@ export class OrderRepository {
   public async getPaidOrderById(paidOrderId: string): Promise<PaidOrderRecord | null> {
     const row = await this.db.query.ordersPaid.findFirst({
       where: eq(ordersPaid.id, paidOrderId),
+    });
+
+    if (!row) {
+      return null;
+    }
+
+    return mapPaidOrderRow(row);
+  }
+
+  public async getPaidOrderByOrderSessionId(orderSessionId: string): Promise<PaidOrderRecord | null> {
+    const row = await this.db.query.ordersPaid.findFirst({
+      where: eq(ordersPaid.orderSessionId, orderSessionId),
     });
 
     if (!row) {

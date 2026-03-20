@@ -225,7 +225,7 @@ export class ReferralRepository {
         'code' in error &&
         (error as { code?: string }).code === 'ER_DUP_ENTRY'
       ) {
-        const existing = await this.getFirstPaidGateByReferredEmail({
+        const existing = await this.findFirstPaidGateByReferredEmail({
           tenantId: input.tenantId,
           guildId: input.guildId,
           referredEmailNormalized: input.referredEmailNormalized,
@@ -276,7 +276,7 @@ export class ReferralRepository {
     return mapFirstPaidGateRow(row);
   }
 
-  private async getFirstPaidGateByReferredEmail(input: {
+  public async findFirstPaidGateByReferredEmail(input: {
     tenantId: string;
     guildId: string;
     referredEmailNormalized: string;

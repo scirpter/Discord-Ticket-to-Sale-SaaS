@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrderSessionRecord } from '../src/repositories/order-repository.js';
 import { ReferralService } from '../src/services/referral-service.js';
@@ -38,6 +38,10 @@ function makeOrderSession(overrides: Partial<OrderSessionRecord> = {}): OrderSes
 }
 
 describe('referral service', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('renders thank-you template placeholders', () => {
     const service = new ReferralService();
 
@@ -98,5 +102,72 @@ describe('referral service', () => {
       return;
     }
     expect(result.value.reason).toBe('no_customer_email');
+  });
+
+  it('returns the rewarded outcome again when the same paid order is retried', async () => {
+    const service = new ReferralService();
+    const orderSession = makeOrderSession({
+      customerEmailNormalized: 'new@example.com',
+      referralRewardMinorSnapshot: 500,
+      pointsConfigSnapshot: {
+        pointValueMinor: 100,
+        earnCategoryKeys: [],
+        redeemCategoryKeys: [],
+      },
+    });
+    const claim = {
+      id: 'claim-1',
+      tenantId: orderSession.tenantId,
+      guildId: orderSession.guildId,
+      referrerDiscordUserId: '523456789012345678',
+      referrerEmailNormalized: 'ref@example.com',
+      referrerEmailDisplay: 'ref@example.com',
+      referredEmailNormalized: 'new@example.com',
+      referredEmailDisplay: 'new@example.com',
+      status: 'rewarded' as const,
+      rewardOrderSessionId: orderSession.id,
+      rewardPoints: 5,
+      rewardedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    vi.spyOn((service as any).referralRepository, 'findClaimByReferredEmail').mockResolvedValue(claim);
+    vi.spyOn((service as any).referralRepository, 'insertFirstPaidGate').mockResolvedValue({
+      created: false,
+      row: {
+        id: 'gate-1',
+        tenantId: orderSession.tenantId,
+        guildId: orderSession.guildId,
+        referredEmailNormalized: 'new@example.com',
+        firstOrderSessionId: orderSession.id,
+        firstPaidAt: new Date(),
+        claimId: claim.id,
+        rewardApplied: true,
+        rewardPoints: 5,
+        referralRewardMinorSnapshot: 500,
+        pointValueMinorSnapshot: 100,
+        createdAt: new Date(),
+      },
+    });
+
+    const result = await service.processPaidOrderReward({
+      orderSession,
+      referralThankYouTemplate: null,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+
+    expect(result.value.status).toBe('rewarded');
+    if (result.value.status !== 'rewarded') {
+      return;
+    }
+
+    expect(result.value.claimId).toBe('claim-1');
+    expect(result.value.rewardPoints).toBe(5);
+    expect(result.value.referredEmailNormalized).toBe('new@example.com');
   });
 });

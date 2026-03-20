@@ -5,7 +5,11 @@ import type { AppError} from '../domain/errors.js';
 import { fromUnknownError, validationError } from '../domain/errors.js';
 import { PointsRepository } from '../repositories/points-repository.js';
 import { type OrderSessionRecord } from '../repositories/order-repository.js';
-import { ReferralRepository, type ReferralClaimRecord } from '../repositories/referral-repository.js';
+import {
+  ReferralRepository,
+  type FirstPaidGateRecord,
+  type ReferralClaimRecord,
+} from '../repositories/referral-repository.js';
 import { formatUserReference } from '../utils/platform-ids.js';
 import { PointsService } from './points-service.js';
 
@@ -138,18 +142,19 @@ export class ReferralService {
         input.orderSession.pointsConfigSnapshot?.pointValueMinor ?? 1,
       );
       const rewardMinor = Math.max(0, input.orderSession.referralRewardMinorSnapshot ?? 0);
-      const claim = await this.referralRepository.findActiveClaimByReferredEmail({
+      const claim = await this.referralRepository.findClaimByReferredEmail({
         tenantId: input.orderSession.tenantId,
         guildId: input.orderSession.guildId,
         referredEmailNormalized: referredEmail,
       });
+      const activeClaim = claim?.status === 'active' ? claim : null;
 
       const gate = await this.referralRepository.insertFirstPaidGate({
         tenantId: input.orderSession.tenantId,
         guildId: input.orderSession.guildId,
         referredEmailNormalized: referredEmail,
         firstOrderSessionId: input.orderSession.id,
-        claimId: claim?.id ?? null,
+        claimId: activeClaim?.id ?? null,
         rewardApplied: false,
         rewardPoints: 0,
         referralRewardMinorSnapshot: rewardMinor,
@@ -157,18 +162,20 @@ export class ReferralService {
       });
 
       if (!gate.created) {
-        return ok({
-          status: 'not_applicable',
-          reason: 'not_first_paid',
-          referredEmailNormalized: referredEmail,
-          claim,
-          rewardMinor,
-          pointValueMinor,
-          rewardPoints: 0,
-        });
+        return ok(
+          this.resolveExistingFirstPaidOutcome({
+            orderSession: input.orderSession,
+            referredEmail,
+            claim,
+            gate: gate.row,
+            fallbackRewardMinor: rewardMinor,
+            fallbackPointValueMinor: pointValueMinor,
+            referralThankYouTemplate: input.referralThankYouTemplate,
+          }),
+        );
       }
 
-      if (!claim) {
+      if (!activeClaim) {
         return ok({
           status: 'not_applicable',
           reason: 'no_claim',
@@ -180,12 +187,12 @@ export class ReferralService {
         });
       }
 
-      if (claim.referrerEmailNormalized === referredEmail) {
+      if (activeClaim.referrerEmailNormalized === referredEmail) {
         return ok({
           status: 'not_applicable',
           reason: 'self_blocked',
           referredEmailNormalized: referredEmail,
-          claim,
+          claim: activeClaim,
           rewardMinor,
           pointValueMinor,
           rewardPoints: 0,
@@ -197,7 +204,7 @@ export class ReferralService {
           status: 'not_applicable',
           reason: 'reward_disabled',
           referredEmailNormalized: referredEmail,
-          claim,
+          claim: activeClaim,
           rewardMinor,
           pointValueMinor,
           rewardPoints: 0,
@@ -210,7 +217,7 @@ export class ReferralService {
           status: 'not_applicable',
           reason: 'reward_zero_points',
           referredEmailNormalized: referredEmail,
-          claim,
+          claim: activeClaim,
           rewardMinor,
           pointValueMinor,
           rewardPoints,
@@ -220,20 +227,20 @@ export class ReferralService {
       await this.pointsRepository.addPoints({
         tenantId: input.orderSession.tenantId,
         guildId: input.orderSession.guildId,
-        emailNormalized: claim.referrerEmailNormalized,
-        emailDisplay: claim.referrerEmailDisplay,
+        emailNormalized: activeClaim.referrerEmailNormalized,
+        emailDisplay: activeClaim.referrerEmailDisplay,
         points: rewardPoints,
       });
 
       await this.pointsRepository.insertLedgerEvent({
         tenantId: input.orderSession.tenantId,
         guildId: input.orderSession.guildId,
-        emailNormalized: claim.referrerEmailNormalized,
+        emailNormalized: activeClaim.referrerEmailNormalized,
         deltaPoints: rewardPoints,
         eventType: 'referral_reward_first_paid_order',
         orderSessionId: input.orderSession.id,
         metadata: {
-          claimId: claim.id,
+          claimId: activeClaim.id,
           referredEmailNormalized: referredEmail,
           referralRewardMinorSnapshot: rewardMinor,
           pointValueMinorSnapshot: pointValueMinor,
@@ -242,14 +249,14 @@ export class ReferralService {
       });
 
       await this.referralRepository.markClaimRewarded({
-        claimId: claim.id,
+        claimId: activeClaim.id,
         rewardOrderSessionId: input.orderSession.id,
         rewardPoints,
       });
 
       await this.referralRepository.updateFirstPaidGateOutcome({
         gateId: gate.row.id,
-        claimId: claim.id,
+        claimId: activeClaim.id,
         rewardApplied: true,
         rewardPoints,
         referralRewardMinorSnapshot: rewardMinor,
@@ -261,16 +268,16 @@ export class ReferralService {
         rewardPoints,
         rewardMinor,
         referredEmail,
-        referrerEmail: claim.referrerEmailDisplay,
-        referrerDiscordUserId: claim.referrerDiscordUserId,
+        referrerEmail: activeClaim.referrerEmailDisplay,
+        referrerDiscordUserId: activeClaim.referrerDiscordUserId,
         orderSessionId: input.orderSession.id,
       });
 
       return ok({
         status: 'rewarded',
-        claimId: claim.id,
-        referrerDiscordUserId: claim.referrerDiscordUserId,
-        referrerEmailNormalized: claim.referrerEmailNormalized,
+        claimId: activeClaim.id,
+        referrerDiscordUserId: activeClaim.referrerDiscordUserId,
+        referrerEmailNormalized: activeClaim.referrerEmailNormalized,
         referredEmailNormalized: referredEmail,
         rewardPoints,
         rewardMinor,
@@ -280,6 +287,119 @@ export class ReferralService {
     } catch (error) {
       return err(fromUnknownError(error));
     }
+  }
+
+  private resolveExistingFirstPaidOutcome(input: {
+    orderSession: OrderSessionRecord;
+    referredEmail: string;
+    claim: ReferralClaimRecord | null;
+    gate: FirstPaidGateRecord | null;
+    fallbackRewardMinor: number;
+    fallbackPointValueMinor: number;
+    referralThankYouTemplate: string | null;
+  }): ReferralRewardResult {
+    if (!input.gate || input.gate.firstOrderSessionId !== input.orderSession.id) {
+      return {
+        status: 'not_applicable',
+        reason: 'not_first_paid',
+        referredEmailNormalized: input.referredEmail,
+        claim: input.claim,
+        rewardMinor: input.fallbackRewardMinor,
+        pointValueMinor: input.fallbackPointValueMinor,
+        rewardPoints: 0,
+      };
+    }
+
+    const rewardMinor = Math.max(0, input.gate.referralRewardMinorSnapshot);
+    const pointValueMinor = Math.max(1, input.gate.pointValueMinorSnapshot);
+    const rewardPoints = Math.max(
+      0,
+      input.gate.rewardPoints > 0 ? input.gate.rewardPoints : Math.floor(rewardMinor / pointValueMinor),
+    );
+
+    if (
+      input.gate.rewardApplied &&
+      input.claim &&
+      input.claim.rewardOrderSessionId === input.orderSession.id
+    ) {
+      return {
+        status: 'rewarded',
+        claimId: input.claim.id,
+        referrerDiscordUserId: input.claim.referrerDiscordUserId,
+        referrerEmailNormalized: input.claim.referrerEmailNormalized,
+        referredEmailNormalized: input.referredEmail,
+        rewardPoints,
+        rewardMinor,
+        pointValueMinor,
+        thankYouMessage: this.renderThankYouTemplate({
+          template: input.referralThankYouTemplate,
+          rewardPoints,
+          rewardMinor,
+          referredEmail: input.referredEmail,
+          referrerEmail: input.claim.referrerEmailDisplay,
+          referrerDiscordUserId: input.claim.referrerDiscordUserId,
+          orderSessionId: input.orderSession.id,
+        }),
+      };
+    }
+
+    if (!input.claim) {
+      return {
+        status: 'not_applicable',
+        reason: 'no_claim',
+        referredEmailNormalized: input.referredEmail,
+        claim: null,
+        rewardMinor,
+        pointValueMinor,
+        rewardPoints: 0,
+      };
+    }
+
+    if (input.claim.referrerEmailNormalized === input.referredEmail) {
+      return {
+        status: 'not_applicable',
+        reason: 'self_blocked',
+        referredEmailNormalized: input.referredEmail,
+        claim: input.claim,
+        rewardMinor,
+        pointValueMinor,
+        rewardPoints: 0,
+      };
+    }
+
+    if (rewardMinor <= 0) {
+      return {
+        status: 'not_applicable',
+        reason: 'reward_disabled',
+        referredEmailNormalized: input.referredEmail,
+        claim: input.claim,
+        rewardMinor,
+        pointValueMinor,
+        rewardPoints: 0,
+      };
+    }
+
+    if (rewardPoints <= 0) {
+      return {
+        status: 'not_applicable',
+        reason: 'reward_zero_points',
+        referredEmailNormalized: input.referredEmail,
+        claim: input.claim,
+        rewardMinor,
+        pointValueMinor,
+        rewardPoints,
+      };
+    }
+
+    return {
+      status: 'not_applicable',
+      reason: 'not_first_paid',
+      referredEmailNormalized: input.referredEmail,
+      claim: input.claim,
+      rewardMinor,
+      pointValueMinor,
+      rewardPoints: 0,
+    };
   }
 
   public renderThankYouTemplate(input: {
