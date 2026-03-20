@@ -4,29 +4,29 @@ import {
   Events,
   GatewayIntentBits,
   MessageFlags,
-  type AutocompleteInteraction,
   type ChatInputCommandInteraction,
   type Interaction,
 } from 'discord.js';
 import { getEnv, logger } from '@voodoo/core';
 
 import { activationCommand } from './commands/activation.js';
-import { mapNukeError, nukeCommand, startNukeScheduler } from './commands/nuke.js';
+import { searchCommand } from './commands/search.js';
+import { sportsCommand } from './commands/sports.js';
+import { mapSportsError, startSportsScheduler } from './sports-runtime.js';
 
 type Command = {
   data: { name: string };
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
-  autocomplete?: (interaction: AutocompleteInteraction) => Promise<void>;
 };
 
-function resolveNukeWorkerToken(): string {
+function resolveSportsWorkerToken(): string {
   const env = getEnv();
-  const token = env.NUKE_DISCORD_TOKEN.trim();
+  const token = env.SPORTS_DISCORD_TOKEN.trim();
   if (token.length > 0) {
     return token;
   }
 
-  throw new Error('NUKE_DISCORD_TOKEN is required for apps/nuke-worker.');
+  throw new Error('SPORTS_DISCORD_TOKEN is required for apps/sports-worker.');
 }
 
 const env = getEnv();
@@ -36,12 +36,13 @@ const client = new Client({
 
 const commands = new Collection<string, Command>();
 commands.set(activationCommand.data.name, activationCommand as unknown as Command);
-commands.set(nukeCommand.data.name, nukeCommand as unknown as Command);
+commands.set(searchCommand.data.name, searchCommand as unknown as Command);
+commands.set(sportsCommand.data.name, sportsCommand as unknown as Command);
 
 client.once(Events.ClientReady, () => {
-  logger.info({ botUser: client.user?.tag }, 'nuke-worker ready');
-  startNukeScheduler(client, env.NUKE_POLL_INTERVAL_MS);
-  logger.info({ pollIntervalMs: env.NUKE_POLL_INTERVAL_MS }, 'nuke scheduler loop started');
+  logger.info({ botUser: client.user?.tag }, 'sports-worker ready');
+  startSportsScheduler(client, env.SPORTS_POLL_INTERVAL_MS);
+  logger.info({ pollIntervalMs: env.SPORTS_POLL_INTERVAL_MS }, 'sports scheduler loop started');
 });
 
 async function sendInteractionFailure(interaction: Interaction, message: string): Promise<void> {
@@ -58,25 +59,6 @@ async function sendInteractionFailure(interaction: Interaction, message: string)
 }
 
 async function handleInteraction(interaction: Interaction): Promise<void> {
-  if (interaction.isAutocomplete()) {
-    const command = commands.get(interaction.commandName);
-    if (!command?.autocomplete) {
-      await interaction.respond([]);
-      return;
-    }
-
-    try {
-      await command.autocomplete(interaction);
-    } catch (error) {
-      logger.error(
-        { err: error, commandName: interaction.commandName, guildId: interaction.guildId },
-        'nuke-worker autocomplete handler failed',
-      );
-      await interaction.respond([]);
-    }
-    return;
-  }
-
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -92,9 +74,9 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
   } catch (error) {
     logger.error(
       { err: error, commandName: interaction.commandName, guildId: interaction.guildId },
-      'nuke-worker interaction handler failed',
+      'sports-worker interaction handler failed',
     );
-    await sendInteractionFailure(interaction, mapNukeError(error));
+    await sendInteractionFailure(interaction, mapSportsError(error));
   }
 }
 
@@ -102,4 +84,4 @@ client.on(Events.InteractionCreate, (interaction) => {
   void handleInteraction(interaction);
 });
 
-void client.login(resolveNukeWorkerToken());
+void client.login(resolveSportsWorkerToken());

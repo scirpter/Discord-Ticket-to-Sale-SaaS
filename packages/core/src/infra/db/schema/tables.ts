@@ -766,6 +766,76 @@ export const channelNukeAuthorizedUsers = mysqlTable(
   }),
 );
 
+export const sportsGuildConfigs = mysqlTable(
+  'sports_guild_configs',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    managedCategoryChannelId: varchar('managed_category_channel_id', { length: 32 }),
+    localTimeHhmm: varchar('local_time_hhmm', { length: 5 }).notNull(),
+    timezone: varchar('timezone', { length: 64 }).notNull(),
+    broadcastCountry: varchar('broadcast_country', { length: 120 }).notNull(),
+    nextRunAtUtc: timestamp('next_run_at_utc', { mode: 'date' }).notNull(),
+    lastRunAtUtc: timestamp('last_run_at_utc', { mode: 'date' }),
+    lastLocalRunDate: varchar('last_local_run_date', { length: 10 }),
+    updatedByDiscordUserId: varchar('updated_by_discord_user_id', { length: 32 }),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    guildUnique: uniqueIndex('sports_guild_configs_guild_uq').on(table.guildId),
+    enabledNextRunIdx: index('sports_guild_configs_enabled_next_run_idx').on(
+      table.enabled,
+      table.nextRunAtUtc,
+    ),
+  }),
+);
+
+export const sportsChannelBindings = mysqlTable(
+  'sports_channel_bindings',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    sportId: varchar('sport_id', { length: 16 }),
+    sportName: varchar('sport_name', { length: 80 }).notNull(),
+    sportSlug: varchar('sport_slug', { length: 100 }).notNull(),
+    channelId: varchar('channel_id', { length: 32 }).notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    guildSportUnique: uniqueIndex('sports_channel_bindings_guild_sport_uq').on(
+      table.guildId,
+      table.sportName,
+    ),
+    guildChannelUnique: uniqueIndex('sports_channel_bindings_guild_channel_uq').on(
+      table.guildId,
+      table.channelId,
+    ),
+    guildIdx: index('sports_channel_bindings_guild_idx').on(table.guildId),
+  }),
+);
+
+export const sportsAuthorizedUsers = mysqlTable(
+  'sports_authorized_users',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    discordUserId: varchar('discord_user_id', { length: 32 }).notNull(),
+    grantedByDiscordUserId: varchar('granted_by_discord_user_id', { length: 32 }),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    guildUserUnique: uniqueIndex('sports_authorized_users_guild_user_uq').on(
+      table.guildId,
+      table.discordUserId,
+    ),
+    guildIdx: index('sports_authorized_users_guild_idx').on(table.guildId),
+  }),
+);
+
 export const auditLogs = mysqlTable(
   'audit_logs',
   {

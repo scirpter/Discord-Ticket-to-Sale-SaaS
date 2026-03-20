@@ -127,6 +127,13 @@
       "when": 1773946000000,
       "tag": "0017_join_gate_panel_config",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1774006024889,
+      "tag": "0018_add_sports_worker",
+      "breakpoints": true
     }
   ]
 }

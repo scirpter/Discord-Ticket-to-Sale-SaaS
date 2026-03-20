@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 import { getEnv, logger } from '@voodoo/core';
 
+import { activationCommand } from './commands/activation.js';
 import { joinGateCommand } from './commands/join-gate.js';
 import {
   bindJoinGateReadyHandlers,
@@ -47,6 +48,7 @@ const client = new Client({
 });
 
 const commands = new Collection<string, Command>();
+commands.set(activationCommand.data.name, activationCommand as unknown as Command);
 commands.set(joinGateCommand.data.name, joinGateCommand as unknown as Command);
 
 bindJoinGateReadyHandlers(client);

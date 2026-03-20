@@ -21,7 +21,11 @@
 - Runs as a separate Discord application/token for `/nuke`.
 - Manages channel nuke scheduling, execution, and safety checks independently from sales traffic.
 
-5. `telegram-worker`
+5. `sports-worker`
+- Runs as a separate Discord application/token for daily sports listings and `/search`.
+- Creates and maintains one managed text channel per sport, republishes the UK TV schedule daily, and resolves event lookups from TheSportsDB.
+
+6. `telegram-worker`
 - Handles Telegram workspace linking, sales handoff, points, referrals, and paid-order callbacks.
 
 ## Data Layer
@@ -33,6 +37,10 @@
   - `guild_configs` join-gate columns for per-server configuration
   - `join_gate_members` for each joining member's verification progress
   - `join_gate_email_index` for normalized email matches extracted from lookup channels
+- Sports worker state is persisted in:
+  - `sports_guild_configs` for per-server schedule, timezone, broadcaster country, and managed category
+  - `sports_channel_bindings` for the one-channel-per-sport mapping inside each server
+  - `sports_authorized_users` for server-specific activation and `/sports` management access
 
 ## Security and Reliability
 

@@ -9,7 +9,7 @@ It is step-by-step and beginner-friendly, and includes:
 - PM2 process management
 - Nginx + SSL
 - Discord + WooCommerce integration basics
-- separate Discord workers for sales, join-gate verification, and nuke
+- separate Discord workers for sales, join-gate verification, nuke, and sports listings
 
 ---
 
@@ -189,6 +189,15 @@ DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
 DISCORD_CLIENT_ID=YOUR_DISCORD_CLIENT_ID
 JOIN_GATE_DISCORD_TOKEN=YOUR_JOIN_GATE_BOT_TOKEN
 JOIN_GATE_DISCORD_CLIENT_ID=YOUR_JOIN_GATE_BOT_CLIENT_ID
+SPORTS_DISCORD_TOKEN=YOUR_SPORTS_BOT_TOKEN
+SPORTS_DISCORD_CLIENT_ID=YOUR_SPORTS_BOT_CLIENT_ID
+SPORTS_POLL_INTERVAL_MS=30000
+SPORTS_API_KEY=YOUR_THESPORTSDB_PAID_API_KEY
+SPORTS_API_V1_BASE_URL=https://www.thesportsdb.com/api/v1/json
+SPORTS_API_BASE_URL=https://www.thesportsdb.com/api/v2/json
+SPORTS_DEFAULT_TIMEZONE=Europe/London
+SPORTS_DEFAULT_PUBLISH_TIME=01:00
+SPORTS_BROADCAST_COUNTRY=United Kingdom
 TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 TELEGRAM_BOT_USERNAME=YOUR_TELEGRAM_BOT_USERNAME
 NUKE_DISCORD_TOKEN=YOUR_NUKE_BOT_TOKEN
@@ -204,7 +213,7 @@ SESSION_SECRET=LONG_RANDOM_STRING_MIN_32_CHARS
 ENCRYPTION_KEY=LONG_RANDOM_STRING_MIN_32_CHARS
 CHECKOUT_SIGNING_SECRET=LONG_RANDOM_STRING_MIN_32_CHARS
 
-# Super admin Discord IDs can run /nuke grant, /nuke revoke, and /nuke authorized.
+# Super admin Discord IDs can run /activation grant, /activation revoke, and /activation list.
 SUPER_ADMIN_DISCORD_IDS=123456789012345678
 BOT_PUBLIC_URL=https://voodoo.example.com
 DISCORD_TEST_GUILD_ID=
@@ -237,7 +246,7 @@ pnpm deploy:commands
 ```
 
 Telegram does not require slash-command deployment. After the dashboard is online, generate a Telegram link command from `Workspace & Server`, add the Telegram bot to the target group, and run `/connect <token>` as a Telegram group admin. `TELEGRAM_BOT_USERNAME` is also required because `/sale` now hands customers off from the group into a private DM with the bot.
-`pnpm deploy:commands` now deploys the sales bot, join-gate bot, and nuke bot command sets together.
+`pnpm deploy:commands` now deploys the sales bot, join-gate bot, nuke bot, and sports bot command sets together.
 
 ---
 
@@ -305,6 +314,16 @@ module.exports = {
         NODE_ENV: 'production'
       },
       env_file: '/var/www/voodoo/.env'
+    },
+    {
+      name: 'voodoo-sports',
+      cwd: '/var/www/voodoo',
+      script: 'node',
+      args: 'apps/sports-worker/dist/index.js',
+      env: {
+        NODE_ENV: 'production'
+      },
+      env_file: '/var/www/voodoo/.env'
     }
   ]
 };
@@ -334,6 +353,7 @@ pm2 logs voodoo-bot --lines 100
 pm2 logs voodoo-telegram --lines 100
 pm2 logs voodoo-join-gate --lines 100
 pm2 logs voodoo-nuke --lines 100
+pm2 logs voodoo-sports --lines 100
 ```
 
 ---
@@ -416,6 +436,19 @@ The join-gate worker is a separate Discord application/token. It does not use OA
 
 Make sure the nuke bot app is also invited and has the permissions required by `/nuke`.
 
+### 14.4 Sports bot app
+
+Make sure the sports bot app is also invited and has the permissions required by `/sports`:
+
+- `View Channels`
+- `Manage Channels`
+- `Send Messages`
+- `Embed Links`
+- `Manage Messages`
+- `Read Message History`
+
+The sports worker also needs a paid `SPORTS_API_KEY` from TheSportsDB for full daily coverage. The public test key is not enough for a production sports schedule bot.
+
 After updates:
 
 ```bash
@@ -426,6 +459,7 @@ pm2 restart voodoo-bot
 pm2 restart voodoo-telegram
 pm2 start ecosystem.config.cjs --only voodoo-join-gate --update-env
 pm2 start ecosystem.config.cjs --only voodoo-nuke --update-env
+pm2 start ecosystem.config.cjs --only voodoo-sports --update-env
 pm2 save
 ```
 
@@ -499,6 +533,7 @@ pm2 restart voodoo-bot
 pm2 restart voodoo-telegram
 pm2 start ecosystem.config.cjs --only voodoo-join-gate --update-env
 pm2 start ecosystem.config.cjs --only voodoo-nuke --update-env
+pm2 start ecosystem.config.cjs --only voodoo-sports --update-env
 pm2 save
 ```
 

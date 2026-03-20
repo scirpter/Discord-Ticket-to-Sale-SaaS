@@ -1,6 +1,7 @@
 import { REST, Routes } from 'discord.js';
 import { getEnv, logger } from '@voodoo/core';
 
+import { activationCommand } from './commands/activation.js';
 import { joinGateCommand } from './commands/join-gate.js';
 
 function resolveDeployConfig(): { token: string; clientId: string } {
@@ -22,7 +23,7 @@ function resolveDeployConfig(): { token: string; clientId: string } {
 async function deploy(): Promise<void> {
   const { token, clientId } = resolveDeployConfig();
   const rest = new REST({ version: '10' }).setToken(token);
-  const payload = [joinGateCommand.data.toJSON()];
+  const payload = [joinGateCommand.data.toJSON(), activationCommand.data.toJSON()];
   const guildId = process.env.DISCORD_TEST_GUILD_ID?.trim();
 
   if (guildId) {

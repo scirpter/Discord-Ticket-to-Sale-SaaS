@@ -14,6 +14,7 @@ export default defineConfig({
       'apps/bot-worker/**/*.test.ts',
       'apps/join-gate-worker/**/*.test.ts',
       'apps/nuke-worker/**/*.test.ts',
+      'apps/sports-worker/**/*.test.ts',
       'apps/telegram-worker/**/*.test.ts',
     ],
     environment: 'node',

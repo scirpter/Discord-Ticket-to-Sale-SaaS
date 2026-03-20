@@ -64,6 +64,7 @@ import {
   type DashboardSectionId,
   toggleExclusivePanel,
 } from '@/lib/dashboard-panels';
+import { buildCategoryQuestionTemplateByKey } from '@/lib/category-question-templates';
 import { cn } from '@/lib/utils';
 
 type FieldType = 'short_text' | 'long_text' | 'email' | 'number';
@@ -832,29 +833,13 @@ export default function DashboardPage() {
     [products],
   );
   const categoryTemplateByKey = useMemo(() => {
-    const templates = new Map<
-      string,
-      {
-        category: string;
-        productId: string;
-        questions: QuestionDraft[];
-      }
-    >();
-
-    for (const product of products) {
-      const key = normalizeCategoryKey(product.category);
-      if (!key || templates.has(key)) {
-        continue;
-      }
-
-      templates.set(key, {
-        category: product.category.trim(),
-        productId: product.id,
+    return buildCategoryQuestionTemplateByKey(
+      products.map((product) => ({
+        id: product.id,
+        category: product.category,
         questions: toQuestionDrafts(product.formFields),
-      });
-    }
-
-    return templates;
+      })),
+    );
   }, [products]);
   const categorySelectOptions = useMemo(
     () =>
@@ -4175,7 +4160,7 @@ export default function DashboardPage() {
                       type="button"
                       variant="outline"
                       data-tutorial="save-category-questions"
-                      disabled={state.loading || !serverReady}
+                      disabled={state.loading}
                       onClick={() =>
                         runAction(async () => {
                           const context = requireWorkspaceAndServer({ requireBot: true });
@@ -4214,6 +4199,12 @@ export default function DashboardPage() {
                     >
                       Save Category Questions
                     </Button>
+                    {!serverReady ? (
+                      <p className="text-xs text-muted-foreground">
+                        Add the pay bot to this Discord server first, then save the category
+                        questions again.
+                      </p>
+                    ) : null}
                   </div>
                 </CatalogStepPanel>
 

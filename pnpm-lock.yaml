@@ -78,6 +78,15 @@ importers:
         specifier: 14.25.1
         version: 14.25.1
 
+  apps/sports-worker:
+    dependencies:
+      '@voodoo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      discord.js:
+        specifier: 14.25.1
+        version: 14.25.1
+
   apps/telegram-worker:
     dependencies:
       '@voodoo/core':

@@ -2,18 +2,20 @@ import { REST, Routes } from 'discord.js';
 import { getEnv, logger } from '@voodoo/core';
 
 import { activationCommand } from './commands/activation.js';
-import { nukeCommand } from './commands/nuke.js';
+import { searchCommand } from './commands/search.js';
+import { sportsCommand } from './commands/sports.js';
 
 function resolveDeployConfig(): { token: string; clientId: string } {
   const env = getEnv();
-  const token = env.NUKE_DISCORD_TOKEN.trim();
-  const clientId = env.NUKE_DISCORD_CLIENT_ID.trim();
+  const token = env.SPORTS_DISCORD_TOKEN.trim();
+  const clientId = env.SPORTS_DISCORD_CLIENT_ID.trim();
 
   if (token.length === 0) {
-    throw new Error('NUKE_DISCORD_TOKEN is required to deploy nuke commands.');
+    throw new Error('SPORTS_DISCORD_TOKEN is required to deploy sports commands.');
   }
+
   if (clientId.length === 0) {
-    throw new Error('NUKE_DISCORD_CLIENT_ID is required to deploy nuke commands.');
+    throw new Error('SPORTS_DISCORD_CLIENT_ID is required to deploy sports commands.');
   }
 
   return { token, clientId };
@@ -22,17 +24,21 @@ function resolveDeployConfig(): { token: string; clientId: string } {
 async function deploy(): Promise<void> {
   const { token, clientId } = resolveDeployConfig();
   const rest = new REST({ version: '10' }).setToken(token);
-  const payload = [nukeCommand.data.toJSON(), activationCommand.data.toJSON()];
+  const payload = [
+    sportsCommand.data.toJSON(),
+    searchCommand.data.toJSON(),
+    activationCommand.data.toJSON(),
+  ];
   const guildId = process.env.DISCORD_TEST_GUILD_ID?.trim();
 
   if (guildId) {
     await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: payload });
-    logger.info({ guildId, clientId }, 'deployed nuke guild application commands');
+    logger.info({ guildId, clientId }, 'deployed sports guild application commands');
     return;
   }
 
   await rest.put(Routes.applicationCommands(clientId), { body: payload });
-  logger.info({ clientId }, 'deployed nuke global application commands');
+  logger.info({ clientId }, 'deployed sports global application commands');
 }
 
 void deploy();

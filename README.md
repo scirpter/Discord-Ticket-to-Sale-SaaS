@@ -17,6 +17,7 @@ Multi-tenant Discord + Telegram bot stack with a web dashboard for ticket-based 
 - `apps/telegram-worker`: Telegram group worker with `/connect`, `/sale`, `/points`, `/refer`, and paid-order fulfillment callbacks.
 - `apps/join-gate-worker`: separate-token Discord worker for new-member verification, email matching, and private verification ticket creation.
 - `apps/nuke-worker`: separate-token Discord worker for `/nuke` scheduling and channel nukes.
+- `apps/sports-worker`: separate-token Discord worker for daily UK sports TV listings, managed sport channels, and `/search`.
 - `packages/core`: shared domain/config/security/services/repositories.
 - `drizzle/migrations`: SQL migrations.
 
@@ -26,6 +27,9 @@ Multi-tenant Discord + Telegram bot stack with a web dashboard for ticket-based 
 - `DISCORD_CLIENT_ID`
 - `JOIN_GATE_DISCORD_TOKEN`
 - `JOIN_GATE_DISCORD_CLIENT_ID`
+- `SPORTS_DISCORD_TOKEN`
+- `SPORTS_DISCORD_CLIENT_ID`
+- `SPORTS_API_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `DATABASE_URL`
 
@@ -42,6 +46,10 @@ Recommended for production:
 - `NUKE_DISCORD_TOKEN`
 - `NUKE_DISCORD_CLIENT_ID`
 - `NUKE_POLL_INTERVAL_MS`
+- `SPORTS_POLL_INTERVAL_MS`
+- `SPORTS_DEFAULT_TIMEZONE`
+- `SPORTS_DEFAULT_PUBLISH_TIME`
+- `SPORTS_BROADCAST_COUNTRY`
 
 Copy `.env.example` to `.env` and fill values.
 
@@ -59,6 +67,7 @@ Copy `.env.example` to `.env` and fill values.
 - Deploy sales bot slash commands only: `pnpm deploy:commands:bot`
 - Deploy join-gate slash commands only: `pnpm deploy:commands:join-gate`
 - Deploy nuke slash commands: `pnpm deploy:commands:nuke`
+- Deploy sports slash commands: `pnpm deploy:commands:sports`
 - Deploy all Discord command sets: `pnpm deploy:commands:all`
 
 ## Join Gate Verification
@@ -80,8 +89,28 @@ Copy `.env.example` to `.env` and fill values.
 - `/join-gate authorized` lists the extra Discord user IDs allowed to use `/join-gate` in the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/join-gate grant user:<@user>` grants `/join-gate` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/join-gate revoke user:<@user>` revokes `/join-gate` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation grant guild_id:<server-id> user_id:<user-id>` can now remotely activate join-gate for another server without you joining that server first. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation revoke guild_id:<server-id> user_id:<user-id>` can now remotely revoke join-gate access for another server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation list guild_id:<server-id>` lists the remote join-gate activation entries for another server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/join-gate` is now default-deny for every server. Until a super admin grants at least one Discord user, regular members cannot use it and the automatic join verification flow stays inactive for that server.
 - Restrict the rest of the server so `@everyone` only sees the fallback verify area, while the configured verified role and staff roles can see the normal channels.
+
+## Sports Listings Worker
+
+- Runs from separate worker/token (`apps/sports-worker`).
+- Creates and manages one text channel per sport under a managed category, then republishes that day’s UK TV listings on the daily schedule.
+- Default schedule is `01:00` in `Europe/London`, and the worker clears the previous day’s managed posts before sending the new listings.
+- Uses TheSportsDB for sport, event, broadcaster, and image data. A paid API key is required for full daily coverage because the public `123` key is heavily truncated.
+- `/sports setup` creates or refreshes the managed sports category and publishes the current day’s listings immediately.
+- `/sports sync` creates missing sport channels and refreshes the saved channel bindings without republishing.
+- `/sports refresh` clears the managed sport channels and republishes today’s listings on demand.
+- `/sports status` shows activation state, managed category, channel count, and the next scheduled run.
+- `/search query:"Rangers v Celtic"` finds the best matching event and returns the UK kickoff time, channels, and artwork.
+- `/activation grant guild_id:<server-id> user_id:<user-id>` activates the sports worker for another server without needing to run the command inside that server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation revoke guild_id:<server-id> user_id:<user-id>` remotely removes a sports worker activation entry. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation list guild_id:<server-id>` lists the current sports worker activation entries for a server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/sports` is default-deny for every server until a super admin grants at least one Discord user for that server.
+- `/search` stays locked for regular members until the sports worker is activated for that server.
 
 ## OAuth + Dashboard
 
@@ -106,6 +135,7 @@ Copy `.env.example` to `.env` and fill values.
 - Dashboard navigation now keeps regular merchant work in a one-section-at-a-time flow so mobile setup feels less crowded.
 - Dashboard now opens with a mobile-first setup flow strip and compact current-context card so merchants can jump straight to Workspace, Sales, Payments, Coupons, or Catalog without scanning the whole page.
 - Dashboard navigation now uses collapsible section cards, and catalog management uses four guided step panels so merchants can review products, manage category questions, edit product details, and handle variations without keeping the full builder open at once.
+- Category question loading now prefers the most complete template already used in that category, and the dashboard explains when the pay bot must be added before those question changes can be saved.
 - Server settings now include a `tip enabled` toggle (ask customer for optional GBP tip before checkout link generation).
 - Server settings now include rewards configuration:
   - `point value` (minor currency based)
@@ -195,6 +225,9 @@ Copy `.env.example` to `.env` and fill values.
 - `/nuke authorized` lists the extra Discord user IDs allowed to use `/nuke` in the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/nuke grant user:<@user>` grants `/nuke` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/nuke revoke user:<@user>` revokes `/nuke` access for the current server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation grant guild_id:<server-id> user_id:<user-id>` can now remotely activate `/nuke` for another server without you joining that server first. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation revoke guild_id:<server-id> user_id:<user-id>` can now remotely revoke `/nuke` access for another server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
+- `/activation list guild_id:<server-id>` lists the remote `/nuke` activation entries for another server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/nuke` is now default-deny for every server. Until a super admin grants at least one Discord user, regular members cannot use it even if they have `Manage Channels`.
 - Super admins listed in `SUPER_ADMIN_DISCORD_IDS` can always run `/nuke authorized`, `/nuke grant`, and `/nuke revoke` to activate or manage a server.
 - Once a server has granted `/nuke` users, only those granted users plus the configured `SUPER_ADMIN_DISCORD_IDS` can use `/nuke`.
