@@ -105,7 +105,7 @@ Copy `.env.example` to `.env` and fill values.
 - `/sports sync` creates missing sport channels and refreshes the saved channel bindings without republishing.
 - `/sports refresh` clears the managed sport channels and republishes today’s listings on demand.
 - `/sports status` shows activation state, managed category, channel count, and the next scheduled run.
-- `/search query:"Rangers v Celtic"` returns upcoming televised matches from today through the next 7 days, including UK kickoff time, channels, and artwork.
+- `/search query:"Rangers v Celtic"` or `/search query:"New York Rangers"` returns upcoming televised matches from today through the next 7 days, including UK kickoff time, channels, and artwork.
 - `/activation grant guild_id:<server-id> user_id:<user-id>` activates the sports worker for another server without needing to run the command inside that server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/activation revoke guild_id:<server-id> user_id:<user-id>` remotely removes a sports worker activation entry. Only `SUPER_ADMIN_DISCORD_IDS` can use it.
 - `/activation list guild_id:<server-id>` lists the current sports worker activation entries for a server. Only `SUPER_ADMIN_DISCORD_IDS` can use it.

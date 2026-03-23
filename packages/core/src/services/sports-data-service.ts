@@ -654,6 +654,35 @@ export class SportsDataService {
     return [...uniqueResults.values()];
   }
 
+  private async searchSingleTeamScheduleEvents(query: string): Promise<SportsSearchResult[]> {
+    if (parseVersusQuery(query)) {
+      return [];
+    }
+
+    const teamPayload = await this.requestV2<SportsApiV2TeamSearchPayload>({
+      path: `/search/team/${toApiPathSegment(query)}`,
+    });
+    const team = pickBestTeamSearchResult(query, extractTeamSearchRows(teamPayload));
+    const teamId = firstNonEmpty(team?.idTeam);
+
+    if (!team || !teamId) {
+      return [];
+    }
+
+    const schedulePayload = await this.requestV2<SportsApiV2TeamSchedulePayload>({
+      path: `/schedule/full/team/${encodeURIComponent(teamId)}`,
+    });
+
+    const uniqueResults = new Map<string, SportsSearchResult>();
+    for (const result of this.mapTeamScheduleResults(schedulePayload.schedule ?? [])) {
+      if (!uniqueResults.has(result.eventId)) {
+        uniqueResults.set(result.eventId, result);
+      }
+    }
+
+    return [...uniqueResults.values()];
+  }
+
   public async listSupportedSports(): Promise<Result<SportDefinition[], AppError>> {
     try {
       if (this.sportsCache && this.sportsCache.expiresAt > Date.now()) {
@@ -842,27 +871,52 @@ export class SportsDataService {
       const payload = await this.requestV2<SportsApiV2EventSearchPayload>({
         path: `/search/event/${toApiPathSegment(eventSearchQuery)}`,
       });
+
+      const directResults = this.mapSportsSearchResults(extractEventSearchRows(payload));
       const combinedResults = new Map<string, SportsSearchResult>();
-      for (const result of this.mapSportsSearchResults(extractEventSearchRows(payload))) {
-        combinedResults.set(result.eventId, result);
-      }
-
-      const headToHeadResults = await this.searchHeadToHeadEvents(normalizedQuery);
-      for (const result of headToHeadResults) {
-        if (!combinedResults.has(result.eventId)) {
-          combinedResults.set(result.eventId, result);
-        }
-      }
-
-      const results = [...combinedResults.values()]
-        .filter((result) =>
+      for (const result of directResults) {
+        if (
           isWithinSportsSearchWindow({
             dateEvent: result.dateEvent,
             windowStartDate: searchWindowStartDate,
             windowEndDate: searchWindowEndDate,
-          }),
-        )
-        .sort(sortSportsSearchResults);
+          })
+        ) {
+          combinedResults.set(result.eventId, result);
+        }
+      }
+
+      if (parseVersusQuery(normalizedQuery)) {
+        const headToHeadResults = await this.searchHeadToHeadEvents(normalizedQuery);
+        for (const result of headToHeadResults) {
+          if (
+            !combinedResults.has(result.eventId) &&
+            isWithinSportsSearchWindow({
+              dateEvent: result.dateEvent,
+              windowStartDate: searchWindowStartDate,
+              windowEndDate: searchWindowEndDate,
+            })
+          ) {
+            combinedResults.set(result.eventId, result);
+          }
+        }
+      } else if (combinedResults.size === 0) {
+        const teamScheduleResults = await this.searchSingleTeamScheduleEvents(normalizedQuery);
+        for (const result of teamScheduleResults) {
+          if (
+            !combinedResults.has(result.eventId) &&
+            isWithinSportsSearchWindow({
+              dateEvent: result.dateEvent,
+              windowStartDate: searchWindowStartDate,
+              windowEndDate: searchWindowEndDate,
+            })
+          ) {
+            combinedResults.set(result.eventId, result);
+          }
+        }
+      }
+
+      const results = [...combinedResults.values()].sort(sortSportsSearchResults);
 
       this.searchCache.set(cacheKey, {
         expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,

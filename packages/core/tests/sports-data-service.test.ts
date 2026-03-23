@@ -334,6 +334,98 @@ describe('pickBestSportsSearchResult', () => {
     ]);
   });
 
+  it('falls back to a single team schedule for team-name searches with no direct event hits', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-23T10:00:00Z'));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          Message: 'No data found',
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          search: [
+            {
+              idTeam: 134830,
+              strTeam: 'New York Rangers',
+              strTeamShort: 'NY Rangers',
+              strSport: 'Ice Hockey',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          schedule: [
+            {
+              idEvent: 900001,
+              strEvent: 'New York Rangers vs New Jersey Devils',
+              strLeague: 'NHL',
+              strSport: 'Ice Hockey',
+              dateEvent: '2026-03-23',
+              strThumb: 'https://img.test/rangers-devils.jpg',
+            },
+            {
+              idEvent: 900002,
+              strEvent: 'Pittsburgh Penguins vs New York Rangers',
+              strLeague: 'NHL',
+              strSport: 'Ice Hockey',
+              dateEvent: '2026-03-27',
+              strThumb: 'https://img.test/pens-rangers.jpg',
+            },
+            {
+              idEvent: 900003,
+              strEvent: 'Boston Bruins vs New York Rangers',
+              strLeague: 'NHL',
+              strSport: 'Ice Hockey',
+              dateEvent: '2026-03-31',
+              strThumb: 'https://img.test/bruins-rangers.jpg',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new SportsDataService();
+    const result = await service.searchEvents('New York Rangers');
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://example.com/api/v2/json/search/event/new_york_rangers');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://example.com/api/v2/json/search/team/new_york_rangers');
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('https://example.com/api/v2/json/schedule/full/team/134830');
+
+    expect(result.value).toEqual([
+      {
+        eventId: '900001',
+        eventName: 'New York Rangers vs New Jersey Devils',
+        sportName: 'Ice Hockey',
+        leagueName: 'NHL',
+        dateEvent: '2026-03-23',
+        imageUrl: 'https://img.test/rangers-devils.jpg',
+      },
+      {
+        eventId: '900002',
+        eventName: 'Pittsburgh Penguins vs New York Rangers',
+        sportName: 'Ice Hockey',
+        leagueName: 'NHL',
+        dateEvent: '2026-03-27',
+        imageUrl: 'https://img.test/pens-rangers.jpg',
+      },
+    ]);
+  });
+
   it('falls back to team schedules for head-to-head search queries', async () => {
     process.env.SPORTS_API_KEY = 'premium-key';
     process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
