@@ -362,7 +362,7 @@ function WorkspaceOperationsPanel() {
 
   useEffect(() => {
     void loadWorkspaceAccess(true);
-  }, [isLinkedToCurrentTenant, loadWorkspaceAccess, tenantId]);
+  }, [isLinkedToCurrentTenant, tenantId]);
 
   const searchGuildMembers = useEffectEvent(async (query: string) => {
     if (!isLinkedToCurrentTenant || !workspaceAccess?.canManageMembers) {
@@ -433,7 +433,7 @@ function WorkspaceOperationsPanel() {
 
   useEffect(() => {
     void searchGuildMembers(deferredMemberSearch.trim());
-  }, [deferredMemberSearch, guildId, isLinkedToCurrentTenant, searchGuildMembers, tenantId, workspaceAccess?.canManageMembers]);
+  }, [deferredMemberSearch, guildId, isLinkedToCurrentTenant, tenantId, workspaceAccess?.canManageMembers]);
 
   function resetInviteComposer() {
     memberLookupRequestRef.current += 1;
@@ -1503,7 +1503,7 @@ export function CouponsSection() {
     } else {
       setCoupons([]);
     }
-  }, [config?.couponsEnabled, loadCoupons]);
+  }, [config?.couponsEnabled]);
 
   useEffect(() => {
     if (!config?.couponsEnabled && activeCouponsPanel !== 'settings') {
@@ -1913,7 +1913,7 @@ export function PointsSection() {
     if (shouldLoadCustomerPoints({ pointsEnabled: Boolean(config?.pointsEnabled), activePanel: activePointsPanel })) {
       void loadCustomers(deferredSearch.trim());
     }
-  }, [activePointsPanel, config?.pointsEnabled, deferredSearch, loadCustomers]);
+  }, [activePointsPanel, config?.pointsEnabled, deferredSearch]);
 
   async function handleSaveRules() {
     try {
