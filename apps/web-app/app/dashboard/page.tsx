@@ -6,8 +6,14 @@ import { ModeToggle } from '@/components/mode-toggle';
 import { Button } from '@/components/ui/button';
 import { getDashboardSessionData } from '@/lib/dashboard-session';
 
-export default async function DashboardEntryPage() {
+export default async function DashboardEntryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const sessionData = await getDashboardSessionData();
+  const authErrorParam = (await searchParams).authError;
+  const authError = Array.isArray(authErrorParam) ? authErrorParam[0] : authErrorParam;
 
   return (
     <main className="relative min-h-screen overflow-hidden">
@@ -33,6 +39,12 @@ export default async function DashboardEntryPage() {
             <ModeToggle />
           </div>
         </div>
+
+        {authError ? (
+          <div className="rounded-[1.4rem] border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive sm:px-5">
+            {authError}
+          </div>
+        ) : null}
 
         {sessionData ? (
           <DashboardLaunchpad data={sessionData} />

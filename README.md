@@ -117,6 +117,8 @@ Copy `.env.example` to `.env` and fill values.
 - Login endpoint: `GET /api/auth/discord/login`
 - Callback endpoint: `GET /api/auth/discord/callback`
 - Dashboard page: `/dashboard`
+- Discord OAuth callback failures now redirect back to `/dashboard` with a readable error banner instead of dumping raw JSON in the browser.
+- Discord OAuth login now only requires the Discord profile fetch to succeed; temporary guild-list failures no longer block login and the server list reloads after session creation.
 - Dashboard now uses a launchpad flow: login -> choose workspace -> choose Discord server -> open `/dashboard/<tenantId>/<guildId>`.
 - Dashboard loads Discord servers from OAuth (manage-server capable guilds), checks bot installation, and links the selected server to the chosen workspace on entry when needed.
 - A Discord server is now bound to exactly one workspace at a time; reconnecting a server moves it to the current workspace mapping.

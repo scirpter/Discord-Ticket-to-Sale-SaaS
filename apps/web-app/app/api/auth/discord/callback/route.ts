@@ -1,4 +1,4 @@
-import { AuthService } from '@voodoo/core';
+import { AuthService, logger } from '@voodoo/core';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
@@ -29,7 +29,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     if (result.isErr()) {
-      return NextResponse.json({ error: result.error.message }, { status: result.error.statusCode });
+      logger.warn(
+        { code: result.error.code, statusCode: result.error.statusCode },
+        'discord oauth callback failed',
+      );
+
+      const failureUrl = new URL('/dashboard', publicOrigin);
+      failureUrl.searchParams.set('authError', result.error.message);
+      const response = NextResponse.redirect(failureUrl);
+      response.cookies.delete('vd_oauth_state');
+      response.cookies.delete('vd_oauth_redirect_uri');
+      return response;
     }
 
     const response = NextResponse.redirect(new URL('/dashboard', publicOrigin));

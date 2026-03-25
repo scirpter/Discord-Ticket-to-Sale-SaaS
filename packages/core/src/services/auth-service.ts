@@ -4,6 +4,7 @@ import { getEnv } from '../config/env.js';
 import { AppError, fromUnknownError } from '../domain/errors.js';
 import type { OAuthDiscordGuild, OAuthDiscordUser } from '../domain/types.js';
 import { createSessionToken, verifySessionToken, type SessionPayload } from '../security/session-token.js';
+import { logger } from '../infra/logger.js';
 import { TenantRepository } from '../repositories/tenant-repository.js';
 import { UserRepository } from '../repositories/user-repository.js';
 
@@ -158,26 +159,46 @@ export class AuthService {
         return err(new AppError('DISCORD_OAUTH_FAILED', 'Missing access token from Discord', 502));
       }
 
-      const [userRes, guildsRes] = await Promise.all([
-        fetch(`${this.env.DISCORD_API_BASE_URL}/users/@me`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }),
-        fetch(`${this.env.DISCORD_API_BASE_URL}/users/@me/guilds`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }),
-      ]);
+      const userRes = await fetch(`${this.env.DISCORD_API_BASE_URL}/users/@me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
 
-      if (!userRes.ok || !guildsRes.ok) {
+      if (!userRes.ok) {
+        logger.warn(
+          { status: userRes.status },
+          'discord oauth could not fetch user profile during callback',
+        );
         return err(new AppError('DISCORD_OAUTH_PROFILE_FAILED', 'Failed to fetch profile from Discord', 502));
       }
 
       const discordUser = (await userRes.json()) as OAuthDiscordUser;
-      const discordGuilds = (await guildsRes.json()) as OAuthDiscordGuild[];
-      AuthService.writeGuildCache(accessToken, Array.isArray(discordGuilds) ? discordGuilds : []);
+      let discordGuilds: OAuthDiscordGuild[] = [];
+
+      try {
+        const guildsRes = await fetch(`${this.env.DISCORD_API_BASE_URL}/users/@me/guilds`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (guildsRes.ok) {
+          const guildsBody = (await guildsRes.json()) as OAuthDiscordGuild[];
+          discordGuilds = Array.isArray(guildsBody) ? guildsBody : [];
+          AuthService.writeGuildCache(accessToken, discordGuilds);
+        } else {
+          logger.warn(
+            { discordUserId: discordUser.id, status: guildsRes.status },
+            'discord oauth could not fetch guild list during callback',
+          );
+        }
+      } catch (guildsError) {
+        logger.warn(
+          { discordUserId: discordUser.id, err: guildsError },
+          'discord oauth guild list fetch threw during callback',
+        );
+      }
 
       const user = await this.userRepository.upsertDiscordUser({
         discordUserId: discordUser.id,
