@@ -495,7 +495,7 @@ export function SettingsSection() {
             onChange={setActiveSettingsPanel}
           />
 
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-5">
             {activeSettingsPanel === 'default-currency' ? (
               <Panel
                 title={
@@ -1034,7 +1034,7 @@ export function CouponsSection() {
             onChange={setActiveCouponsPanel}
           />
 
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-5">
             {activeCouponsPanel === 'settings' ? (
               <>
                 <Panel
@@ -1105,14 +1105,14 @@ export function CouponsSection() {
                     <span>Coupon active</span>
                   </label>
 
-                  <div className="grid gap-4 xl:grid-cols-3">
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-3">
                     <div className="space-y-3">
                       <p className="text-sm font-semibold">Categories</p>
                       {categories.length ? (
                         categories.map((category) => (
                           <label
                             key={category.name}
-                            className="flex items-center gap-3 rounded-[1.05rem] border border-border/70 bg-background/70 px-3 py-3 text-sm"
+                            className="flex min-w-0 items-center gap-3 rounded-[1.05rem] border border-border/70 bg-background/70 px-3 py-3 text-sm"
                           >
                             <Checkbox
                               checked={allowedCategories.includes(category.name)}
@@ -1124,7 +1124,7 @@ export function CouponsSection() {
                                 )
                               }
                             />
-                            <span className="truncate">{category.name}</span>
+                            <span className="min-w-0 flex-1 truncate">{category.name}</span>
                           </label>
                         ))
                       ) : (
@@ -1138,7 +1138,7 @@ export function CouponsSection() {
                         products.map((product) => (
                           <label
                             key={product.id}
-                            className="flex items-center gap-3 rounded-[1.05rem] border border-border/70 bg-background/70 px-3 py-3 text-sm"
+                            className="flex min-w-0 items-center gap-3 rounded-[1.05rem] border border-border/70 bg-background/70 px-3 py-3 text-sm"
                           >
                             <Checkbox
                               checked={allowedProductIds.includes(product.id)}
@@ -1150,7 +1150,7 @@ export function CouponsSection() {
                                 )
                               }
                             />
-                            <span className="truncate">
+                            <span className="min-w-0 flex-1 truncate">
                               {product.name} <span className="text-muted-foreground">({product.category})</span>
                             </span>
                           </label>
@@ -1167,7 +1167,7 @@ export function CouponsSection() {
                           product.variants.map((variant) => (
                             <label
                               key={variant.id}
-                              className="flex items-center gap-3 rounded-[1.05rem] border border-border/70 bg-background/70 px-3 py-3 text-sm"
+                              className="flex min-w-0 items-center gap-3 rounded-[1.05rem] border border-border/70 bg-background/70 px-3 py-3 text-sm"
                             >
                               <Checkbox
                                 checked={allowedVariantIds.includes(variant.id)}
@@ -1179,7 +1179,7 @@ export function CouponsSection() {
                                   )
                                 }
                               />
-                              <span className="truncate">
+                              <span className="min-w-0 flex-1 truncate">
                                 {product.name}: {variant.label}
                               </span>
                             </label>
@@ -1391,7 +1391,7 @@ export function PointsSection() {
       <DashboardSetupState />
 
       {isLinkedToCurrentTenant ? (
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <Panel
             title={
               <span className="flex items-center gap-2">
@@ -1426,7 +1426,7 @@ export function PointsSection() {
                 onChange={setActivePointsPanel}
               />
 
-              <div className="space-y-5">
+              <div className="min-w-0 space-y-5">
                 {activePointsPanel === 'reward-settings' ? (
                   <Panel
                     title={

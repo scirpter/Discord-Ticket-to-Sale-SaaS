@@ -56,7 +56,7 @@ export function DashboardShell({
         <div className="grid min-h-[calc(100vh-2rem)] gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
           <aside
             className={cn(
-              'rounded-[2rem] border border-border/70 bg-card/85 p-4 shadow-[0_24px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur',
+              'relative z-20 rounded-[2rem] border border-border/70 bg-card/85 p-4 shadow-[0_24px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur lg:sticky lg:top-4 lg:self-start',
               mobileOpen ? 'block' : 'hidden lg:block',
             )}
           >
@@ -141,7 +141,7 @@ export function DashboardShell({
             </div>
           </aside>
 
-          <div className="min-w-0 rounded-[2rem] border border-border/70 bg-card/65 p-4 shadow-[0_24px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur sm:p-5">
+          <div className="relative z-0 min-w-0 rounded-[2rem] border border-border/70 bg-card/65 p-4 shadow-[0_24px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur sm:p-5">
             <header className="mb-5 flex flex-col gap-4 rounded-[1.65rem] border border-border/70 bg-background/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">

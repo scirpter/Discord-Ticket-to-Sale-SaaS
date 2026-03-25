@@ -80,7 +80,7 @@ export function SectionShell({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-5">
+    <section className="min-w-0 space-y-5">
       <div className="flex flex-col gap-4 rounded-[1.75rem] border border-border/70 bg-card/80 px-5 py-5 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.5)] backdrop-blur sm:px-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-2">
@@ -154,7 +154,7 @@ export function SectionMenu<T extends string>({
   onChange: (id: T) => void;
 }) {
   return (
-    <aside className="rounded-[1.6rem] border border-border/70 bg-card/85 p-4 shadow-[0_18px_50px_-28px_rgba(0,0,0,0.55)] backdrop-blur">
+    <aside className="min-w-0 rounded-[1.6rem] border border-border/70 bg-card/85 p-4 shadow-[0_18px_50px_-28px_rgba(0,0,0,0.55)] backdrop-blur">
       <div className="space-y-1 border-b border-border/70 pb-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{title}</p>
         <p className="text-sm text-muted-foreground">
@@ -211,7 +211,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        'rounded-[1.6rem] border border-border/70 bg-card/85 p-5 shadow-[0_18px_50px_-28px_rgba(0,0,0,0.55)] backdrop-blur',
+        'min-w-0 rounded-[1.6rem] border border-border/70 bg-card/85 p-5 shadow-[0_18px_50px_-28px_rgba(0,0,0,0.55)] backdrop-blur',
         className,
       )}
     >
