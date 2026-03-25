@@ -15,7 +15,7 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react';
-import { useDeferredValue, useEffect, useEffectEvent, useState } from 'react';
+import { useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
 
 import { createEmptyIntegration, useDashboardContext } from '@/components/dashboard/dashboard-provider';
 import {
@@ -52,6 +52,11 @@ import {
   parseWholePoints,
   previewReferralRewardPoints,
 } from '@/lib/dashboard-format';
+import {
+  shouldLoadCustomerPoints,
+  shouldShowCustomerPointsLoading,
+  type PointsPanelId,
+} from '@/lib/dashboard-points';
 import type {
   CouponRecord,
   PointsCustomerRecord,
@@ -1278,8 +1283,7 @@ export function PointsSection() {
   const [pointValueMajor, setPointValueMajor] = useState(DEFAULT_POINT_VALUE_MAJOR);
   const [earnCategories, setEarnCategories] = useState<string[]>([]);
   const [redeemCategories, setRedeemCategories] = useState<string[]>([]);
-  const [activePointsPanel, setActivePointsPanel] =
-    useState<(typeof pointsMenuItems)[number]['id']>('reward-settings');
+  const [activePointsPanel, setActivePointsPanel] = useState<PointsPanelId>('reward-settings');
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [customers, setCustomers] = useState<PointsCustomerRecord[]>([]);
@@ -1287,6 +1291,7 @@ export function PointsSection() {
   const [adjustEmail, setAdjustEmail] = useState('');
   const [adjustAction, setAdjustAction] = useState<'add' | 'set' | 'clear'>('add');
   const [adjustPoints, setAdjustPoints] = useState('');
+  const latestCustomerRequestId = useRef(0);
 
   useEffect(() => {
     if (!config) {
@@ -1304,26 +1309,41 @@ export function PointsSection() {
       return;
     }
 
+    const requestId = latestCustomerRequestId.current + 1;
+    latestCustomerRequestId.current = requestId;
+
     setLoadingCustomers(true);
     try {
       const response = await dashboardApi<{ customers: PointsCustomerRecord[] }>(
         `/api/guilds/${encodeURIComponent(guildId)}/points/customers?tenantId=${encodeURIComponent(tenantId)}&search=${encodeURIComponent(searchTerm)}`,
       );
-      setCustomers(response.customers);
+      if (requestId === latestCustomerRequestId.current) {
+        setCustomers(response.customers);
+      }
     } catch (loadError) {
-      showFlash('error', getMessage(loadError, 'Failed to load customer points.'));
+      if (requestId === latestCustomerRequestId.current) {
+        showFlash('error', getMessage(loadError, 'Failed to load customer points.'));
+      }
     } finally {
-      setLoadingCustomers(false);
+      if (requestId === latestCustomerRequestId.current) {
+        setLoadingCustomers(false);
+      }
     }
   });
 
   useEffect(() => {
-    if (config?.pointsEnabled) {
-      void loadCustomers(deferredSearch.trim());
-    } else {
+    if (!config?.pointsEnabled) {
       setCustomers([]);
+      setLoadingCustomers(false);
+      latestCustomerRequestId.current += 1;
     }
-  }, [config?.pointsEnabled, deferredSearch, loadCustomers]);
+  }, [config?.pointsEnabled]);
+
+  useEffect(() => {
+    if (shouldLoadCustomerPoints({ pointsEnabled: Boolean(config?.pointsEnabled), activePanel: activePointsPanel })) {
+      void loadCustomers(deferredSearch.trim());
+    }
+  }, [activePointsPanel, config?.pointsEnabled, deferredSearch, loadCustomers]);
 
   async function handleSaveRules() {
     try {
@@ -1567,7 +1587,10 @@ export function PointsSection() {
                             onChange={(event) => setSearch(event.target.value)}
                             placeholder="customer@example.com"
                           />
-                          {loadingCustomers ? (
+                          {shouldShowCustomerPointsLoading({
+                            loadingCustomers,
+                            customerCount: customers.length,
+                          }) ? (
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Loader2 className="size-4 animate-spin" />
                               Loading balances...
