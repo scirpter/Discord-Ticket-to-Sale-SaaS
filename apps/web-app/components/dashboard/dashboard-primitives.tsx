@@ -167,26 +167,27 @@ export function SectionMenu<T extends string>({
           const active = item.id === activeId;
 
           return (
-            <div
-              key={item.id}
-              className={cn(
-                'flex min-h-12 items-start justify-between gap-3 rounded-[1.2rem] border px-4 py-3 transition',
-                active
-                  ? 'border-primary/45 bg-primary/10 shadow-[0_14px_34px_-24px_rgba(56,189,248,0.8)]'
-                  : 'border-border/70 bg-background/70 hover:border-primary/25 hover:bg-background/85',
-              )}
-            >
+            <div key={item.id} className="relative">
               <button
                 type="button"
                 onClick={() => onChange(item.id)}
-                className="min-w-0 flex-1 text-left"
+                className={cn(
+                  'flex min-h-12 w-full flex-col items-start rounded-[1.2rem] border px-4 py-3 pr-14 text-left transition',
+                  active
+                    ? 'border-primary/45 bg-primary/10 shadow-[0_14px_34px_-24px_rgba(56,189,248,0.8)]'
+                    : 'border-border/70 bg-background/70 hover:border-primary/25 hover:bg-background/85',
+                )}
               >
                 <span className="block font-medium text-foreground">{item.label}</span>
                 {item.description ? (
                   <span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.description}</span>
                 ) : null}
               </button>
-              {item.info ? <InfoButton label={item.info} /> : null}
+              {item.info ? (
+                <div className="absolute top-3 right-4">
+                  <InfoButton label={item.info} />
+                </div>
+              ) : null}
             </div>
           );
         })}

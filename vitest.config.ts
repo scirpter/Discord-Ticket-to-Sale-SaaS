@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@': fileURLToPath(new URL('./apps/web-app', import.meta.url)),
       '@voodoo/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
     },
   },
