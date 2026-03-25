@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { dashboardApi } from '@/lib/dashboard-api';
+import { getCouponMenuItems, type CouponPanelId } from '@/lib/dashboard-coupon-menu';
 import {
   DEFAULT_CURRENCY,
   DEFAULT_POINT_VALUE_MAJOR,
@@ -891,6 +892,7 @@ export function PaymentsSection() {
 export function CouponsSection() {
   const { actionPending, categories, config, guildId, isLinkedToCurrentTenant, products, saveConfig, showFlash, tenantId } =
     useDashboardContext();
+  const [activeCouponsPanel, setActiveCouponsPanel] = useState<CouponPanelId>('settings');
   const [loadingCoupons, setLoadingCoupons] = useState(false);
   const [coupons, setCoupons] = useState<CouponRecord[]>([]);
   const [editingCouponId, setEditingCouponId] = useState<string | null>(null);
@@ -927,6 +929,12 @@ export function CouponsSection() {
       setCoupons([]);
     }
   }, [config?.couponsEnabled, loadCoupons]);
+
+  useEffect(() => {
+    if (!config?.couponsEnabled && activeCouponsPanel !== 'settings') {
+      setActiveCouponsPanel('settings');
+    }
+  }, [activeCouponsPanel, config?.couponsEnabled]);
 
   function resetCouponForm() {
     setEditingCouponId(null);
@@ -965,6 +973,7 @@ export function CouponsSection() {
       }
 
       resetCouponForm();
+      setActiveCouponsPanel('saved-coupons');
       await loadCoupons();
     } catch (saveError) {
       showFlash('error', getMessage(saveError, 'Failed to save coupon.'));
@@ -985,6 +994,7 @@ export function CouponsSection() {
   }
 
   function editCoupon(coupon: CouponRecord) {
+    setActiveCouponsPanel('create-coupon');
     setEditingCouponId(coupon.id);
     setCouponCode(coupon.code);
     setDiscountMajor(formatMinorToMajor(coupon.discountMinor));
@@ -1016,26 +1026,49 @@ export function CouponsSection() {
       <DashboardSetupState />
 
       {isLinkedToCurrentTenant ? (
-        <div className="space-y-5">
-          <Panel title="Feature toggle" description="Turn the coupon system off to hide coupon actions and block coupon usage.">
-            <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border/70 bg-background/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-medium">Enable coupons</p>
-                <p className="text-sm text-muted-foreground">
-                  Disabled coupons will no longer be accepted in checkout flows.
-                </p>
-              </div>
-              <FeatureToggle
-                checked={Boolean(config?.couponsEnabled)}
-                label="Enable coupons"
-                disabled={actionPending}
-                onChange={(checked) => void saveConfig({ couponsEnabled: checked })}
-              />
-            </div>
-          </Panel>
+        <div className="grid gap-5 xl:grid-cols-[17rem_minmax(0,1fr)]">
+          <SectionMenu
+            title="Coupons Menu"
+            items={getCouponMenuItems(Boolean(config?.couponsEnabled))}
+            activeId={activeCouponsPanel}
+            onChange={setActiveCouponsPanel}
+          />
 
-          {config?.couponsEnabled ? (
-            <>
+          <div className="space-y-5">
+            {activeCouponsPanel === 'settings' ? (
+              <>
+                <Panel
+                  title={
+                    <span className="flex items-center gap-2">
+                      Feature toggle
+                      <InfoButton label="Turn coupons off to hide the create and management views and block coupon usage in checkout." />
+                    </span>
+                  }
+                  description="Turn the coupon system off to hide coupon actions and block coupon usage."
+                >
+                  <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border/70 bg-background/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-medium">Enable coupons</p>
+                      <p className="text-sm text-muted-foreground">
+                        Disabled coupons will no longer be accepted in checkout flows.
+                      </p>
+                    </div>
+                    <FeatureToggle
+                      checked={Boolean(config?.couponsEnabled)}
+                      label="Enable coupons"
+                      disabled={actionPending}
+                      onChange={(checked) => void saveConfig({ couponsEnabled: checked })}
+                    />
+                  </div>
+                </Panel>
+
+                {!config?.couponsEnabled ? (
+                  <InfoTip>Coupons are currently disabled. Turn the feature on to reveal the create and manage steps.</InfoTip>
+                ) : null}
+              </>
+            ) : null}
+
+            {config?.couponsEnabled && activeCouponsPanel === 'create-coupon' ? (
               <Panel
                 title={
                   <span className="flex items-center gap-2">
@@ -1176,16 +1209,24 @@ export function CouponsSection() {
                   </div>
                 </div>
               </Panel>
+            ) : null}
 
+            {config?.couponsEnabled && activeCouponsPanel === 'saved-coupons' ? (
               <Panel title="Saved coupons" description="Existing discount codes for this Discord server.">
                 {coupons.length ? (
                   <div className="space-y-3">
                     {coupons.map((coupon) => (
                       (() => {
                         const scopeParts = [
-                          coupon.allowedCategories.length ? `${coupon.allowedCategories.length} categor${coupon.allowedCategories.length === 1 ? 'y' : 'ies'}` : null,
-                          coupon.allowedProductIds.length ? `${coupon.allowedProductIds.length} product${coupon.allowedProductIds.length === 1 ? '' : 's'}` : null,
-                          coupon.allowedVariantIds.length ? `${coupon.allowedVariantIds.length} variation${coupon.allowedVariantIds.length === 1 ? '' : 's'}` : null,
+                          coupon.allowedCategories.length
+                            ? `${coupon.allowedCategories.length} categor${coupon.allowedCategories.length === 1 ? 'y' : 'ies'}`
+                            : null,
+                          coupon.allowedProductIds.length
+                            ? `${coupon.allowedProductIds.length} product${coupon.allowedProductIds.length === 1 ? '' : 's'}`
+                            : null,
+                          coupon.allowedVariantIds.length
+                            ? `${coupon.allowedVariantIds.length} variation${coupon.allowedVariantIds.length === 1 ? '' : 's'}`
+                            : null,
                         ].filter((value): value is string => Boolean(value));
 
                         return (
@@ -1200,7 +1241,9 @@ export function CouponsSection() {
                                 <Badge variant="outline">{coupon.active ? 'Active' : 'Inactive'}</Badge>
                               </div>
                               <p className="mt-1 text-sm text-muted-foreground">
-                                {scopeParts.length ? `Scoped to ${scopeParts.join(', ')}.` : 'Applies to all categories and products.'}
+                                {scopeParts.length
+                                  ? `Scoped to ${scopeParts.join(', ')}.`
+                                  : 'Applies to all categories and products.'}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -1221,10 +1264,8 @@ export function CouponsSection() {
                   <p className="text-sm text-muted-foreground">No coupons have been created yet.</p>
                 )}
               </Panel>
-            </>
-          ) : (
-            <InfoTip>Coupons are currently disabled. Turn the feature on to create and manage discount codes.</InfoTip>
-          )}
+            ) : null}
+          </div>
         </div>
       ) : null}
     </SectionShell>

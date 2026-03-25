@@ -8,7 +8,8 @@
 
 ## Coupon Management
 
-- Expand the **Coupons** panel.
+- Open the **Coupons** page from the dashboard sidebar.
+- Use the internal `Coupon Settings`, `Create Coupon`, and `View Coupons` steps to switch between enabling the feature, building a coupon, and managing saved coupons.
 - Create coupon:
   - `Code` (e.g. `SAVE10`).
   - `Discount Amount (GBP)` (fixed amount).

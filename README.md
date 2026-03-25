@@ -125,6 +125,7 @@ Copy `.env.example` to `.env` and fill values.
 - Settings now uses an internal sidebar flow for default currency, staff roles, paid-log channel, and Telegram integration, including add/copy/regenerate Telegram actions when the Telegram feature is enabled.
 - Payments now separates the Voodoo Pay wallet, checkout domain, callback secret rotation, and hosted crypto wallet controls into a dedicated page.
 - Coupons, points, referrals, and Telegram now use persisted feature toggles in `guild_configs`; when disabled, the UI hides those controls and the backend rejects the related actions.
+- Coupons now uses an internal step menu for `Coupon Settings`, `Create Coupon`, and `View Coupons` so coupon creation and deletion are separate, obvious actions.
 - Product management now lives in a dedicated catalog page with an internal sidebar for `Categories & Questions` and `Products`, plus category selection in the product builder.
 - Dashboard now includes a Telegram group link command generator for the selected workspace + Discord server.
 - Telegram groups reuse the selected Discord server store configuration instead of duplicating catalog, coupon, points, or integration data.
