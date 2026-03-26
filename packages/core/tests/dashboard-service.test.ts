@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ok } from 'neverthrow';
 
-import type { PaidOrderRecord } from '../src/repositories/order-repository.js';
+import type { PaidOrderRecord, PaidOrderWithSessionRecord } from '../src/repositories/order-repository.js';
 import type { GuildConfigRecord } from '../src/repositories/tenant-repository.js';
 import type { SessionPayload } from '../src/security/session-token.js';
 import { DashboardService } from '../src/services/dashboard-service.js';
@@ -68,6 +68,34 @@ function makePaidOrder(overrides: Partial<PaidOrderRecord> = {}): PaidOrderRecor
     paidAt: new Date('2026-03-25T00:30:00.000Z'),
     createdAt: new Date('2026-03-25T00:35:00.000Z'),
     updatedAt: new Date('2026-03-25T00:35:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makePaidOrderWithSession(
+  overrides: Partial<PaidOrderWithSessionRecord> = {},
+): PaidOrderWithSessionRecord {
+  return {
+    ...makePaidOrder(overrides),
+    ticketChannelId: 'discord:channel:ticket-1',
+    customerDiscordId: 'discord:user:customer-1',
+    productId: 'product-1',
+    variantId: 'variant-1',
+    customerEmailNormalized: 'customer@example.com',
+    answers: {
+      email: 'customer@example.com',
+    },
+    basketItems: [
+      {
+        productId: 'product-1',
+        productName: 'Starter Package',
+        category: 'Boosting',
+        variantId: 'variant-1',
+        variantLabel: 'Gold Plan',
+        priceMinor: 1200,
+        currency: 'GBP',
+      },
+    ],
     ...overrides,
   };
 }
@@ -260,5 +288,115 @@ describe('dashboard service', () => {
     expect(result.value.telegramEnabled).toBe(false);
     expect(result.value.telegramLinked).toBe(false);
     expect(result.value.recentSales).toEqual([]);
+  });
+
+  it('lists filtered sales and supports txid, email, and local-date search terms', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-26T12:00:00.000Z'));
+
+    const service = new DashboardService();
+
+    vi.spyOn((service as any).authorizationService, 'ensureTenantRole').mockResolvedValue(ok(undefined));
+    vi.spyOn((service as any).authorizationService, 'ensureGuildBoundToTenant').mockResolvedValue(ok(undefined));
+    vi.spyOn((service as any).tenantRepository, 'getGuildConfig').mockResolvedValue(makeGuildConfig());
+    vi.spyOn((service as any).orderRepository, 'listPaidOrdersWithSessionsByGuild').mockResolvedValue([
+      makePaidOrderWithSession({
+        id: 'paid-order-1',
+        orderSessionId: 'session-1',
+        priceMinor: 1200,
+        currency: 'USD',
+        paymentReference: 'tx-123',
+        paidAt: new Date('2026-03-26T09:15:00.000Z'),
+      }),
+      makePaidOrderWithSession({
+        id: 'paid-order-2',
+        orderSessionId: 'session-2',
+        paymentReference: 'tx-999',
+        customerEmailNormalized: 'other@example.com',
+        answers: {
+          email: 'other@example.com',
+        },
+        paidAt: new Date('2026-03-18T09:15:00.000Z'),
+      }),
+    ]);
+
+    const txidResult = await service.listGuildSales(makeSession(), {
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      timeZone: 'Europe/Berlin',
+      range: 'week',
+      search: 'tx-123',
+    });
+
+    expect(txidResult.isOk()).toBe(true);
+    if (txidResult.isErr()) {
+      return;
+    }
+
+    expect(txidResult.value.totalSalesCount).toBe(1);
+    expect(txidResult.value.totalSalesMinor).toBe(1200);
+    expect(txidResult.value.sales[0]).toMatchObject({
+      paymentReference: 'tx-123',
+      customerEmail: 'customer@example.com',
+      productName: 'Starter Package',
+      variantLabel: 'Gold Plan',
+      paidDateKey: '2026-03-26',
+    });
+
+    const emailResult = await service.listGuildSales(makeSession(), {
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      timeZone: 'Europe/Berlin',
+      range: 'all',
+      search: 'customer@example.com',
+    });
+
+    expect(emailResult.isOk()).toBe(true);
+    if (emailResult.isErr()) {
+      return;
+    }
+
+    expect(emailResult.value.totalSalesCount).toBe(1);
+    expect(emailResult.value.sales[0]?.orderSessionId).toBe('session-1');
+
+    const dateResult = await service.listGuildSales(makeSession(), {
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      timeZone: 'Europe/Berlin',
+      range: 'all',
+      search: '2026-03-26',
+    });
+
+    expect(dateResult.isOk()).toBe(true);
+    if (dateResult.isErr()) {
+      return;
+    }
+
+    expect(dateResult.value.totalSalesCount).toBe(1);
+    expect(dateResult.value.sales[0]?.paidDateKey).toBe('2026-03-26');
+  });
+
+  it('rejects invalid custom sales ranges', async () => {
+    const service = new DashboardService();
+
+    vi.spyOn((service as any).authorizationService, 'ensureTenantRole').mockResolvedValue(ok(undefined));
+    vi.spyOn((service as any).authorizationService, 'ensureGuildBoundToTenant').mockResolvedValue(ok(undefined));
+    vi.spyOn((service as any).tenantRepository, 'getGuildConfig').mockResolvedValue(makeGuildConfig());
+
+    const result = await service.listGuildSales(makeSession(), {
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      range: 'custom',
+      fromDate: '2026-03-28',
+      toDate: '2026-03-20',
+    });
+
+    expect(result.isErr()).toBe(true);
+    if (result.isOk()) {
+      return;
+    }
+
+    expect(result.error.code).toBe('INVALID_SALES_FILTER');
+    expect(result.error.statusCode).toBe(400);
   });
 });

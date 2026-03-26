@@ -201,6 +201,37 @@ export type DashboardOverview = {
   }>;
 };
 
+export type DashboardSaleFilterRange = 'all' | 'day' | 'week' | 'month' | 'custom';
+
+export type DashboardSaleRecord = {
+  id: string;
+  orderSessionId: string;
+  priceMinor: number;
+  currency: string;
+  status: string;
+  fulfillmentStatus: 'needs_action' | 'fulfilled';
+  paymentReference: string | null;
+  paidAt: string;
+  paidDateKey: string;
+  customerEmail: string | null;
+  ticketChannelId: string | null;
+  productId: string | null;
+  productName: string | null;
+  variantId: string | null;
+  variantLabel: string | null;
+};
+
+export type DashboardSalesResponse = {
+  timezone: string;
+  range: DashboardSaleFilterRange;
+  fromDate: string | null;
+  toDate: string | null;
+  search: string;
+  totalSalesMinor: number;
+  totalSalesCount: number;
+  sales: DashboardSaleRecord[];
+};
+
 export type WorkspaceMemberRecord = {
   userId: string;
   discordUserId: string;

@@ -62,6 +62,8 @@ import {
 } from '@/lib/dashboard-points';
 import type {
   CouponRecord,
+  DashboardSaleFilterRange,
+  DashboardSalesResponse,
   PointsCustomerRecord,
   PriceOptionDraft,
   ProductRecord,
@@ -142,6 +144,18 @@ const pointsMenuItems = [
     info: 'This is the admin control center for manual balance management.',
   },
 ] as const;
+
+const salesRangeOptions: Array<{
+  id: DashboardSaleFilterRange;
+  label: string;
+  description: string;
+}> = [
+  { id: 'all', label: 'All', description: 'See every paid sale for this server.' },
+  { id: 'day', label: 'Day', description: 'Only show today’s paid sales.' },
+  { id: 'week', label: 'Week', description: 'Review the last 7 days of sales.' },
+  { id: 'month', label: 'Month', description: 'Review the last 30 days of sales.' },
+  { id: 'custom', label: 'Custom', description: 'Choose an exact date window.' },
+];
 
 const productsMenuItems = [
   {
@@ -872,7 +886,9 @@ function WorkspaceOperationsPanel() {
 }
 
 export function OverviewSection() {
-  const { overview, resources, refreshing, refreshBase, isLinkedToCurrentTenant } = useDashboardContext();
+  const { config, guildId, overview, resources, refreshing, refreshBase, isLinkedToCurrentTenant, tenantId } =
+    useDashboardContext();
+  const displayCurrency = config?.defaultCurrency || DEFAULT_CURRENCY;
 
   return (
     <SectionShell
@@ -940,7 +956,7 @@ export function OverviewSection() {
             <OverviewStat icon={Sparkles} title="Today’s Sales">
               <div className="space-y-2">
                 <p className="font-[family-name:var(--font-display)] text-3xl tracking-tight">
-                  {formatCurrencyMinor(overview?.todaySalesMinor ?? 0)}
+                  {formatCurrencyMinor(overview?.todaySalesMinor ?? 0, displayCurrency)}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {overview?.todaySalesCount ?? 0} paid sale{overview?.todaySalesCount === 1 ? '' : 's'} today
@@ -949,7 +965,15 @@ export function OverviewSection() {
             </OverviewStat>
           </div>
 
-          <Panel title="Recent sales" description="Latest successful payments captured for this server.">
+          <Panel
+            title="Recent sales"
+            description="Latest successful payments captured for this server."
+            action={
+              <Button asChild variant="outline" size="sm" className="min-h-10">
+                <a href={`/dashboard/${tenantId}/${guildId}/sales`}>View all sales</a>
+              </Button>
+            }
+          >
             {overview?.recentSales.length ? (
               <div className="space-y-3">
                 {overview.recentSales.map((sale) => (
@@ -983,6 +1007,255 @@ export function OverviewSection() {
           </Panel>
 
           <WorkspaceOperationsPanel />
+        </div>
+      ) : null}
+    </SectionShell>
+  );
+}
+
+export function SalesSection() {
+  const { config, guildId, isLinkedToCurrentTenant, tenantId } = useDashboardContext();
+  const displayCurrency = config?.defaultCurrency || DEFAULT_CURRENCY;
+  const [range, setRange] = useState<DashboardSaleFilterRange>('all');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
+  const [salesData, setSalesData] = useState<DashboardSalesResponse | null>(null);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesError, setSalesError] = useState('');
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const loadSales = useEffectEvent(async () => {
+    if (!isLinkedToCurrentTenant) {
+      setSalesData(null);
+      setSalesError('');
+      setSalesLoading(false);
+      return;
+    }
+
+    if (range === 'custom' && (!fromDate || !toDate)) {
+      setSalesData(null);
+      setSalesError('Choose both a start date and an end date to load a custom sales range.');
+      setSalesLoading(false);
+      return;
+    }
+
+    setSalesLoading(true);
+    setSalesError('');
+
+    try {
+      const params = new URLSearchParams({
+        tenantId,
+        range,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+
+      if (range === 'custom') {
+        params.set('fromDate', fromDate);
+        params.set('toDate', toDate);
+      }
+
+      if (deferredSearch) {
+        params.set('search', deferredSearch);
+      }
+
+      const response = await dashboardApi<{ sales: DashboardSalesResponse }>(
+        `/api/guilds/${encodeURIComponent(guildId)}/sales?${params.toString()}`,
+      );
+      setSalesData(response.sales);
+    } catch (error) {
+      setSalesData(null);
+      setSalesError(getMessage(error, 'Failed to load sales.'));
+    } finally {
+      setSalesLoading(false);
+    }
+  });
+
+  useEffect(() => {
+    void loadSales();
+  }, [deferredSearch, fromDate, guildId, isLinkedToCurrentTenant, range, refreshTick, tenantId, toDate]);
+
+  return (
+    <SectionShell
+      eyebrow="Sales"
+      title="Sales history"
+      description="Review every paid order with date filters, custom ranges, and direct search across customer email, date, or TXID."
+      action={
+        <Button type="button" variant="outline" className="min-h-11" onClick={() => setRefreshTick((current) => current + 1)}>
+          {salesLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
+          Refresh
+        </Button>
+      }
+    >
+      <FlashBanner />
+      <DashboardSetupState />
+
+      {isLinkedToCurrentTenant ? (
+        <div className="space-y-5">
+          <Panel
+            title="Browse paid sales"
+            description="Switch between quick time windows, choose an exact date range, or search directly for a customer email, date, or transaction reference."
+          >
+            <div className="space-y-5">
+              <div className="flex flex-wrap gap-2">
+                {salesRangeOptions.map((option) => (
+                  <Button
+                    key={option.id}
+                    type="button"
+                    size="sm"
+                    variant={range === option.id ? 'default' : 'outline'}
+                    className="min-h-10"
+                    onClick={() => setRange(option.id)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(14rem,0.45fr)_minmax(14rem,0.45fr)]">
+                <div className="space-y-2">
+                  <Label htmlFor="sales-search">Search</Label>
+                  <Input
+                    id="sales-search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search by YYYY-MM-DD, customer email, or TXID"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sales-from-date">From date</Label>
+                  <Input
+                    id="sales-from-date"
+                    type="date"
+                    value={fromDate}
+                    onChange={(event) => setFromDate(event.target.value)}
+                    disabled={range !== 'custom'}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sales-to-date">To date</Label>
+                  <Input
+                    id="sales-to-date"
+                    type="date"
+                    value={toDate}
+                    onChange={(event) => setToDate(event.target.value)}
+                    disabled={range !== 'custom'}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                {salesRangeOptions.map((option) => (
+                  <div
+                    key={option.id}
+                    className={cn(
+                      'rounded-[1.15rem] border px-4 py-4',
+                      range === option.id
+                        ? 'border-primary/35 bg-primary/10'
+                        : 'border-border/70 bg-background/70',
+                    )}
+                  >
+                    <p className="font-medium">{option.label}</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{option.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Panel>
+
+          {salesError ? <InfoTip>{salesError}</InfoTip> : null}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <OverviewStat icon={Sparkles} title="Matched sales">
+              <div className="space-y-2">
+                <p className="font-[family-name:var(--font-display)] text-3xl tracking-tight">
+                  {salesLoading ? '...' : salesData?.totalSalesCount ?? 0}
+                </p>
+                <p className="text-sm text-muted-foreground">Paid orders matching the current filters.</p>
+              </div>
+            </OverviewStat>
+            <OverviewStat icon={CreditCard} title="Matched value">
+              <div className="space-y-2">
+                <p className="font-[family-name:var(--font-display)] text-3xl tracking-tight">
+                  {salesLoading
+                    ? '...'
+                    : formatCurrencyMinor(salesData?.totalSalesMinor ?? 0, displayCurrency)}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Displayed in the current server currency for quick comparison.
+                </p>
+              </div>
+            </OverviewStat>
+          </div>
+
+          <Panel title="All matched sales" description="Paid orders are listed newest first.">
+            {salesLoading ? (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading sales...
+              </div>
+            ) : salesData?.sales.length ? (
+              <div className="space-y-3">
+                {salesData.sales.map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="grid gap-4 rounded-[1.2rem] border border-border/70 bg-background/70 px-4 py-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_auto]"
+                  >
+                    <div className="min-w-0 space-y-3">
+                      <div>
+                        <p className="truncate font-medium">
+                          {sale.customerEmail ?? 'Customer email unavailable'}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {(sale.productName ?? sale.productId ?? 'Unknown product')} /{' '}
+                          {(sale.variantLabel ?? sale.variantId ?? 'Unknown variation')}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <Badge variant="outline">{sale.fulfillmentStatus}</Badge>
+                        <Badge variant="outline">{sale.status}</Badge>
+                        <Badge variant="outline">Date {sale.paidDateKey}</Badge>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 text-sm">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Paid at
+                        </p>
+                        <p className="mt-1">
+                          {new Date(sale.paidAt).toLocaleString([], {
+                            dateStyle: 'medium',
+                            timeStyle: 'short',
+                          })}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          TXID / payment ref
+                        </p>
+                        <p className="mt-1 break-all text-muted-foreground">
+                          {sale.paymentReference ?? 'Unavailable'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-start gap-3 xl:items-end">
+                      <span className="text-lg font-semibold">
+                        {formatCurrencyMinor(sale.priceMinor, sale.currency)}
+                      </span>
+                      <p className="text-xs text-muted-foreground">Session {sale.orderSessionId}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No paid sales matched the current filter and search combination.
+              </p>
+            )}
+          </Panel>
         </div>
       ) : null}
     </SectionShell>
@@ -1814,7 +2087,12 @@ export function CouponsSection() {
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <p className="font-semibold">{coupon.code}</p>
-                                <Badge variant="outline">{formatCurrencyMinor(coupon.discountMinor)}</Badge>
+                                <Badge variant="outline">
+                                  {formatCurrencyMinor(
+                                    coupon.discountMinor,
+                                    config?.defaultCurrency || DEFAULT_CURRENCY,
+                                  )}
+                                </Badge>
                                 <Badge variant="outline">{coupon.active ? 'Active' : 'Inactive'}</Badge>
                               </div>
                               <p className="mt-1 text-sm text-muted-foreground">
@@ -2519,18 +2797,19 @@ function questionDraftsFromProduct(product: ProductRecord | null): QuestionDraft
   );
 }
 
-function blankVariant(): PriceOptionDraft {
+function blankVariant(currency = DEFAULT_CURRENCY): PriceOptionDraft {
   return {
     label: '',
     priceMajor: '',
     referralRewardMajor: DEFAULT_REFERRAL_REWARD_MAJOR,
-    currency: DEFAULT_CURRENCY,
+    currency,
   };
 }
 
 export function ProductsSection() {
   const { categories, config, guildId, isLinkedToCurrentTenant, products, refreshProducts, showFlash, tenantId } =
     useDashboardContext();
+  const productCurrency = config?.defaultCurrency || DEFAULT_CURRENCY;
   const [activeProductsPanel, setActiveProductsPanel] =
     useState<(typeof productsMenuItems)[number]['id']>('categories');
   const [categoryName, setCategoryName] = useState('');
@@ -2544,7 +2823,7 @@ export function ProductsSection() {
   const [productDescription, setProductDescription] = useState('');
   const [productActive, setProductActive] = useState(true);
   const [variants, setVariants] = useState<PriceOptionDraft[]>([]);
-  const [variantDraft, setVariantDraft] = useState(blankVariant());
+  const [variantDraft, setVariantDraft] = useState(blankVariant(productCurrency));
   const [editingVariantIndex, setEditingVariantIndex] = useState<number | null>(null);
   const draftCategoryOption = categoryName.trim();
   const productCategoryOptions = [
@@ -2571,7 +2850,7 @@ export function ProductsSection() {
     setProductDescription('');
     setProductActive(true);
     setVariants([]);
-    setVariantDraft(blankVariant());
+    setVariantDraft(blankVariant(productCurrency));
     setEditingVariantIndex(null);
   }
 
@@ -2602,7 +2881,7 @@ export function ProductsSection() {
         currency: variant.currency,
       })),
     );
-    setVariantDraft(blankVariant());
+    setVariantDraft(blankVariant(productCurrency));
     setEditingVariantIndex(null);
   }
 
@@ -2611,7 +2890,7 @@ export function ProductsSection() {
       label: variantDraft.label.trim(),
       priceMajor: variantDraft.priceMajor.trim(),
       referralRewardMajor: variantDraft.referralRewardMajor.trim() || DEFAULT_REFERRAL_REWARD_MAJOR,
-      currency: DEFAULT_CURRENCY,
+      currency: productCurrency,
     };
 
     if (!preparedVariant.label || !preparedVariant.priceMajor) {
@@ -2627,7 +2906,7 @@ export function ProductsSection() {
       return current.map((variant, index) => (index === editingVariantIndex ? preparedVariant : variant));
     });
 
-    setVariantDraft(blankVariant());
+    setVariantDraft(blankVariant(productCurrency));
     setEditingVariantIndex(null);
   }
 
@@ -2721,7 +3000,7 @@ export function ProductsSection() {
       label: variant.label.trim(),
       priceMinor: parsePriceToMinor(variant.priceMajor),
       referralRewardMinor: config?.referralsEnabled ? parsePriceToMinor(variant.referralRewardMajor) : 0,
-      currency: DEFAULT_CURRENCY,
+      currency: variant.currency || productCurrency,
     }));
 
     const payload = {
@@ -3139,7 +3418,7 @@ export function ProductsSection() {
                           className="min-h-11 sm:flex-1"
                           onClick={() => {
                             setEditingVariantIndex(null);
-                            setVariantDraft(blankVariant());
+                            setVariantDraft(blankVariant(productCurrency));
                           }}
                         >
                           Cancel Variant Edit
@@ -3158,9 +3437,9 @@ export function ProductsSection() {
                           <div className="min-w-0">
                             <p className="font-medium">{variant.label}</p>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              {variant.priceMajor} {DEFAULT_CURRENCY}
+                              {variant.priceMajor} {variant.currency || productCurrency}
                               {config?.referralsEnabled
-                                ? ` / Referral reward ${variant.referralRewardMajor} ${DEFAULT_CURRENCY}`
+                                ? ` / Referral reward ${variant.referralRewardMajor} ${variant.currency || productCurrency}`
                                 : ''}
                             </p>
                           </div>

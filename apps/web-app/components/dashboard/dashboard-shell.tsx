@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Link2,
   Menu,
+  ReceiptText,
   Settings2,
   ShoppingBag,
   Sparkles,
@@ -16,12 +17,14 @@ import { useState } from 'react';
 
 import darkModeLogo from '../../../../assets/darkmode-logo.png';
 import lightModeLogo from '../../../../assets/lightmode-logo.png';
+import { useDashboardContext } from '@/components/dashboard/dashboard-provider';
 import { ModeToggle } from '@/components/mode-toggle';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '', label: 'Overview', icon: LayoutDashboard },
+  { href: '/sales', label: 'Sales', icon: ReceiptText },
   { href: '/settings', label: 'Settings', icon: Settings2 },
   { href: '/payments', label: 'Payments', icon: CreditCard },
   { href: '/coupons', label: 'Coupons', icon: Sparkles },
@@ -47,6 +50,7 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { resources } = useDashboardContext();
   const basePath = `/dashboard/${tenantId}/${guildId}`;
 
   return (
@@ -128,6 +132,13 @@ export function DashboardShell({
                 Open the public Voodoo Pay site or switch stores without losing this session.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
+                {resources?.inviteUrl ? (
+                  <Button asChild size="sm" variant="outline" className="min-h-10">
+                    <a href={resources.inviteUrl} target="_blank" rel="noreferrer">
+                      Invite Bot
+                    </a>
+                  </Button>
+                ) : null}
                 <Button asChild size="sm" className="min-h-10">
                   <a href="https://voodoopay.online/" target="_blank" rel="noreferrer">
                     Visit Website

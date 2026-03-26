@@ -94,6 +94,16 @@ export type PaidOrderRecord = {
   updatedAt: Date;
 };
 
+export type PaidOrderWithSessionRecord = PaidOrderRecord & {
+  ticketChannelId: string | null;
+  customerDiscordId: string | null;
+  productId: string | null;
+  variantId: string | null;
+  customerEmailNormalized: string | null;
+  answers: Record<string, string> | null;
+  basketItems: OrderSessionBasketItem[] | null;
+};
+
 function mapOrderSessionRow(row: typeof orderSessions.$inferSelect): OrderSessionRecord {
   return {
     id: row.id,
@@ -458,6 +468,83 @@ export class OrderRepository {
     });
 
     return rows.map(mapPaidOrderRow);
+  }
+
+  public async listPaidOrdersWithSessionsByGuild(input: {
+    tenantId: string;
+    guildId: string;
+    since?: Date;
+    until?: Date;
+  }): Promise<PaidOrderWithSessionRecord[]> {
+    const dateFilter =
+      input.since && input.until
+        ? and(gte(ordersPaid.paidAt, input.since), lt(ordersPaid.paidAt, input.until))
+        : input.since
+          ? gte(ordersPaid.paidAt, input.since)
+          : input.until
+            ? lt(ordersPaid.paidAt, input.until)
+            : undefined;
+
+    const rows = await this.db
+      .select({
+        id: ordersPaid.id,
+        tenantId: ordersPaid.tenantId,
+        guildId: ordersPaid.guildId,
+        orderSessionId: ordersPaid.orderSessionId,
+        wooOrderId: ordersPaid.wooOrderId,
+        status: ordersPaid.status,
+        priceMinor: ordersPaid.priceMinor,
+        currency: ordersPaid.currency,
+        paymentReference: ordersPaid.paymentReference,
+        fulfillmentStatus: ordersPaid.fulfillmentStatus,
+        fulfilledAt: ordersPaid.fulfilledAt,
+        fulfilledByDiscordUserId: ordersPaid.fulfilledByDiscordUserId,
+        paidAt: ordersPaid.paidAt,
+        createdAt: ordersPaid.createdAt,
+        updatedAt: ordersPaid.updatedAt,
+        ticketChannelId: orderSessions.ticketChannelId,
+        customerDiscordId: orderSessions.customerDiscordId,
+        productId: orderSessions.productId,
+        variantId: orderSessions.variantId,
+        customerEmailNormalized: orderSessions.customerEmailNormalized,
+        answers: orderSessions.answers,
+        basketItems: orderSessions.basketItems,
+      })
+      .from(ordersPaid)
+      .leftJoin(orderSessions, eq(ordersPaid.orderSessionId, orderSessions.id))
+      .where(
+        and(
+          eq(ordersPaid.tenantId, input.tenantId),
+          eq(ordersPaid.guildId, input.guildId),
+          dateFilter ?? undefined,
+        ),
+      )
+      .orderBy(desc(ordersPaid.paidAt));
+
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenantId,
+      guildId: row.guildId,
+      orderSessionId: row.orderSessionId,
+      wooOrderId: row.wooOrderId,
+      status: row.status,
+      priceMinor: row.priceMinor,
+      currency: row.currency,
+      paymentReference: row.paymentReference ?? null,
+      fulfillmentStatus: row.fulfillmentStatus,
+      fulfilledAt: row.fulfilledAt ?? null,
+      fulfilledByDiscordUserId: row.fulfilledByDiscordUserId ?? null,
+      paidAt: row.paidAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      ticketChannelId: row.ticketChannelId ?? null,
+      customerDiscordId: row.customerDiscordId ?? null,
+      productId: row.productId ?? null,
+      variantId: row.variantId ?? null,
+      customerEmailNormalized: row.customerEmailNormalized ?? null,
+      answers: row.answers ?? null,
+      basketItems: row.basketItems ?? null,
+    }));
   }
 
   public async markPaidOrderFulfilled(input: {

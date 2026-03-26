@@ -123,8 +123,10 @@ Copy `.env.example` to `.env` and fill values.
 - Merchants can now create their first workspace directly from the launchpad after Discord login, so fresh accounts are no longer blocked on an empty workspace list.
 - Dashboard loads Discord servers from OAuth (manage-server capable guilds), checks bot installation, and links the selected server to the chosen workspace on entry when needed.
 - A Discord server is now bound to exactly one workspace at a time; reconnecting a server moves it to the current workspace mapping.
-- Main panel navigation is now sidebar-based with dedicated pages for `Overview`, `Settings`, `Payments`, `Coupons`, `Points`, `Referrals`, and `Products`.
-- Overview now exposes live cards for bot status, payment readiness, Telegram status, recent sales, and today’s total sales.
+- Main panel navigation is now sidebar-based with dedicated pages for `Overview`, `Sales`, `Settings`, `Payments`, `Coupons`, `Points`, `Referrals`, and `Products`.
+- Overview now exposes live cards for bot status, payment readiness, Telegram status, recent sales, and today’s total sales, with a direct jump into the full sales history page.
+- The dashboard sales page now supports all-sales browsing with `day`, `week`, `month`, and custom date filters plus search by date, customer email, or TXID/payment reference.
+- The dashboard sidebar now keeps a Discord bot invite button visible so merchants can reinstall or add the bot again after redesign updates.
 - Settings now uses an internal sidebar flow for default currency, staff roles, paid-log channel, and Telegram integration, including add/copy/regenerate Telegram actions when the Telegram feature is enabled.
 - Payments now separates the Voodoo Pay wallet, checkout domain, callback secret rotation, and hosted crypto wallet controls into a dedicated page.
 - Coupons, points, referrals, and Telegram now use persisted feature toggles in `guild_configs`; when disabled, the UI hides those controls and the backend rejects the related actions.

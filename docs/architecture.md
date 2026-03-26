@@ -6,6 +6,7 @@
 - Hosts dashboard pages and API/webhook routes.
 - Handles Discord OAuth and session cookie auth.
 - Manages workspace member invites/removals plus Discord/Telegram connection controls from the dashboard.
+- Exposes filtered sales-history views and bot invite actions inside the dashboard shell.
 - Runs Woo webhook receiver and enqueue/retry logic.
 
 2. `bot-worker`
