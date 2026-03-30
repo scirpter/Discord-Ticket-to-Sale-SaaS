@@ -344,6 +344,36 @@ describe('nuke command helpers', () => {
     );
   });
 
+  it('falls back to guild-scoped nuke storage when the server is not linked to a tenant/workspace', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(TenantRepository.prototype, 'getTenantByGuildId').mockResolvedValue(null);
+    const getChannelScheduleSpy = vi
+      .spyOn(NukeService.prototype, 'getChannelSchedule')
+      .mockResolvedValue(
+        createOkResult(null) as Awaited<ReturnType<NukeService['getChannelSchedule']>>,
+      );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'owner-1',
+      subcommand: 'status',
+    });
+
+    await nukeCommand.execute(interaction);
+
+    expect(getChannelScheduleSpy).toHaveBeenCalledWith({
+      tenantId: 'guild-1',
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+    });
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'No nuke schedule exists for this channel.',
+      }),
+    );
+  });
+
   it('shows the current schedule when the caller is authorized for /nuke usage', async () => {
     process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
     resetEnvForTests();

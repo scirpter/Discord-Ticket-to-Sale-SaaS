@@ -26,6 +26,11 @@ function normalizeDiscordId(value: string): string | null {
   return /^\d{17,32}$/u.test(trimmed) ? trimmed : null;
 }
 
+async function resolveNukeTenantId(guildId: string): Promise<string> {
+  const tenant = await tenantRepository.getTenantByGuildId(guildId);
+  return tenant?.tenantId ?? guildId;
+}
+
 async function deferEphemeralReply(interaction: ChatInputCommandInteraction): Promise<void> {
   if (interaction.deferred || interaction.replied) {
     return;
@@ -170,18 +175,11 @@ export const activationCommand = {
         return;
       }
 
-      const tenant = await tenantRepository.getTenantByGuildId(guildId);
-      if (!tenant) {
-        await sendEphemeralReply(
-          interaction,
-          'The target server is not connected to a tenant/workspace yet.',
-        );
-        return;
-      }
+      const tenantId = await resolveNukeTenantId(guildId);
 
       if (subcommand === 'list') {
         const result = await nukeService.listAuthorizedUsers({
-          tenantId: tenant.tenantId,
+          tenantId,
           guildId,
         });
         if (result.isErr()) {
@@ -207,7 +205,7 @@ export const activationCommand = {
 
       if (subcommand === 'grant') {
         const result = await nukeService.grantUserAccess({
-          tenantId: tenant.tenantId,
+          tenantId,
           guildId,
           discordUserId: userId,
           grantedByDiscordUserId: interaction.user.id,
@@ -228,7 +226,7 @@ export const activationCommand = {
 
       if (subcommand === 'revoke') {
         const result = await nukeService.revokeUserAccess({
-          tenantId: tenant.tenantId,
+          tenantId,
           guildId,
           discordUserId: userId,
         });

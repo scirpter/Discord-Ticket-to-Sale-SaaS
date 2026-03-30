@@ -22,7 +22,8 @@
 
 4. `nuke-worker`
 - Runs as a separate Discord application/token for `/nuke`.
-- Manages channel nuke scheduling, execution, and safety checks independently from sales traffic.
+- Manages daily, weekly, and monthly channel nuke scheduling, execution, and safety checks independently from sales traffic.
+- Can operate as a standalone guild-scoped bot when a server is not linked to the sales workspace model.
 
 5. `sports-worker`
 - Runs as a separate Discord application/token for daily sports listings and `/search`.

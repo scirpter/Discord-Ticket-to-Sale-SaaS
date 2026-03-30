@@ -150,4 +150,37 @@ describe('nuke activation command', () => {
         'Granted `/nuke` access for `234567890123456789` in `Remote Guild` (`123456789012345678`).',
     });
   });
+
+  it('grants remote nuke access even when the target server is not linked to a tenant/workspace', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(TenantRepository.prototype, 'getTenantByGuildId').mockResolvedValue(null);
+    const grantUserAccessSpy = vi
+      .spyOn(NukeService.prototype, 'grantUserAccess')
+      .mockResolvedValue(
+        createOkResult({
+          authorizationId: 'auth-1',
+          discordUserId: '234567890123456789',
+          created: true,
+        }) as Awaited<ReturnType<NukeService['grantUserAccess']>>,
+      );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'owner-1',
+    });
+
+    await activationCommand.execute(interaction);
+
+    expect(grantUserAccessSpy).toHaveBeenCalledWith({
+      tenantId: '123456789012345678',
+      guildId: '123456789012345678',
+      discordUserId: '234567890123456789',
+      grantedByDiscordUserId: 'owner-1',
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content:
+        'Granted `/nuke` access for `234567890123456789` in `Remote Guild` (`123456789012345678`).',
+    });
+  });
 });

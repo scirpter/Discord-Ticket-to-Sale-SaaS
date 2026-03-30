@@ -1,4 +1,4 @@
-import { and, eq, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, lte, or, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
@@ -130,11 +130,8 @@ export class NukeRepository {
     channelId: string;
   }): Promise<ChannelNukeScheduleRecord | null> {
     const row = await this.db.query.channelNukeSchedules.findFirst({
-      where: and(
-        eq(channelNukeSchedules.tenantId, input.tenantId),
-        eq(channelNukeSchedules.guildId, input.guildId),
-        eq(channelNukeSchedules.channelId, input.channelId),
-      ),
+      where: and(eq(channelNukeSchedules.guildId, input.guildId), eq(channelNukeSchedules.channelId, input.channelId)),
+      orderBy: [desc(channelNukeSchedules.updatedAt), desc(channelNukeSchedules.createdAt)],
     });
 
     return row ? mapScheduleRow(row) : null;
@@ -153,9 +150,29 @@ export class NukeRepository {
     updatedByDiscordUserId: string;
   }): Promise<ChannelNukeScheduleRecord> {
     const now = new Date();
-    await this.db
-      .insert(channelNukeSchedules)
-      .values({
+    const existing = await this.getScheduleByChannel(input);
+
+    if (existing) {
+      await this.db
+        .update(channelNukeSchedules)
+        .set({
+          tenantId: input.tenantId,
+          guildId: input.guildId,
+          channelId: input.channelId,
+          enabled: true,
+          localTimeHhmm: input.localTimeHhmm,
+          timezone: input.timezone,
+          cadence: input.cadence,
+          weeklyDayOfWeek: input.weeklyDayOfWeek,
+          monthlyDayOfMonth: input.monthlyDayOfMonth,
+          nextRunAtUtc: input.nextRunAtUtc,
+          consecutiveFailures: 0,
+          updatedByDiscordUserId: input.updatedByDiscordUserId,
+          updatedAt: now,
+        })
+        .where(eq(channelNukeSchedules.id, existing.id));
+    } else {
+      await this.db.insert(channelNukeSchedules).values({
         id: ulid(),
         tenantId: input.tenantId,
         guildId: input.guildId,
@@ -171,21 +188,8 @@ export class NukeRepository {
         updatedByDiscordUserId: input.updatedByDiscordUserId,
         createdAt: now,
         updatedAt: now,
-      })
-      .onDuplicateKeyUpdate({
-        set: {
-          enabled: true,
-          localTimeHhmm: input.localTimeHhmm,
-          timezone: input.timezone,
-          cadence: input.cadence,
-          weeklyDayOfWeek: input.weeklyDayOfWeek,
-          monthlyDayOfMonth: input.monthlyDayOfMonth,
-          nextRunAtUtc: input.nextRunAtUtc,
-          consecutiveFailures: 0,
-          updatedByDiscordUserId: input.updatedByDiscordUserId,
-          updatedAt: now,
-        },
       });
+    }
 
     const createdOrUpdated = await this.getScheduleByChannel({
       tenantId: input.tenantId,
@@ -329,7 +333,16 @@ export class NukeRepository {
       limit: input.limit,
     });
 
-    return rows.map(mapScheduleRow);
+    const dedupedByGuildChannel = new Map<string, ChannelNukeScheduleRecord>();
+    for (const row of rows) {
+      const mapped = mapScheduleRow(row);
+      const dedupeKey = `${mapped.guildId}:${mapped.channelId}`;
+      if (!dedupedByGuildChannel.has(dedupeKey)) {
+        dedupedByGuildChannel.set(dedupeKey, mapped);
+      }
+    }
+
+    return [...dedupedByGuildChannel.values()];
   }
 
   public async tryAcquireLock(input: {
@@ -627,13 +640,13 @@ export class NukeRepository {
         await tx
           .update(channelNukeSchedules)
           .set({
+            tenantId: input.tenantId,
             channelId: input.newChannelId,
             updatedByDiscordUserId: input.updatedByDiscordUserId,
             updatedAt: now,
           })
           .where(
             and(
-              eq(channelNukeSchedules.tenantId, input.tenantId),
               eq(channelNukeSchedules.guildId, input.guildId),
               eq(channelNukeSchedules.channelId, input.oldChannelId),
             ),
