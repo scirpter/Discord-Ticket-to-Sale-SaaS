@@ -9,6 +9,7 @@ export default defineConfig({
     },
   },
   test: {
+    execArgv: ['--disable-warning=DEP0040'],
     include: [
       'packages/core/tests/**/*.test.ts',
       'apps/web-app/**/*.test.ts',

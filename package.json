@@ -10,7 +10,7 @@
     "dev": "concurrently -n web,bot,telegram,nuke,joingate,sports -c cyan,magenta,green,yellow,blue,red \"pnpm --filter @voodoo/web-app dev\" \"pnpm --filter @voodoo/bot-worker dev\" \"pnpm --filter @voodoo/telegram-worker dev\" \"pnpm --filter @voodoo/nuke-worker dev\" \"pnpm --filter @voodoo/join-gate-worker dev\" \"pnpm --filter @voodoo/sports-worker dev\"",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "typecheck": "pnpm -r run typecheck",
-    "test": "vitest run",
+    "test": "node --disable-warning=DEP0040 ./node_modules/vitest/vitest.mjs run",
     "build": "pnpm --filter @voodoo/core build && pnpm --filter @voodoo/bot-worker build && pnpm --filter @voodoo/telegram-worker build && pnpm --filter @voodoo/nuke-worker build && pnpm --filter @voodoo/join-gate-worker build && pnpm --filter @voodoo/sports-worker build && pnpm --filter @voodoo/web-app build",
     "migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "setup": "pnpm migrate && pnpm deploy:commands",
