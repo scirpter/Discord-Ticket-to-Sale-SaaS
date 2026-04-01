@@ -16,18 +16,37 @@ vi.mock('@voodoo/core', () => {
     public async getGuildStatus(): Promise<never> {
       throw new Error('Mock getGuildStatus not implemented');
     }
+
+    public async getGuildConfig(): Promise<never> {
+      throw new Error('Mock getGuildConfig not implemented');
+    }
+
+    public async listChannelBindings(): Promise<never> {
+      throw new Error('Mock listChannelBindings not implemented');
+    }
+  }
+
+  class SportsDataService {
+    public async listDailyListingsForLocalDate(): Promise<never> {
+      throw new Error('Mock listDailyListingsForLocalDate not implemented');
+    }
   }
 
   return {
     SportsAccessService,
+    SportsDataService,
     SportsService,
     getEnv: () => ({
       superAdminDiscordIds: (process.env.SUPER_ADMIN_DISCORD_IDS ?? '')
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean),
+      SPORTS_DEFAULT_PUBLISH_TIME: '01:00',
+      SPORTS_DEFAULT_TIMEZONE: 'Europe/London',
+      SPORTS_BROADCAST_COUNTRY: 'United Kingdom',
     }),
     resetEnvForTests: () => undefined,
+    resolveSportsLocalDate: () => '2026-03-20',
   };
 });
 
@@ -57,7 +76,12 @@ vi.mock('../sports-runtime.js', () => ({
   })),
 }));
 
-import { SportsAccessService, resetEnvForTests } from '@voodoo/core';
+import {
+  SportsAccessService,
+  SportsDataService,
+  SportsService,
+  resetEnvForTests,
+} from '@voodoo/core';
 
 import { sportsCommand } from './sports.js';
 
@@ -134,6 +158,40 @@ function createInteractionMock(input?: {
   };
 }
 
+function createMessageCollectionWithFreshMessage() {
+  return {
+    size: 1,
+    filter: vi.fn((predicate: (message: { id: string; createdTimestamp: number }) => boolean) => {
+      const message = {
+        id: 'message-1',
+        createdTimestamp: Date.now(),
+        delete: vi.fn(async () => undefined),
+      };
+      return predicate(message)
+        ? new Map([[message.id, message]])
+        : new Map<string, typeof message>();
+    }),
+  };
+}
+
+function createManagedTextChannel(id: string, name: string) {
+  const messages = {
+    fetch: vi.fn(async () => createMessageCollectionWithFreshMessage()),
+  };
+
+  return {
+    id,
+    name,
+    type: 0,
+    parentId: 'category-1',
+    topic: 'managed topic',
+    send: vi.fn(async () => undefined),
+    edit: vi.fn(async () => undefined),
+    bulkDelete: vi.fn(async () => undefined),
+    messages,
+  };
+}
+
 describe('sports command', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -203,5 +261,117 @@ describe('sports command', () => {
     expect(editReply).toHaveBeenCalledWith({
       content: expect.not.stringContaining('Empty sport channels today'),
     });
+  });
+
+  it('clears stale managed sport channels that have no listings today', async () => {
+    vi.resetModules();
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        localTimeHhMm: '01:00',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T01:00:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: 'soccer',
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+        {
+          bindingId: 'binding-2',
+          guildId: 'guild-1',
+          sportId: 'rugby',
+          sportName: 'Rugby Union',
+          sportSlug: 'rugby-union',
+          channelId: 'sport-2',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
+      createOkResult([
+        {
+          sportName: 'Soccer',
+          listings: [
+            {
+              eventId: 'evt-1',
+              eventName: 'Rangers vs Celtic',
+              sportName: 'Soccer',
+              startTimeUkLabel: '15:00',
+              imageUrl: null,
+              eventCountry: null,
+              season: null,
+              broadcasters: [
+                {
+                  channelId: 'chan-1',
+                  channelName: 'Sky Sports Main Event',
+                  country: 'United Kingdom',
+                  logoUrl: null,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          sportName: 'Rugby Union',
+          listings: [],
+        },
+      ]) as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
+    );
+
+    const soccerChannel = createManagedTextChannel('sport-1', 'soccer');
+    const rugbyChannel = createManagedTextChannel('sport-2', 'rugby-union');
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        fetch: vi.fn(async (channelId?: string) => {
+          if (channelId === 'category-1') {
+            return { id: 'category-1', type: 4 };
+          }
+          if (channelId === 'sport-1') {
+            return soccerChannel;
+          }
+          if (channelId === 'sport-2') {
+            return rugbyChannel;
+          }
+          return new Map<string, unknown>([
+            ['category-1', { id: 'category-1', name: 'Sports Listings', type: 4 }],
+            ['sport-1', soccerChannel],
+            ['sport-2', rugbyChannel],
+          ]);
+        }),
+      },
+    };
+
+    const { publishSportsForGuild } = (await vi.importActual('../sports-runtime.js')) as {
+      publishSportsForGuild: (input: {
+        guild: unknown;
+        actorDiscordUserId: string | null;
+      }) => Promise<unknown>;
+    };
+    await publishSportsForGuild({
+      guild: guild as never,
+      actorDiscordUserId: 'user-1',
+    });
+
+    expect(rugbyChannel.bulkDelete).toHaveBeenCalled();
+    expect(rugbyChannel.send).not.toHaveBeenCalled();
+    expect(soccerChannel.send).toHaveBeenCalled();
   });
 });

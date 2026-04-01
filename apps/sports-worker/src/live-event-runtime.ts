@@ -90,6 +90,26 @@ function buildLiveEventChannelName(eventName: string): string {
   return normalizeChannelName(`live-${eventName}`);
 }
 
+function buildLiveEventSnapshots(event: SportsLiveEvent): {
+  scoreSnapshot: Record<string, unknown> | null;
+  stateSnapshot: Record<string, unknown>;
+} {
+  return {
+    scoreSnapshot: event.scoreLabel ? { scoreLabel: event.scoreLabel } : null,
+    stateSnapshot: {
+      statusLabel: event.statusLabel,
+      broadcasterCount: event.broadcasters.length,
+    },
+  };
+}
+
+function areSnapshotsEqual(
+  left: Record<string, unknown> | null,
+  right: Record<string, unknown> | null,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function isCategoryChannel(channel: unknown): channel is CategoryChannel {
   return typeof channel === 'object' && channel !== null && 'type' in channel && channel.type === ChannelType.GuildCategory;
 }
@@ -331,30 +351,43 @@ export async function reconcileLiveEventsForGuild(input: {
     const parentId = sportChannel.parentId ?? category.id;
     const trackedEvent = trackedEventsByEventId.get(event.eventId) ?? null;
     const existingChannel = await fetchTrackedEventChannel(input.guild, trackedEvent?.eventChannelId ?? null);
+    const desiredName = buildLiveEventChannelName(event.eventName);
+    const desiredSnapshots = buildLiveEventSnapshots(event);
+    const isPlacementUnchanged =
+      existingChannel?.name === desiredName && (existingChannel.parentId ?? category.id) === parentId;
+    const isTrackedStateUnchanged =
+      trackedEvent?.status === 'live' &&
+      trackedEvent.eventChannelId === existingChannel?.id &&
+      areSnapshotsEqual(trackedEvent.lastScoreSnapshot, desiredSnapshots.scoreSnapshot) &&
+      areSnapshotsEqual(trackedEvent.lastStateSnapshot, desiredSnapshots.stateSnapshot);
+
+    if (existingChannel && isPlacementUnchanged && isTrackedStateUnchanged) {
+      continue;
+    }
 
     let targetChannel: TextChannel;
     if (existingChannel) {
-      const desiredName = reserveUniqueChannelName({
-        base: buildLiveEventChannelName(event.eventName),
+      const reservedName = reserveUniqueChannelName({
+        base: desiredName,
         usedNames,
         currentName: existingChannel.name,
       });
       await LIVE_EVENT_QUEUE.add(async () =>
         existingChannel.edit({
-          name: desiredName,
+          name: reservedName,
           parent: parentId,
         }),
       );
       updatedChannelCount += 1;
       targetChannel = existingChannel;
     } else {
-      const desiredName = reserveUniqueChannelName({
-        base: buildLiveEventChannelName(event.eventName),
+      const reservedName = reserveUniqueChannelName({
+        base: desiredName,
         usedNames,
       });
       targetChannel = (await LIVE_EVENT_QUEUE.add(async () =>
         input.guild.channels.create({
-          name: desiredName,
+          name: reservedName,
           type: ChannelType.GuildText,
           parent: parentId,
           reason: `Create a temporary live event channel for ${event.eventName}.`,
@@ -377,11 +410,8 @@ export async function reconcileLiveEventsForGuild(input: {
       kickoffAtUtc: trackedEvent?.kickoffAtUtc ?? now,
       eventChannelId: targetChannel.id,
       status: 'live',
-      lastScoreSnapshot: event.scoreLabel ? { scoreLabel: event.scoreLabel } : null,
-      lastStateSnapshot: {
-        statusLabel: event.statusLabel,
-        broadcasterCount: event.broadcasters.length,
-      },
+      lastScoreSnapshot: desiredSnapshots.scoreSnapshot,
+      lastStateSnapshot: desiredSnapshots.stateSnapshot,
       lastSyncedAtUtc: now,
       finishedAtUtc: null,
       deleteAfterUtc: null,

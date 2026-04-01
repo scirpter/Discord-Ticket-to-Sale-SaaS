@@ -430,6 +430,19 @@ export async function publishSportsForGuild(input: {
     publishedChannelCount += 1;
   }
 
+  for (const binding of bindingMap.values()) {
+    if (listingsBySport.has(binding.sportName)) {
+      continue;
+    }
+
+    const channel = await input.guild.channels.fetch(binding.channelId).catch(() => null);
+    if (!isManagedTextChannel(channel)) {
+      continue;
+    }
+
+    await clearManagedChannel(channel);
+  }
+
   return {
     publishedChannelCount,
     listingCount,

@@ -468,6 +468,85 @@ describe('live event runtime', () => {
     expect(existingLiveChannel.edit).toHaveBeenCalled();
   });
 
+  it('skips rewriting a live event channel when the persisted state is unchanged', async () => {
+    const { guild, channels, create } = createGuildFixture();
+    const existingLiveChannel = createTextChannel({
+      id: 'live-1',
+      name: 'live-rangers-vs-celtic',
+      parentId: 'category-1',
+    });
+    channels.set(existingLiveChannel.id, existingLiveChannel);
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        localTimeHhMm: '01:00',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T01:00:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: 'soccer',
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
+      createOkResult([makeLiveEvent()]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventChannelId: 'live-1',
+          status: 'live',
+          lastScoreSnapshot: { scoreLabel: '2-1' },
+          lastStateSnapshot: { statusLabel: 'Live', broadcasterCount: 1 },
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            eventChannelId: 'live-1',
+            status: 'live',
+            lastScoreSnapshot: { scoreLabel: '2-1' },
+            lastStateSnapshot: { statusLabel: 'Live', broadcasterCount: 1 },
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
+
+    const result = await reconcileLiveEventsForGuild({
+      guild,
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      now: new Date('2026-03-20T15:07:00.000Z'),
+    });
+
+    expect(result.createdChannelCount).toBe(0);
+    expect(result.updatedChannelCount).toBe(0);
+    expect(create).not.toHaveBeenCalled();
+    expect(existingLiveChannel.edit).not.toHaveBeenCalled();
+    expect(existingLiveChannel.send).not.toHaveBeenCalled();
+    expect(existingLiveChannel.messages.fetch).not.toHaveBeenCalled();
+    expect(upsertTrackedEvent).not.toHaveBeenCalled();
+  });
+
   it('deletes finished event channels after the three-hour cleanup window', async () => {
     const { guild, channels } = createGuildFixture();
     const eventChannel = createTextChannel({
