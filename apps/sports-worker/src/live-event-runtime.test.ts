@@ -713,13 +713,16 @@ describe('live event runtime', () => {
       .spyOn(SportsLiveEventService.prototype, 'markHighlightsPosted')
       .mockResolvedValue(
         createOkResult(
-          makeTrackedEvent({
-            eventChannelId: 'live-1',
-            status: 'cleanup_due',
-            finishedAtUtc: new Date('2026-03-20T15:15:00.000Z'),
-            deleteAfterUtc: new Date('2026-03-20T18:15:00.000Z'),
-            highlightsPosted: true,
-          }),
+          {
+            claimed: true,
+            trackedEvent: makeTrackedEvent({
+              eventChannelId: 'live-1',
+              status: 'cleanup_due',
+              finishedAtUtc: new Date('2026-03-20T15:15:00.000Z'),
+              deleteAfterUtc: new Date('2026-03-20T18:15:00.000Z'),
+              highlightsPosted: true,
+            }),
+          },
         ) as Awaited<ReturnType<SportsLiveEventService['markHighlightsPosted']>>,
       );
 
@@ -801,13 +804,16 @@ describe('live event runtime', () => {
       .spyOn(SportsLiveEventService.prototype, 'markHighlightsPosted')
       .mockResolvedValue(
         createOkResult(
-          makeTrackedEvent({
-            eventChannelId: 'live-1',
-            status: 'cleanup_due',
-            finishedAtUtc: new Date('2026-03-20T15:15:00.000Z'),
-            deleteAfterUtc: new Date('2026-03-20T18:15:00.000Z'),
-            highlightsPosted: true,
-          }),
+          {
+            claimed: true,
+            trackedEvent: makeTrackedEvent({
+              eventChannelId: 'live-1',
+              status: 'cleanup_due',
+              finishedAtUtc: new Date('2026-03-20T15:15:00.000Z'),
+              deleteAfterUtc: new Date('2026-03-20T18:15:00.000Z'),
+              highlightsPosted: true,
+            }),
+          },
         ) as Awaited<ReturnType<SportsLiveEventService['markHighlightsPosted']>>,
       );
 
@@ -900,6 +906,81 @@ describe('live event runtime', () => {
     expect(warnSpy).toHaveBeenCalled();
   });
 
+  it('does not send highlights when another caller already claimed the highlight transition', async () => {
+    const { guild, channels } = createGuildFixture();
+    const existingLiveChannel = createTextChannel({
+      id: 'live-1',
+      name: 'live-rangers-vs-celtic',
+      parentId: 'category-1',
+    });
+    channels.set(existingLiveChannel.id, existingLiveChannel);
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        localTimeHhMm: '01:00',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T01:00:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventChannelId: 'live-1',
+          status: 'cleanup_due',
+          finishedAtUtc: new Date('2026-03-20T15:15:00.000Z'),
+          deleteAfterUtc: new Date('2026-03-20T18:15:00.000Z'),
+          highlightsPosted: false,
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getEventHighlights').mockResolvedValue(
+      createOkResult({
+        eventId: 'evt-1',
+        eventName: 'Rangers vs Celtic',
+        sportName: 'Soccer',
+        videoUrl: 'https://videos.test/highlights/rangers-celtic',
+        imageUrl: 'https://videos.test/highlights/rangers-celtic.jpg',
+      }) as Awaited<ReturnType<SportsDataService['getEventHighlights']>>,
+    );
+    const markHighlightsPosted = vi
+      .spyOn(SportsLiveEventService.prototype, 'markHighlightsPosted')
+      .mockResolvedValue(
+        createOkResult({
+          claimed: false,
+          trackedEvent: makeTrackedEvent({
+            eventChannelId: 'live-1',
+            status: 'cleanup_due',
+            finishedAtUtc: new Date('2026-03-20T15:15:00.000Z'),
+            deleteAfterUtc: new Date('2026-03-20T18:15:00.000Z'),
+            highlightsPosted: true,
+          }),
+        }) as Awaited<ReturnType<SportsLiveEventService['markHighlightsPosted']>>,
+      );
+
+    await reconcileLiveEventsForGuild({
+      guild,
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      now: new Date('2026-03-20T15:45:00.000Z'),
+    });
+
+    expect(markHighlightsPosted).toHaveBeenCalledTimes(1);
+    expect(existingLiveChannel.send).not.toHaveBeenCalled();
+  });
+
   it('marks a tracked event as failed during recovery when its channel is missing', async () => {
     const { guild, create } = createGuildFixture();
     const markFailed = vi
@@ -934,6 +1015,40 @@ describe('live event runtime', () => {
       eventId: 'evt-1',
       failedAtUtc: new Date('2026-03-20T16:05:00.000Z'),
     });
+    expect(create).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('does not mark a tracked event failed when channel fetch errors during recovery', async () => {
+    const { guild, create } = createGuildFixture();
+    const originalFetch = guild.channels.fetch;
+    const fetchError = new Error('discord unavailable');
+    guild.channels.fetch = vi.fn(async (channelId?: string) => {
+      if (channelId === 'live-1') {
+        throw fetchError;
+      }
+
+      return originalFetch(channelId as never);
+    }) as unknown as typeof guild.channels.fetch;
+
+    const markFailed = vi.spyOn(SportsLiveEventService.prototype, 'markFailed');
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    vi.spyOn(SportsLiveEventService.prototype, 'listRecoverableEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventChannelId: 'live-1',
+          status: 'live',
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listRecoverableEvents']>>,
+    );
+
+    await resumeTrackedLiveEventsForGuild({
+      guild,
+      now: new Date('2026-03-20T16:05:00.000Z'),
+    });
+
+    expect(markFailed).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalled();
   });

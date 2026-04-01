@@ -26,6 +26,11 @@ export type SportsLiveEventChannelSummary = {
   updatedAt: Date;
 };
 
+export type SportsLiveEventHighlightClaimSummary = {
+  claimed: boolean;
+  trackedEvent: SportsLiveEventChannelSummary | null;
+};
+
 function mapSportsLiveEventChannelSummary(
   record: SportsLiveEventChannelRecord,
 ): SportsLiveEventChannelSummary {
@@ -201,17 +206,13 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     postedAtUtc: Date;
-  }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
+  }): Promise<Result<SportsLiveEventHighlightClaimSummary, AppError>> {
     try {
-      const record = await this.repository.markHighlightsPosted(input);
-
-      if (!record) {
-        return err(
-          new AppError('SPORTS_LIVE_EVENT_NOT_FOUND', 'Tracked live event not found.', 404),
-        );
-      }
-
-      return ok(mapSportsLiveEventChannelSummary(record));
+      const result = await this.repository.markHighlightsPosted(input);
+      return ok({
+        claimed: result.claimed,
+        trackedEvent: result.record ? mapSportsLiveEventChannelSummary(result.record) : null,
+      });
     } catch (error) {
       return err(
         error instanceof AppError

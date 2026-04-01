@@ -313,6 +313,9 @@ async function postLiveEventHighlightsIfAvailable(input: {
     );
     return false;
   }
+  if (!markHighlightsPostedResult.value.claimed) {
+    return false;
+  }
 
   try {
     await LIVE_EVENT_QUEUE.add(async () => {
@@ -346,12 +349,29 @@ async function fetchTrackedEventChannel(
   guild: Guild,
   eventChannelId: string | null,
 ): Promise<TextChannel | null> {
+  const channelLookup = await fetchTrackedEventChannelState(guild, eventChannelId);
+  return channelLookup.status === 'found' ? channelLookup.channel : null;
+}
+
+type TrackedEventChannelState =
+  | { status: 'found'; channel: TextChannel }
+  | { status: 'missing' }
+  | { status: 'error'; error: unknown };
+
+async function fetchTrackedEventChannelState(
+  guild: Guild,
+  eventChannelId: string | null,
+): Promise<TrackedEventChannelState> {
   if (!eventChannelId) {
-    return null;
+    return { status: 'missing' };
   }
 
-  const channel = await guild.channels.fetch(eventChannelId).catch(() => null);
-  return isManagedTextChannel(channel) ? channel : null;
+  try {
+    const channel = await guild.channels.fetch(eventChannelId);
+    return isManagedTextChannel(channel) ? { status: 'found', channel } : { status: 'missing' };
+  } catch (error) {
+    return { status: 'error', error };
+  }
 }
 
 async function cleanupTrackedEventIfDue(input: {
@@ -418,8 +438,21 @@ export async function resumeTrackedLiveEventsForGuild(input: {
   let highlightsPostedCount = 0;
 
   for (const trackedEvent of recoverableEventsResult.value) {
-    const channel = await fetchTrackedEventChannel(input.guild, trackedEvent.eventChannelId);
-    if (!channel) {
+    const channelLookup = await fetchTrackedEventChannelState(input.guild, trackedEvent.eventChannelId);
+    if (channelLookup.status === 'error') {
+      logger.warn(
+        {
+          guildId: input.guild.id,
+          eventId: trackedEvent.eventId,
+          eventChannelId: trackedEvent.eventChannelId,
+          errorMessage:
+            channelLookup.error instanceof Error ? channelLookup.error.message : 'unknown',
+        },
+        'live event runtime could not recover the tracked event channel because fetching it failed',
+      );
+      continue;
+    }
+    if (channelLookup.status === 'missing') {
       const markFailedResult = await sportsLiveEventService.markFailed({
         guildId: input.guild.id,
         eventId: trackedEvent.eventId,
@@ -440,6 +473,7 @@ export async function resumeTrackedLiveEventsForGuild(input: {
       );
       continue;
     }
+    const channel = channelLookup.channel;
 
     if (trackedEvent.status === 'cleanup_due') {
       const deleted = await cleanupTrackedEventIfDue({

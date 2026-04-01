@@ -24,6 +24,11 @@ export type SportsLiveEventChannelRecord = {
   updatedAt: Date;
 };
 
+export type SportsLiveEventHighlightClaimRecord = {
+  claimed: boolean;
+  record: SportsLiveEventChannelRecord | null;
+};
+
 function mapSportsLiveEventChannelRow(
   row: typeof sportsLiveEventChannels.$inferSelect,
 ): SportsLiveEventChannelRecord {
@@ -50,6 +55,23 @@ function mapSportsLiveEventChannelRow(
 
 export class SportsLiveEventRepository {
   private readonly db = getDb();
+
+  private getAffectedRowCount(result: unknown): number {
+    if (typeof result === 'object' && result !== null) {
+      if ('affectedRows' in result && typeof result.affectedRows === 'number') {
+        return result.affectedRows;
+      }
+      if ('rowsAffected' in result && typeof result.rowsAffected === 'number') {
+        return result.rowsAffected;
+      }
+    }
+
+    if (Array.isArray(result) && result.length > 0) {
+      return this.getAffectedRowCount(result[0]);
+    }
+
+    return 0;
+  }
 
   public async getTrackedEvent(input: {
     guildId: string;
@@ -86,8 +108,8 @@ export class SportsLiveEventRepository {
     guildId: string;
     eventId: string;
     postedAtUtc: Date;
-  }): Promise<SportsLiveEventChannelRecord | null> {
-    await this.db
+  }): Promise<SportsLiveEventHighlightClaimRecord> {
+    const updateResult = await this.db
       .update(sportsLiveEventChannels)
       .set({
         highlightsPosted: true,
@@ -98,13 +120,19 @@ export class SportsLiveEventRepository {
         and(
           eq(sportsLiveEventChannels.guildId, input.guildId),
           eq(sportsLiveEventChannels.eventId, input.eventId),
+          eq(sportsLiveEventChannels.highlightsPosted, false),
         ),
       );
 
-    return this.getTrackedEvent({
+    const record = await this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
     });
+
+    return {
+      claimed: this.getAffectedRowCount(updateResult) > 0,
+      record,
+    };
   }
 
   public async markFailed(input: {

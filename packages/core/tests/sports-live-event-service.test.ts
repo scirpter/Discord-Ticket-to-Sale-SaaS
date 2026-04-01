@@ -35,9 +35,15 @@ type MockDb = {
   insertCalls: number;
   findFirstCalls: number;
   onDuplicateKeyUpdateCalls: number;
+  updateCalls: number;
   insert: () => {
     values: (value: Partial<SportsLiveEventRow>) => {
       onDuplicateKeyUpdate: (_input: unknown) => Promise<void>;
+    };
+  };
+  update: () => {
+    set: (value: Partial<SportsLiveEventRow>) => {
+      where: (where: unknown) => Promise<{ affectedRows: number }>;
     };
   };
 };
@@ -52,6 +58,11 @@ function getQueryKey(where: unknown): { guildId: string; eventId: string } | nul
   }
 
   return { guildId, eventId };
+}
+
+function whereIncludesBoolean(where: unknown, value: boolean): boolean {
+  const text = inspect(where, { depth: 8, compact: true, breakLength: Infinity });
+  return text.includes(`value: ${String(value)}`);
 }
 
 function makeRow(overrides: Partial<SportsLiveEventRow> = {}): SportsLiveEventRow {
@@ -81,6 +92,7 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
   let insertCalls = 0;
   let findFirstCalls = 0;
   let onDuplicateKeyUpdateCalls = 0;
+  let updateCalls = 0;
 
   return {
     get insertCalls() {
@@ -91,6 +103,9 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
     },
     get onDuplicateKeyUpdateCalls() {
       return onDuplicateKeyUpdateCalls;
+    },
+    get updateCalls() {
+      return updateCalls;
     },
     query: {
       sportsLiveEventChannels: {
@@ -152,6 +167,34 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
           },
         };
       },
+    }),
+    update: () => ({
+      set: (value: Partial<SportsLiveEventRow>) => ({
+        where: async (where: unknown): Promise<{ affectedRows: number }> => {
+          updateCalls += 1;
+          const key = getQueryKey(where);
+          if (!key) {
+            return { affectedRows: 0 };
+          }
+
+          const existing = rows.find((row) => row.guildId === key.guildId && row.eventId === key.eventId);
+          if (!existing) {
+            return { affectedRows: 0 };
+          }
+
+          const requiresHighlightsFalse = whereIncludesBoolean(where, false);
+          if (requiresHighlightsFalse && value.highlightsPosted === true && existing.highlightsPosted) {
+            return { affectedRows: 0 };
+          }
+
+          Object.assign(existing, {
+            ...value,
+            updatedAt: value.updatedAt ?? existing.updatedAt,
+          });
+
+          return { affectedRows: 1 };
+        },
+      }),
     }),
   };
 }
@@ -318,15 +361,18 @@ describe('SportsLiveEventService', () => {
   it('marks highlights as posted once for a tracked event', async () => {
     const repository = new SportsLiveEventRepository();
     const markHighlightsPostedSpy = vi.spyOn(repository, 'markHighlightsPosted').mockResolvedValue(
-      makeRow({
-        id: '01J0SPORTSLIVE000000000012',
-        eventId: 'evt-1',
-        status: 'cleanup_due',
-        highlightsPosted: true,
-        lastSyncedAtUtc: new Date('2026-03-20T16:00:00.000Z'),
-        deleteAfterUtc: new Date('2026-03-20T18:00:00.000Z'),
-        updatedAt: new Date('2026-03-20T16:00:00.000Z'),
-      }),
+      {
+        claimed: true,
+        record: makeRow({
+          id: '01J0SPORTSLIVE000000000012',
+          eventId: 'evt-1',
+          status: 'cleanup_due',
+          highlightsPosted: true,
+          lastSyncedAtUtc: new Date('2026-03-20T16:00:00.000Z'),
+          deleteAfterUtc: new Date('2026-03-20T18:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T16:00:00.000Z'),
+        }),
+      },
     );
 
     const service = new SportsLiveEventService(repository);
@@ -347,7 +393,43 @@ describe('SportsLiveEventService', () => {
       eventId: 'evt-1',
       postedAtUtc: new Date('2026-03-20T16:00:00.000Z'),
     });
-    expect(result.value.highlightsPosted).toBe(true);
+    expect(result.value.claimed).toBe(true);
+    expect(result.value.trackedEvent?.highlightsPosted).toBe(true);
+  });
+
+  it('lets only the first highlight claimant win the false-to-true transition', async () => {
+    const rows: SportsLiveEventRow[] = [
+      makeRow({
+        id: '01J0SPORTSLIVE000000000014',
+        eventId: 'evt-1',
+        status: 'cleanup_due',
+        highlightsPosted: false,
+      }),
+    ];
+    const mockDb = createStatefulMockDb(rows);
+    const service = new SportsLiveEventService(createRepositoryWithMockDb(mockDb));
+
+    const first = await service.markHighlightsPosted({
+      guildId: 'guild-1',
+      eventId: 'evt-1',
+      postedAtUtc: new Date('2026-03-20T16:00:00.000Z'),
+    });
+    const second = await service.markHighlightsPosted({
+      guildId: 'guild-1',
+      eventId: 'evt-1',
+      postedAtUtc: new Date('2026-03-20T16:01:00.000Z'),
+    });
+
+    expect(first.isOk()).toBe(true);
+    expect(second.isOk()).toBe(true);
+    if (first.isErr() || second.isErr()) {
+      return;
+    }
+
+    expect(mockDb.updateCalls).toBe(2);
+    expect(first.value.claimed).toBe(true);
+    expect(second.value.claimed).toBe(false);
+    expect(rows[0]?.highlightsPosted).toBe(true);
   });
 
   it('marks a recoverable tracked event as failed when recovery cannot continue', async () => {
