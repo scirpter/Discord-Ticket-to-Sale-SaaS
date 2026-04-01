@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
@@ -65,6 +65,23 @@ export class SportsLiveEventRepository {
     return row ? mapSportsLiveEventChannelRow(row) : null;
   }
 
+  public async listTrackedEvents(input: {
+    guildId: string;
+    statuses?: SportsLiveEventChannelRecord['status'][];
+  }): Promise<SportsLiveEventChannelRecord[]> {
+    const rows = await this.db.query.sportsLiveEventChannels.findMany({
+      where:
+        input.statuses && input.statuses.length > 0
+          ? and(
+              eq(sportsLiveEventChannels.guildId, input.guildId),
+              inArray(sportsLiveEventChannels.status, input.statuses),
+            )
+          : eq(sportsLiveEventChannels.guildId, input.guildId),
+    });
+
+    return rows.map((row) => mapSportsLiveEventChannelRow(row));
+  }
+
   public async upsertTrackedEvent(input: {
     guildId: string;
     sportName: string;
@@ -72,6 +89,14 @@ export class SportsLiveEventRepository {
     eventName: string;
     sportChannelId: string;
     kickoffAtUtc: Date;
+    eventChannelId: string | null;
+    status: SportsLiveEventChannelRecord['status'];
+    lastScoreSnapshot: Record<string, unknown> | null;
+    lastStateSnapshot: Record<string, unknown> | null;
+    lastSyncedAtUtc: Date | null;
+    finishedAtUtc: Date | null;
+    deleteAfterUtc: Date | null;
+    highlightsPosted?: boolean;
   }): Promise<SportsLiveEventChannelRecord> {
     const now = new Date();
 
@@ -84,7 +109,15 @@ export class SportsLiveEventRepository {
         eventId: input.eventId,
         eventName: input.eventName,
         sportChannelId: input.sportChannelId,
+        eventChannelId: input.eventChannelId,
+        status: input.status,
         kickoffAtUtc: input.kickoffAtUtc,
+        lastScoreSnapshot: input.lastScoreSnapshot,
+        lastStateSnapshot: input.lastStateSnapshot,
+        lastSyncedAtUtc: input.lastSyncedAtUtc,
+        finishedAtUtc: input.finishedAtUtc,
+        deleteAfterUtc: input.deleteAfterUtc,
+        highlightsPosted: input.highlightsPosted ?? false,
         createdAt: now,
         updatedAt: now,
       })
@@ -93,7 +126,15 @@ export class SportsLiveEventRepository {
           sportName: input.sportName,
           eventName: input.eventName,
           sportChannelId: input.sportChannelId,
+          eventChannelId: input.eventChannelId,
+          status: input.status,
           kickoffAtUtc: input.kickoffAtUtc,
+          lastScoreSnapshot: input.lastScoreSnapshot,
+          lastStateSnapshot: input.lastStateSnapshot,
+          lastSyncedAtUtc: input.lastSyncedAtUtc,
+          finishedAtUtc: input.finishedAtUtc,
+          deleteAfterUtc: input.deleteAfterUtc,
+          highlightsPosted: input.highlightsPosted ?? false,
           updatedAt: now,
         },
       });
@@ -122,6 +163,32 @@ export class SportsLiveEventRepository {
         finishedAtUtc: input.finishedAtUtc,
         deleteAfterUtc: input.deleteAfterUtc,
         updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(sportsLiveEventChannels.guildId, input.guildId),
+          eq(sportsLiveEventChannels.eventId, input.eventId),
+        ),
+      );
+
+    return this.getTrackedEvent({
+      guildId: input.guildId,
+      eventId: input.eventId,
+    });
+  }
+
+  public async markDeleted(input: {
+    guildId: string;
+    eventId: string;
+    deletedAtUtc: Date;
+  }): Promise<SportsLiveEventChannelRecord | null> {
+    await this.db
+      .update(sportsLiveEventChannels)
+      .set({
+        status: 'deleted',
+        eventChannelId: null,
+        lastSyncedAtUtc: input.deletedAtUtc,
+        updatedAt: input.deletedAtUtc,
       })
       .where(
         and(

@@ -60,6 +60,14 @@ export class SportsLiveEventService {
     eventName: string;
     sportChannelId: string;
     kickoffAtUtc: Date;
+    eventChannelId: string | null;
+    status: SportsLiveEventChannelSummary['status'];
+    lastScoreSnapshot: Record<string, unknown> | null;
+    lastStateSnapshot: Record<string, unknown> | null;
+    lastSyncedAtUtc: Date | null;
+    finishedAtUtc: Date | null;
+    deleteAfterUtc: Date | null;
+    highlightsPosted?: boolean;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
     try {
       const record = await this.repository.upsertTrackedEvent(input);
@@ -71,6 +79,26 @@ export class SportsLiveEventService {
           : new AppError(
               'SPORTS_LIVE_EVENT_WRITE_FAILED',
               'Sports live event update failed due to an internal error.',
+              500,
+            ),
+      );
+    }
+  }
+
+  public async listTrackedEvents(input: {
+    guildId: string;
+    statuses?: SportsLiveEventChannelSummary['status'][];
+  }): Promise<Result<SportsLiveEventChannelSummary[], AppError>> {
+    try {
+      const records = await this.repository.listTrackedEvents(input);
+      return ok(records.map((record) => mapSportsLiveEventChannelSummary(record)));
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError(
+              'SPORTS_LIVE_EVENT_READ_FAILED',
+              'Sports live event read failed due to an internal error.',
               500,
             ),
       );
@@ -111,6 +139,34 @@ export class SportsLiveEventService {
         finishedAtUtc: input.finishedAtUtc,
         deleteAfterUtc,
       });
+
+      if (!record) {
+        return err(
+          new AppError('SPORTS_LIVE_EVENT_NOT_FOUND', 'Tracked live event not found.', 404),
+        );
+      }
+
+      return ok(mapSportsLiveEventChannelSummary(record));
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError(
+              'SPORTS_LIVE_EVENT_WRITE_FAILED',
+              'Sports live event update failed due to an internal error.',
+              500,
+            ),
+      );
+    }
+  }
+
+  public async markDeleted(input: {
+    guildId: string;
+    eventId: string;
+    deletedAtUtc: Date;
+  }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
+    try {
+      const record = await this.repository.markDeleted(input);
 
       if (!record) {
         return err(

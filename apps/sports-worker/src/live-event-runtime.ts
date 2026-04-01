@@ -1,4 +1,5 @@
-import PQueue from '../../../node_modules/.pnpm/p-queue@8.1.1/node_modules/p-queue/dist/index.js';
+// @ts-ignore -- package.json now declares p-queue, but this worktree has not refreshed node_modules links.
+import PQueue from 'p-queue';
 import {
   ChannelType,
   type CategoryChannel,
@@ -38,17 +39,6 @@ const DEFAULT_CATEGORY_NAME = 'Sports Listings';
 
 let liveEventSchedulerTimer: NodeJS.Timeout | null = null;
 let liveEventSchedulerInFlight = false;
-
-export const LIVE_EVENT_TOPIC_PREFIX = 'voodoo:sports-live-event:';
-
-type LiveEventTopicState = {
-  version: 1;
-  eventId: string;
-  eventName: string;
-  sportName: string;
-  sportChannelId: string;
-  cleanupAfterUtc: string | null;
-};
 
 function normalizeChannelName(base: string): string {
   const normalizedBase = base
@@ -98,44 +88,6 @@ function buildManagedChannelTopic(input: {
 
 function buildLiveEventChannelName(eventName: string): string {
   return normalizeChannelName(`live-${eventName}`);
-}
-
-function serializeLiveEventTopic(state: LiveEventTopicState): string {
-  return `${LIVE_EVENT_TOPIC_PREFIX}${JSON.stringify(state)}`;
-}
-
-function parseLiveEventTopic(topic: string | null | undefined): LiveEventTopicState | null {
-  if (!topic?.startsWith(LIVE_EVENT_TOPIC_PREFIX)) {
-    return null;
-  }
-
-  const rawState = topic.slice(LIVE_EVENT_TOPIC_PREFIX.length);
-  try {
-    const parsed = JSON.parse(rawState) as Partial<LiveEventTopicState>;
-    if (
-      parsed.version !== 1 ||
-      typeof parsed.eventId !== 'string' ||
-      typeof parsed.eventName !== 'string' ||
-      typeof parsed.sportName !== 'string' ||
-      typeof parsed.sportChannelId !== 'string'
-    ) {
-      return null;
-    }
-
-    return {
-      version: 1,
-      eventId: parsed.eventId,
-      eventName: parsed.eventName,
-      sportName: parsed.sportName,
-      sportChannelId: parsed.sportChannelId,
-      cleanupAfterUtc:
-        typeof parsed.cleanupAfterUtc === 'string' || parsed.cleanupAfterUtc === null
-          ? parsed.cleanupAfterUtc
-          : null,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function isCategoryChannel(channel: unknown): channel is CategoryChannel {
@@ -290,26 +242,16 @@ async function renderFinishedLiveEventChannel(input: {
   });
 }
 
-async function collectManagedLiveEventChannels(guild: Guild): Promise<
-  Map<string, { channel: TextChannel; state: LiveEventTopicState }>
-> {
-  const fetchedChannels = await guild.channels.fetch();
-  const liveEventChannels = new Map<string, { channel: TextChannel; state: LiveEventTopicState }>();
-
-  for (const channel of fetchedChannels.values()) {
-    if (!isManagedTextChannel(channel)) {
-      continue;
-    }
-
-    const state = parseLiveEventTopic(channel.topic);
-    if (!state) {
-      continue;
-    }
-
-    liveEventChannels.set(state.eventId, { channel, state });
+async function fetchTrackedEventChannel(
+  guild: Guild,
+  eventChannelId: string | null,
+): Promise<TextChannel | null> {
+  if (!eventChannelId) {
+    return null;
   }
 
-  return liveEventChannels;
+  const channel = await guild.channels.fetch(eventChannelId).catch(() => null);
+  return isManagedTextChannel(channel) ? channel : null;
 }
 
 export async function reconcileLiveEventsForGuild(input: {
@@ -348,11 +290,19 @@ export async function reconcileLiveEventsForGuild(input: {
   if (liveEventsResult.isErr()) {
     throw liveEventsResult.error;
   }
+  const trackedEventsResult = await sportsLiveEventService.listTrackedEvents({
+    guildId: input.guild.id,
+  });
+  if (trackedEventsResult.isErr()) {
+    throw trackedEventsResult.error;
+  }
 
   const televisedLiveEvents = liveEventsResult.value.filter(
     (event) => event.broadcasters.length > 0 && typeof event.sportName === 'string' && event.sportName.trim().length > 0,
   );
-  const existingChannelsByEventId = await collectManagedLiveEventChannels(input.guild);
+  const trackedEventsByEventId = new Map(
+    trackedEventsResult.value.map((trackedEvent) => [trackedEvent.eventId, trackedEvent]),
+  );
   const bindingsBySport = new Map(bindings.map((binding) => [binding.sportName, binding]));
   const usedNames = new Set(
     [...(await input.guild.channels.fetch()).values()]
@@ -378,28 +328,9 @@ export async function reconcileLiveEventsForGuild(input: {
       continue;
     }
 
-    const trackedEvent = await sportsLiveEventService.upsertTrackedEvent({
-      guildId: input.guild.id,
-      sportName,
-      eventId: event.eventId,
-      eventName: event.eventName,
-      sportChannelId: sportChannel.id,
-      kickoffAtUtc: now,
-    });
-    if (trackedEvent.isErr()) {
-      throw trackedEvent.error;
-    }
-
     const parentId = sportChannel.parentId ?? category.id;
-    const topic = serializeLiveEventTopic({
-      version: 1,
-      eventId: event.eventId,
-      eventName: event.eventName,
-      sportName,
-      sportChannelId: sportChannel.id,
-      cleanupAfterUtc: null,
-    });
-    const existingChannel = existingChannelsByEventId.get(event.eventId)?.channel ?? null;
+    const trackedEvent = trackedEventsByEventId.get(event.eventId) ?? null;
+    const existingChannel = await fetchTrackedEventChannel(input.guild, trackedEvent?.eventChannelId ?? null);
 
     let targetChannel: TextChannel;
     if (existingChannel) {
@@ -412,7 +343,6 @@ export async function reconcileLiveEventsForGuild(input: {
         existingChannel.edit({
           name: desiredName,
           parent: parentId,
-          topic,
         }),
       );
       updatedChannelCount += 1;
@@ -427,7 +357,6 @@ export async function reconcileLiveEventsForGuild(input: {
           name: desiredName,
           type: ChannelType.GuildText,
           parent: parentId,
-          topic,
           reason: `Create a temporary live event channel for ${event.eventName}.`,
         }),
       )) as TextChannel;
@@ -438,45 +367,66 @@ export async function reconcileLiveEventsForGuild(input: {
       channel: targetChannel,
       event,
     });
+
+    const persistedTrackedEvent = await sportsLiveEventService.upsertTrackedEvent({
+      guildId: input.guild.id,
+      sportName,
+      eventId: event.eventId,
+      eventName: event.eventName,
+      sportChannelId: sportChannel.id,
+      kickoffAtUtc: trackedEvent?.kickoffAtUtc ?? now,
+      eventChannelId: targetChannel.id,
+      status: 'live',
+      lastScoreSnapshot: event.scoreLabel ? { scoreLabel: event.scoreLabel } : null,
+      lastStateSnapshot: {
+        statusLabel: event.statusLabel,
+        broadcasterCount: event.broadcasters.length,
+      },
+      lastSyncedAtUtc: now,
+      finishedAtUtc: null,
+      deleteAfterUtc: null,
+      highlightsPosted: trackedEvent?.highlightsPosted ?? false,
+    });
+    if (persistedTrackedEvent.isErr()) {
+      throw persistedTrackedEvent.error;
+    }
   }
 
   const liveEventIds = new Set(televisedLiveEvents.map((event) => event.eventId));
-  for (const [eventId, entry] of existingChannelsByEventId.entries()) {
-    if (liveEventIds.has(eventId) || entry.state.cleanupAfterUtc) {
+  for (const trackedEvent of trackedEventsResult.value) {
+    if (
+      liveEventIds.has(trackedEvent.eventId) ||
+      trackedEvent.status === 'cleanup_due' ||
+      trackedEvent.status === 'deleted'
+    ) {
       continue;
     }
 
     const finishedResult = await sportsLiveEventService.markFinished({
       guildId: input.guild.id,
-      eventId,
+      eventId: trackedEvent.eventId,
       finishedAtUtc: now,
     });
     if (finishedResult.isErr()) {
       logger.warn(
-        { guildId: input.guild.id, eventId, err: finishedResult.error },
+        { guildId: input.guild.id, eventId: trackedEvent.eventId, err: finishedResult.error },
         'live event runtime could not mark the tracked event as finished',
       );
       continue;
     }
-
+    const eventChannel = await fetchTrackedEventChannel(input.guild, trackedEvent.eventChannelId);
     const deleteAfterUtc =
       finishedResult.value.deleteAfterUtc?.toISOString() ??
       new Date(now.getTime() + LIVE_EVENT_CLEANUP_WINDOW_MS).toISOString();
 
-    await LIVE_EVENT_QUEUE.add(() =>
-      entry.channel.edit({
-        topic: serializeLiveEventTopic({
-          ...entry.state,
-          cleanupAfterUtc: deleteAfterUtc,
-        }),
-      }),
-    );
-    await renderFinishedLiveEventChannel({
-      channel: entry.channel,
-      eventName: entry.state.eventName,
-      sportName: entry.state.sportName,
-      deleteAfterUtc,
-    });
+    if (eventChannel) {
+      await renderFinishedLiveEventChannel({
+        channel: eventChannel,
+        eventName: trackedEvent.eventName,
+        sportName: trackedEvent.sportName,
+        deleteAfterUtc,
+      });
+    }
     markedFinishedCount += 1;
   }
 
@@ -492,22 +442,39 @@ export async function runPendingLiveEventCleanup(input: {
   now?: Date;
 }): Promise<{ deletedChannelCount: number }> {
   const now = input.now ?? new Date();
-  const managedChannels = await collectManagedLiveEventChannels(input.guild);
+  const trackedEventsResult = await sportsLiveEventService.listTrackedEvents({
+    guildId: input.guild.id,
+    statuses: ['cleanup_due'],
+  });
+  if (trackedEventsResult.isErr()) {
+    throw trackedEventsResult.error;
+  }
   let deletedChannelCount = 0;
 
-  for (const { channel, state } of managedChannels.values()) {
-    if (!state.cleanupAfterUtc) {
+  for (const trackedEvent of trackedEventsResult.value) {
+    if (!trackedEvent.deleteAfterUtc) {
       continue;
     }
 
-    const cleanupAt = new Date(state.cleanupAfterUtc);
+    const cleanupAt = trackedEvent.deleteAfterUtc;
     if (Number.isNaN(cleanupAt.getTime()) || cleanupAt > now) {
       continue;
     }
 
-    await LIVE_EVENT_QUEUE.add(() =>
-      channel.delete(`Delete the finished live event channel for ${state.eventName}.`),
-    );
+    const channel = await fetchTrackedEventChannel(input.guild, trackedEvent.eventChannelId);
+    if (channel) {
+      await LIVE_EVENT_QUEUE.add(() =>
+        channel.delete(`Delete the finished live event channel for ${trackedEvent.eventName}.`),
+      );
+    }
+    const markDeletedResult = await sportsLiveEventService.markDeleted({
+      guildId: input.guild.id,
+      eventId: trackedEvent.eventId,
+      deletedAtUtc: now,
+    });
+    if (markDeletedResult.isErr()) {
+      throw markDeletedResult.error;
+    }
     deletedChannelCount += 1;
   }
 

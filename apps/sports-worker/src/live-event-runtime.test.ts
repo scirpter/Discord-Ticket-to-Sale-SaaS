@@ -7,6 +7,14 @@ import {
   type TextChannel,
 } from 'discord.js';
 
+vi.mock('p-queue', () => ({
+  default: class MockPQueue {
+    public async add<T>(task: () => Promise<T>): Promise<T> {
+      return task();
+    }
+  },
+}));
+
 vi.mock('@voodoo/core', () => {
   class SportsDataService {
     public async listLiveEvents(): Promise<never> {
@@ -25,8 +33,16 @@ vi.mock('@voodoo/core', () => {
       throw new Error('Mock upsertTrackedEvent not implemented');
     }
 
+    public async listTrackedEvents(): Promise<never> {
+      throw new Error('Mock listTrackedEvents not implemented');
+    }
+
     public async markFinished(): Promise<never> {
       throw new Error('Mock markFinished not implemented');
+    }
+
+    public async markDeleted(): Promise<never> {
+      throw new Error('Mock markDeleted not implemented');
     }
   }
 
@@ -64,11 +80,27 @@ import {
   type SportsLiveEvent,
 } from '@voodoo/core';
 
-import {
-  LIVE_EVENT_TOPIC_PREFIX,
-  reconcileLiveEventsForGuild,
-  runPendingLiveEventCleanup,
-} from './live-event-runtime.js';
+import { reconcileLiveEventsForGuild, runPendingLiveEventCleanup } from './live-event-runtime.js';
+
+type MockTrackedEvent = {
+  id: string;
+  guildId: string;
+  sportName: string;
+  eventId: string;
+  eventName: string;
+  sportChannelId: string;
+  eventChannelId: string | null;
+  status: 'scheduled' | 'live' | 'finished' | 'cleanup_due' | 'deleted' | 'failed';
+  kickoffAtUtc: Date;
+  lastScoreSnapshot: Record<string, unknown> | null;
+  lastStateSnapshot: Record<string, unknown> | null;
+  lastSyncedAtUtc: Date | null;
+  finishedAtUtc: Date | null;
+  deleteAfterUtc: Date | null;
+  highlightsPosted: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; value: T } {
   return {
@@ -207,6 +239,29 @@ function makeLiveEvent(overrides: Partial<SportsLiveEvent> = {}): SportsLiveEven
   };
 }
 
+function makeTrackedEvent(overrides: Partial<MockTrackedEvent> = {}): MockTrackedEvent {
+  return {
+    id: 'tracked-1',
+    guildId: 'guild-1',
+    sportName: 'Soccer',
+    eventId: 'evt-1',
+    eventName: 'Rangers vs Celtic',
+    sportChannelId: 'sport-1',
+    eventChannelId: 'live-1',
+    status: 'live' as const,
+    kickoffAtUtc: new Date('2026-03-20T15:00:00.000Z'),
+    lastScoreSnapshot: null,
+    lastStateSnapshot: null,
+    lastSyncedAtUtc: new Date('2026-03-20T15:05:00.000Z'),
+    finishedAtUtc: null,
+    deleteAfterUtc: null,
+    highlightsPosted: false,
+    createdAt: new Date('2026-03-20T12:00:00.000Z'),
+    updatedAt: new Date('2026-03-20T15:05:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('live event runtime', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -274,27 +329,35 @@ describe('live event runtime', () => {
         }),
       ]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
     );
-    vi.spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent').mockResolvedValue(
-      createOkResult({
-        id: 'tracked-1',
-        guildId: 'guild-1',
-        sportName: 'Soccer',
-        eventId: 'evt-1',
-        eventName: 'Rangers vs Celtic',
-        sportChannelId: 'sport-1',
-        eventChannelId: null,
-        status: 'scheduled',
-        kickoffAtUtc: new Date('2026-03-20T15:00:00.000Z'),
-        lastScoreSnapshot: null,
-        lastStateSnapshot: null,
-        lastSyncedAtUtc: null,
-        finishedAtUtc: null,
-        deleteAfterUtc: null,
-        highlightsPosted: false,
-        createdAt: new Date('2026-03-20T12:00:00.000Z'),
-        updatedAt: new Date('2026-03-20T12:00:00.000Z'),
-      }) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
     );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValueOnce(
+        createOkResult(
+          makeTrackedEvent({
+            id: 'tracked-1',
+            eventId: 'evt-1',
+            eventName: 'Rangers vs Celtic',
+            sportName: 'Soccer',
+            sportChannelId: 'sport-1',
+            eventChannelId: 'live-1',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      )
+      .mockResolvedValueOnce(
+        createOkResult(
+          makeTrackedEvent({
+            id: 'tracked-2',
+            eventId: 'evt-2',
+            eventName: 'Scotland vs Ireland',
+            sportName: 'Rugby Union',
+            sportChannelId: 'sport-2',
+            eventChannelId: 'live-2',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
 
     const result = await reconcileLiveEventsForGuild({
       guild,
@@ -308,10 +371,32 @@ describe('live event runtime', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ name: expect.stringMatching(/^live-/) }),
     );
+    expect(upsertTrackedEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        eventId: 'evt-1',
+        eventChannelId: 'live-1',
+        status: 'live',
+      }),
+    );
+    expect(upsertTrackedEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        eventId: 'evt-2',
+        eventChannelId: 'live-2',
+        status: 'live',
+      }),
+    );
   });
 
   it('reuses the existing live event channel on later reconciles', async () => {
     const { guild, channels, create } = createGuildFixture();
+    const existingLiveChannel = createTextChannel({
+      id: 'live-1',
+      name: 'live-rangers-vs-celtic',
+      parentId: 'category-1',
+    });
+    channels.set(existingLiveChannel.id, existingLiveChannel);
 
     vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
       createOkResult({
@@ -344,52 +429,43 @@ describe('live event runtime', () => {
     vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
       createOkResult([makeLiveEvent()]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
     );
-    vi.spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent').mockResolvedValue(
-      createOkResult({
-        id: 'tracked-1',
-        guildId: 'guild-1',
-        sportName: 'Soccer',
-        eventId: 'evt-1',
-        eventName: 'Rangers vs Celtic',
-        sportChannelId: 'sport-1',
-        eventChannelId: null,
-        status: 'scheduled',
-        kickoffAtUtc: new Date('2026-03-20T15:00:00.000Z'),
-        lastScoreSnapshot: null,
-        lastStateSnapshot: null,
-        lastSyncedAtUtc: null,
-        finishedAtUtc: null,
-        deleteAfterUtc: null,
-        highlightsPosted: false,
-        createdAt: new Date('2026-03-20T12:00:00.000Z'),
-        updatedAt: new Date('2026-03-20T12:00:00.000Z'),
-      }) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventChannelId: 'live-1',
+          status: 'live',
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
     );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            eventChannelId: 'live-1',
+            status: 'live',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
 
-    const firstResult = await reconcileLiveEventsForGuild({
-      guild,
-      timezone: 'Europe/London',
-      broadcastCountry: 'United Kingdom',
-      now: new Date('2026-03-20T15:05:00.000Z'),
-    });
-    const existingChannel = [...channels.values()].find(
-      (channel): channel is TextChannel =>
-        channel.type === ChannelType.GuildText &&
-        channel.topic?.startsWith(LIVE_EVENT_TOPIC_PREFIX) === true,
-    );
-
-    const secondResult = await reconcileLiveEventsForGuild({
+    const result = await reconcileLiveEventsForGuild({
       guild,
       timezone: 'Europe/London',
       broadcastCountry: 'United Kingdom',
       now: new Date('2026-03-20T15:07:00.000Z'),
     });
 
-    expect(firstResult.createdChannelCount).toBe(1);
-    expect(existingChannel).toBeDefined();
-    expect(secondResult.createdChannelCount).toBe(0);
-    expect(secondResult.updatedChannelCount).toBe(1);
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.createdChannelCount).toBe(0);
+    expect(result.updatedChannelCount).toBe(1);
+    expect(create).not.toHaveBeenCalled();
+    expect(upsertTrackedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+        eventChannelId: 'live-1',
+        status: 'live',
+      }),
+    );
+    expect(existingLiveChannel.edit).toHaveBeenCalled();
   });
 
   it('deletes finished event channels after the three-hour cleanup window', async () => {
@@ -398,16 +474,32 @@ describe('live event runtime', () => {
       id: 'live-cleanup-1',
       name: 'live-rangers-vs-celtic',
       parentId: 'category-1',
-      topic: `${LIVE_EVENT_TOPIC_PREFIX}${JSON.stringify({
-        version: 1,
-        eventId: 'evt-1',
-        eventName: 'Rangers vs Celtic',
-        sportName: 'Soccer',
-        sportChannelId: 'sport-1',
-        cleanupAfterUtc: '2026-03-20T18:00:00.000Z',
-      })}`,
     });
     channels.set(eventChannel.id, eventChannel);
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventId: 'evt-1',
+          eventChannelId: 'live-cleanup-1',
+          status: 'cleanup_due',
+          finishedAtUtc: new Date('2026-03-20T15:00:00.000Z'),
+          deleteAfterUtc: new Date('2026-03-20T18:00:00.000Z'),
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const markDeleted = vi
+      .spyOn(SportsLiveEventService.prototype, 'markDeleted')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            eventId: 'evt-1',
+            eventChannelId: 'live-cleanup-1',
+            status: 'deleted',
+            finishedAtUtc: new Date('2026-03-20T15:00:00.000Z'),
+            deleteAfterUtc: new Date('2026-03-20T18:00:00.000Z'),
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['markDeleted']>>,
+      );
 
     await runPendingLiveEventCleanup({
       guild,
@@ -415,5 +507,10 @@ describe('live event runtime', () => {
     });
 
     expect(eventChannel.delete).toHaveBeenCalled();
+    expect(markDeleted).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      eventId: 'evt-1',
+      deletedAtUtc: new Date('2026-03-20T18:05:00.000Z'),
+    });
   });
 });
