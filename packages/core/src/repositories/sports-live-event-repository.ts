@@ -51,7 +51,7 @@ function mapSportsLiveEventChannelRow(
 export class SportsLiveEventRepository {
   private readonly db = getDb();
 
-  private async getByGuildAndEvent(input: {
+  public async getTrackedEvent(input: {
     guildId: string;
     eventId: string;
   }): Promise<SportsLiveEventChannelRecord | null> {
@@ -73,55 +73,40 @@ export class SportsLiveEventRepository {
     sportChannelId: string;
     kickoffAtUtc: Date;
   }): Promise<SportsLiveEventChannelRecord> {
-    const existing = await this.getByGuildAndEvent({
-      guildId: input.guildId,
-      eventId: input.eventId,
-    });
+    const now = new Date();
 
-    if (existing) {
-      await this.db
-        .update(sportsLiveEventChannels)
-        .set({
+    await this.db
+      .insert(sportsLiveEventChannels)
+      .values({
+        id: ulid(),
+        guildId: input.guildId,
+        sportName: input.sportName,
+        eventId: input.eventId,
+        eventName: input.eventName,
+        sportChannelId: input.sportChannelId,
+        kickoffAtUtc: input.kickoffAtUtc,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onDuplicateKeyUpdate({
+        set: {
           sportName: input.sportName,
           eventName: input.eventName,
           sportChannelId: input.sportChannelId,
           kickoffAtUtc: input.kickoffAtUtc,
-          updatedAt: new Date(),
-        })
-        .where(eq(sportsLiveEventChannels.id, existing.id));
-
-      const refreshed = await this.getByGuildAndEvent({
-        guildId: input.guildId,
-        eventId: input.eventId,
+          updatedAt: now,
+        },
       });
-      if (!refreshed) {
-        throw new Error('Failed to upsert sports live event channel');
-      }
 
-      return refreshed;
-    }
-
-    await this.db.insert(sportsLiveEventChannels).values({
-      id: ulid(),
-      guildId: input.guildId,
-      sportName: input.sportName,
-      eventId: input.eventId,
-      eventName: input.eventName,
-      sportChannelId: input.sportChannelId,
-      kickoffAtUtc: input.kickoffAtUtc,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const created = await this.getByGuildAndEvent({
+    const record = await this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
     });
-    if (!created) {
-      throw new Error('Failed to upsert sports live event channel');
+    if (!record) {
+      throw new Error('Failed to load sports live event channel');
     }
 
-    return created;
+    return record;
   }
 
   public async markFinished(input: {
@@ -145,7 +130,7 @@ export class SportsLiveEventRepository {
         ),
       );
 
-    return this.getByGuildAndEvent({
+    return this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
     });

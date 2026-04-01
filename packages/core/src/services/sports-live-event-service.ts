@@ -77,6 +77,26 @@ export class SportsLiveEventService {
     }
   }
 
+  public async getTrackedEvent(input: {
+    guildId: string;
+    eventId: string;
+  }): Promise<Result<SportsLiveEventChannelSummary | null, AppError>> {
+    try {
+      const record = await this.repository.getTrackedEvent(input);
+      return ok(record ? mapSportsLiveEventChannelSummary(record) : null);
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError(
+              'SPORTS_LIVE_EVENT_READ_FAILED',
+              'Sports live event read failed due to an internal error.',
+              500,
+            ),
+      );
+    }
+  }
+
   public async markFinished(input: {
     guildId: string;
     eventId: string;
