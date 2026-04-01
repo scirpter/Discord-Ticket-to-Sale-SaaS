@@ -4,6 +4,7 @@ import { getEnv, resetEnvForTests } from '../src/config/env.js';
 
 const ORIGINAL_SUPER_ADMIN_DISCORD_IDS = process.env.SUPER_ADMIN_DISCORD_IDS;
 const ORIGINAL_VOODOO_ENV_FILE = process.env.VOODOO_ENV_FILE;
+const ORIGINAL_SPORTS_DEFAULT_PUBLISH_TIME = process.env.SPORTS_DEFAULT_PUBLISH_TIME;
 
 describe('getEnv', () => {
   afterEach(() => {
@@ -20,10 +21,16 @@ describe('getEnv', () => {
   afterEach(() => {
     if (ORIGINAL_VOODOO_ENV_FILE == null) {
       delete process.env.VOODOO_ENV_FILE;
+    } else {
+      process.env.VOODOO_ENV_FILE = ORIGINAL_VOODOO_ENV_FILE;
+    }
+
+    if (ORIGINAL_SPORTS_DEFAULT_PUBLISH_TIME == null) {
+      delete process.env.SPORTS_DEFAULT_PUBLISH_TIME;
       return;
     }
 
-    process.env.VOODOO_ENV_FILE = ORIGINAL_VOODOO_ENV_FILE;
+    process.env.SPORTS_DEFAULT_PUBLISH_TIME = ORIGINAL_SPORTS_DEFAULT_PUBLISH_TIME;
   });
 
   it('parses configured super admin Discord IDs as a trimmed list', () => {

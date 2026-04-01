@@ -100,7 +100,7 @@ Copy `.env.example` to `.env` and fill values.
 
 - Runs from separate worker/token (`apps/sports-worker`).
 - Creates and manages one text channel per sport under a managed category, then republishes that day’s UK TV listings on the daily schedule.
-- Default schedule is `01:00` in `Europe/London`, and the worker clears the previous day’s managed posts before sending the new listings.
+- Default schedule is `00:01` in `Europe/London`, and the worker clears the previous day’s managed posts before sending the new listings.
 - Uses TheSportsDB for sport, event, broadcaster, and image data. A paid API key is required for full daily coverage because the public `123` key is heavily truncated.
 - `/sports setup` creates or refreshes the managed sports category and publishes the current day’s listings immediately.
 - `/sports sync` creates missing sport channels and refreshes the saved channel bindings without republishing.
