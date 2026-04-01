@@ -3,6 +3,7 @@ import { err, ok, type Result } from 'neverthrow';
 
 import { getEnv } from '../config/env.js';
 import { AppError } from '../domain/errors.js';
+import { logger } from '../infra/logger.js';
 import { resolveLocalDate } from './sports-schedule.js';
 
 type SportsApiV1TvEvent = {
@@ -593,6 +594,10 @@ function toNumberValue(value: string | number | null | undefined): number | null
 
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toLoggableError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function pickBestTeamSearchResult(
@@ -1328,7 +1333,14 @@ export class SportsDataService {
               broadcasters: extractTvBroadcasts(tvPayload),
               broadcastCountry: input.broadcastCountry,
             });
-          } catch {
+          } catch (error) {
+            logger.warn(
+              {
+                eventId,
+                err: toLoggableError(error),
+              },
+              'sports live event TV enrichment failed',
+            );
             broadcasters = [];
           }
 
@@ -1370,26 +1382,45 @@ export class SportsDataService {
     eventId: string;
   }): Promise<Result<SportsEventHighlight | null, AppError>> {
     try {
-      const payload = await this.requestV2<SportsApiV2EventHighlightsPayload>({
+      const highlightsPayload = await this.requestV2<SportsApiV2EventHighlightsPayload>({
         path: `/lookup/event_highlights/${encodeURIComponent(input.eventId)}`,
       });
-      const highlight = extractEventHighlightsRows(payload)[0];
+      const highlight = extractEventHighlightsRows(highlightsPayload)[0];
+      const highlightVideoUrl = firstNonEmpty(highlight?.strVideo);
 
-      if (!highlight) {
-        return ok(null);
+      if (highlight && highlightVideoUrl) {
+        return ok({
+          eventId: firstNonEmpty(highlight.idEvent) ?? input.eventId,
+          eventName: firstNonEmpty(highlight.strEvent),
+          sportName: firstNonEmpty(highlight.strSport),
+          videoUrl: highlightVideoUrl,
+          imageUrl: firstNonEmpty(highlight.strThumb, highlight.strPoster, highlight.strFanart),
+        });
       }
 
-      const videoUrl = firstNonEmpty(highlight.strVideo);
-      if (!videoUrl) {
+      const eventPayload = await this.requestV2<{ lookup?: SportsApiV2EventLookup[] | null }>({
+        path: `/lookup/event/${encodeURIComponent(input.eventId)}`,
+      });
+      const event = eventPayload.lookup?.[0];
+      const eventVideoUrl = firstNonEmpty(event?.strVideo);
+      if (!event || !eventVideoUrl) {
         return ok(null);
       }
 
       return ok({
-        eventId: firstNonEmpty(highlight.idEvent) ?? input.eventId,
-        eventName: firstNonEmpty(highlight.strEvent),
-        sportName: firstNonEmpty(highlight.strSport),
-        videoUrl,
-        imageUrl: firstNonEmpty(highlight.strThumb, highlight.strPoster, highlight.strFanart),
+        eventId: firstNonEmpty(event.idEvent) ?? input.eventId,
+        eventName: firstNonEmpty(event.strEvent),
+        sportName: firstNonEmpty(event.strSport),
+        videoUrl: eventVideoUrl,
+        imageUrl: firstNonEmpty(
+          event.strThumb,
+          event.strPoster,
+          event.strFanart,
+          event.strBanner,
+          highlight?.strThumb,
+          highlight?.strPoster,
+          highlight?.strFanart,
+        ),
       });
     } catch (error) {
       return err(this.toSportsApiError(error));

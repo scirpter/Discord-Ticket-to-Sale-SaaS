@@ -6,6 +6,7 @@ import {
   type SportsSearchResult,
 } from '../src/services/sports-data-service.js';
 import { resetEnvForTests } from '../src/config/env.js';
+import { logger } from '../src/infra/logger.js';
 
 const ORIGINAL_SPORTS_API_KEY = process.env.SPORTS_API_KEY;
 const ORIGINAL_SPORTS_API_BASE_URL = process.env.SPORTS_API_BASE_URL;
@@ -646,6 +647,244 @@ describe('pickBestSportsSearchResult', () => {
       videoUrl: 'https://youtube.com/watch?v=highlights',
       imageUrl: 'https://img.test/highlights.jpg',
     });
+  });
+
+  it('falls back to event lookup video when event highlights are empty', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          highlights: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          lookup: [
+            {
+              idEvent: 'evt-2',
+              strEvent: 'Aberdeen vs Rangers',
+              strSport: 'Soccer',
+              strVideo: 'https://youtube.com/watch?v=fallback-video',
+              strThumb: 'https://img.test/fallback-thumb.jpg',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new SportsDataService();
+    const result = await service.getEventHighlights({ eventId: 'evt-2' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://example.com/api/v2/json/lookup/event_highlights/evt-2');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://example.com/api/v2/json/lookup/event/evt-2');
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(result.value).toMatchObject({
+      eventId: 'evt-2',
+      eventName: 'Aberdeen vs Rangers',
+      sportName: 'Soccer',
+      videoUrl: 'https://youtube.com/watch?v=fallback-video',
+      imageUrl: 'https://img.test/fallback-thumb.jpg',
+    });
+  });
+
+  it('returns fixtures from league schedule when team lookup misses', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          search: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          search: [
+            {
+              idLeague: '4328',
+              strLeague: 'Scottish Premiership',
+              strSport: 'Soccer',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          schedule: [
+            {
+              idEvent: 'league-fix-1',
+              strEvent: 'Rangers vs Hearts',
+              strLeague: 'Scottish Premiership',
+              strSport: 'Soccer',
+              dateEvent: '2026-04-02',
+              strThumb: 'https://img.test/league-fixture.jpg',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new SportsDataService();
+    const result = await service.getFixtures({ query: 'Scottish Premiership' });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://example.com/api/v2/json/search/team/scottish_premiership');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://example.com/api/v2/json/search/league/scottish_premiership');
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('https://example.com/api/v2/json/schedule/next/league/4328');
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(result.value).toEqual([
+      {
+        eventId: 'league-fix-1',
+        eventName: 'Rangers vs Hearts',
+        sportName: 'Soccer',
+        leagueName: 'Scottish Premiership',
+        dateEvent: '2026-04-02',
+        imageUrl: 'https://img.test/league-fixture.jpg',
+      },
+    ]);
+  });
+
+  it('returns results from league schedule when team lookup misses', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          search: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          search: [
+            {
+              idLeague: '4328',
+              strLeague: 'Scottish Premiership',
+              strSport: 'Soccer',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          schedule: [
+            {
+              idEvent: 'league-res-1',
+              strEvent: 'Celtic vs Rangers',
+              strLeague: 'Scottish Premiership',
+              strSport: 'Soccer',
+              dateEvent: '2026-03-28',
+              strThumb: 'https://img.test/league-result.jpg',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new SportsDataService();
+    const result = await service.getResults({ query: 'Scottish Premiership' });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://example.com/api/v2/json/search/team/scottish_premiership');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://example.com/api/v2/json/search/league/scottish_premiership');
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('https://example.com/api/v2/json/schedule/previous/league/4328');
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(result.value).toEqual([
+      {
+        eventId: 'league-res-1',
+        eventName: 'Celtic vs Rangers',
+        sportName: 'Soccer',
+        leagueName: 'Scottish Premiership',
+        dateEvent: '2026-03-28',
+        imageUrl: 'https://img.test/league-result.jpg',
+      },
+    ]);
+  });
+
+  it('logs a warning and returns degraded live events when TV enrichment fails', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          events: [
+            {
+              idEvent: 'evt-tv-fail',
+              strEvent: 'Rangers vs Hearts',
+              strSport: 'Soccer',
+              strLeague: 'Scottish Premiership',
+              strStatus: 'Live',
+              intHomeScore: '1',
+              intAwayScore: '0',
+              strTimestamp: '2026-03-20T15:00:00+00:00',
+              strThumb: 'https://img.test/live-fallback.jpg',
+            },
+          ],
+        }),
+      )
+      .mockRejectedValueOnce(new Error('tv lookup failed'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => logger);
+
+    const service = new SportsDataService();
+    const result = await service.listLiveEvents({
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(result.value).toEqual([
+      {
+        eventId: 'evt-tv-fail',
+        eventName: 'Rangers vs Hearts',
+        sportName: 'Soccer',
+        leagueName: 'Scottish Premiership',
+        statusLabel: 'Live',
+        scoreLabel: '1-0',
+        startTimeUkLabel: '15:00',
+        imageUrl: 'https://img.test/live-fallback.jpg',
+        broadcasters: [],
+      },
+    ]);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-tv-fail',
+        err: expect.any(Error),
+      }),
+      'sports live event TV enrichment failed',
+    );
   });
 
   it('returns standings, fixtures, results, team, and player lookup payloads', async () => {
