@@ -91,6 +91,10 @@ function buildLiveEventChannelName(eventName: string): string {
   return normalizeChannelName(`live-${eventName}`);
 }
 
+function buildLiveEventChannelTopic(eventId: string): string {
+  return `Managed by the sports worker for live event ${eventId}.`;
+}
+
 function buildLiveEventSnapshots(event: SportsLiveEvent): {
   scoreSnapshot: Record<string, unknown> | null;
   stateSnapshot: Record<string, unknown>;
@@ -135,12 +139,16 @@ function findAdoptableLiveEventChannel(input: {
   channels: Iterable<unknown>;
   trackedEventChannelIds: Set<string>;
   desiredName: string;
+  eventId: string;
   parentIds: Set<string>;
 }): TextChannel | null {
+  const desiredTopic = buildLiveEventChannelTopic(input.eventId);
+
   for (const channel of input.channels) {
     if (
       isManagedTextChannel(channel) &&
       channel.name === input.desiredName &&
+      channel.topic === desiredTopic &&
       typeof channel.parentId === 'string' &&
       input.parentIds.has(channel.parentId) &&
       !input.trackedEventChannelIds.has(channel.id)
@@ -642,12 +650,14 @@ export async function reconcileLiveEventsForGuild(input: {
     const trackedEvent = trackedEventsByEventId.get(event.eventId) ?? null;
     const existingChannel = await fetchTrackedEventChannel(input.guild, trackedEvent?.eventChannelId ?? null);
     const desiredName = buildLiveEventChannelName(event.eventName);
+    const desiredTopic = buildLiveEventChannelTopic(event.eventId);
     const adoptedChannel = existingChannel
       ? null
       : findAdoptableLiveEventChannel({
           channels: guildChannels.values(),
           trackedEventChannelIds,
           desiredName,
+          eventId: event.eventId,
           parentIds: new Set([parentId, sportChannel.id]),
         });
     const desiredExistingName = existingChannel
@@ -660,6 +670,7 @@ export async function reconcileLiveEventsForGuild(input: {
     const desiredSnapshots = buildLiveEventSnapshots(event);
     const isPlacementUnchanged =
       existingChannel?.name === desiredExistingName &&
+      existingChannel.topic === desiredTopic &&
       (existingChannel.parentId ?? category.id) === parentId;
     const isTrackedStateUnchanged =
       trackedEvent?.status === 'live' &&
@@ -701,6 +712,7 @@ export async function reconcileLiveEventsForGuild(input: {
         existingChannel.edit({
           name: reservedName,
           parent: parentId,
+          topic: desiredTopic,
         }),
       );
       updatedChannelCount += 1;
@@ -718,6 +730,7 @@ export async function reconcileLiveEventsForGuild(input: {
           name: reservedName,
           type: ChannelType.GuildText,
           parent: parentId,
+          topic: desiredTopic,
           reason: `Create a temporary live event channel for ${event.eventName}.`,
         }),
       )) as TextChannel;

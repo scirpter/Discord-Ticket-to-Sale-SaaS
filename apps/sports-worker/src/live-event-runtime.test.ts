@@ -533,6 +533,7 @@ describe('live event runtime', () => {
       id: 'live-1',
       name: 'live-rangers-vs-celtic',
       parentId: 'category-1',
+      topic: 'Managed by the sports worker for live event evt-1.',
     });
     channels.set(existingLiveChannel.id, existingLiveChannel);
 
@@ -1265,6 +1266,7 @@ describe('live event runtime', () => {
       id: 'live-orphan-1',
       name: 'live-rangers-vs-celtic',
       parentId: 'sport-1',
+      topic: 'Managed by the sports worker for live event evt-1.',
     });
     channels.set(orphanedLiveChannel.id, orphanedLiveChannel);
 
@@ -1330,6 +1332,80 @@ describe('live event runtime', () => {
       }),
     );
     expect(orphanedLiveChannel.send).toHaveBeenCalled();
+  });
+
+  it('does not adopt a same-name channel unless it carries the live-event ownership marker', async () => {
+    const { guild, channels, create } = createGuildFixture();
+    const unrelatedChannel = createTextChannel({
+      id: 'live-unrelated-1',
+      name: 'live-rangers-vs-celtic',
+      parentId: 'sport-1',
+      topic: 'General fan discussion',
+    });
+    channels.set(unrelatedChannel.id, unrelatedChannel);
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        localTimeHhMm: '01:00',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T01:00:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: 'soccer',
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
+      createOkResult([makeLiveEvent()]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            eventChannelId: 'live-1',
+            status: 'live',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
+
+    const result = await reconcileLiveEventsForGuild({
+      guild,
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      now: new Date('2026-03-20T16:10:00.000Z'),
+    });
+
+    expect(result.createdChannelCount).toBe(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(upsertTrackedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+        status: 'live',
+        eventChannelId: 'live-1',
+      }),
+    );
+    expect(unrelatedChannel.send).not.toHaveBeenCalled();
   });
 
   it('recovers tracked live channels on scheduler start without creating duplicates', async () => {
