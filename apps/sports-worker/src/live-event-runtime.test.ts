@@ -468,7 +468,7 @@ describe('live event runtime', () => {
     expect(existingLiveChannel.edit).toHaveBeenCalled();
   });
 
-  it('skips rewriting a live event channel when the persisted state is unchanged', async () => {
+  it('skips Discord rewrites but persists the sync heartbeat when the live event state is unchanged', async () => {
     const { guild, channels, create } = createGuildFixture();
     const existingLiveChannel = createTextChannel({
       id: 'live-1',
@@ -544,7 +544,15 @@ describe('live event runtime', () => {
     expect(existingLiveChannel.edit).not.toHaveBeenCalled();
     expect(existingLiveChannel.send).not.toHaveBeenCalled();
     expect(existingLiveChannel.messages.fetch).not.toHaveBeenCalled();
-    expect(upsertTrackedEvent).not.toHaveBeenCalled();
+    expect(upsertTrackedEvent).toHaveBeenCalledTimes(1);
+    expect(upsertTrackedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+        eventChannelId: 'live-1',
+        lastSyncedAtUtc: new Date('2026-03-20T15:07:00.000Z'),
+        status: 'live',
+      }),
+    );
   });
 
   it('deletes finished event channels after the three-hour cleanup window', async () => {

@@ -352,9 +352,17 @@ export async function reconcileLiveEventsForGuild(input: {
     const trackedEvent = trackedEventsByEventId.get(event.eventId) ?? null;
     const existingChannel = await fetchTrackedEventChannel(input.guild, trackedEvent?.eventChannelId ?? null);
     const desiredName = buildLiveEventChannelName(event.eventName);
+    const desiredExistingName = existingChannel
+      ? reserveUniqueChannelName({
+          base: desiredName,
+          usedNames: new Set(usedNames),
+          currentName: existingChannel.name,
+        })
+      : desiredName;
     const desiredSnapshots = buildLiveEventSnapshots(event);
     const isPlacementUnchanged =
-      existingChannel?.name === desiredName && (existingChannel.parentId ?? category.id) === parentId;
+      existingChannel?.name === desiredExistingName &&
+      (existingChannel.parentId ?? category.id) === parentId;
     const isTrackedStateUnchanged =
       trackedEvent?.status === 'live' &&
       trackedEvent.eventChannelId === existingChannel?.id &&
@@ -362,6 +370,25 @@ export async function reconcileLiveEventsForGuild(input: {
       areSnapshotsEqual(trackedEvent.lastStateSnapshot, desiredSnapshots.stateSnapshot);
 
     if (existingChannel && isPlacementUnchanged && isTrackedStateUnchanged) {
+      const heartbeatResult = await sportsLiveEventService.upsertTrackedEvent({
+        guildId: input.guild.id,
+        sportName,
+        eventId: event.eventId,
+        eventName: event.eventName,
+        sportChannelId: sportChannel.id,
+        kickoffAtUtc: trackedEvent?.kickoffAtUtc ?? now,
+        eventChannelId: existingChannel.id,
+        status: 'live',
+        lastScoreSnapshot: desiredSnapshots.scoreSnapshot,
+        lastStateSnapshot: desiredSnapshots.stateSnapshot,
+        lastSyncedAtUtc: now,
+        finishedAtUtc: null,
+        deleteAfterUtc: null,
+        highlightsPosted: trackedEvent?.highlightsPosted ?? false,
+      });
+      if (heartbeatResult.isErr()) {
+        throw heartbeatResult.error;
+      }
       continue;
     }
 
