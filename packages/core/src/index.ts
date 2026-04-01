@@ -18,6 +18,7 @@ export * from './repositories/product-repository.js';
 export * from './repositories/referral-repository.js';
 export * from './repositories/sales-history-repository.js';
 export * from './repositories/sports-access-repository.js';
+export * from './repositories/sports-live-event-repository.js';
 export * from './repositories/sports-repository.js';
 export * from './repositories/tenant-repository.js';
 export * from './repositories/ticket-metadata-repository.js';
@@ -50,6 +51,7 @@ export * from './services/referral-service.js';
 export * from './services/sale-service.js';
 export * from './services/sales-history-service.js';
 export * from './services/sports-access-service.js';
+export * from './services/sports-live-event-service.js';
 export * from './services/sports-data-service.js';
 export * from './services/sports-service.js';
 export {
