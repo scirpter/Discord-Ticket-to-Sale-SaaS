@@ -697,6 +697,57 @@ describe('pickBestSportsSearchResult', () => {
     });
   });
 
+  it('falls back to event lookup video when event highlights request fails', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('Not Found', {
+          status: 404,
+          headers: {
+            'Content-Type': 'text/plain',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          lookup: [
+            {
+              idEvent: 'evt-3',
+              strEvent: 'Hearts vs Rangers',
+              strSport: 'Soccer',
+              strVideo: 'https://youtube.com/watch?v=404-fallback',
+              strThumb: 'https://img.test/404-fallback-thumb.jpg',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new SportsDataService();
+    const result = await service.getEventHighlights({ eventId: 'evt-3' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://example.com/api/v2/json/lookup/event_highlights/evt-3');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://example.com/api/v2/json/lookup/event/evt-3');
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(result.value).toMatchObject({
+      eventId: 'evt-3',
+      eventName: 'Hearts vs Rangers',
+      sportName: 'Soccer',
+      videoUrl: 'https://youtube.com/watch?v=404-fallback',
+      imageUrl: 'https://img.test/404-fallback-thumb.jpg',
+    });
+  });
+
   it('returns fixtures from league schedule when team lookup misses', async () => {
     process.env.SPORTS_API_KEY = 'premium-key';
     process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';

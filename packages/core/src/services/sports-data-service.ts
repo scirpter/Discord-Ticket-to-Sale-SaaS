@@ -1382,10 +1382,16 @@ export class SportsDataService {
     eventId: string;
   }): Promise<Result<SportsEventHighlight | null, AppError>> {
     try {
-      const highlightsPayload = await this.requestV2<SportsApiV2EventHighlightsPayload>({
-        path: `/lookup/event_highlights/${encodeURIComponent(input.eventId)}`,
-      });
-      const highlight = extractEventHighlightsRows(highlightsPayload)[0];
+      let highlight: SportsApiV2EventHighlightsRow | null = null;
+      try {
+        const highlightsPayload = await this.requestV2<SportsApiV2EventHighlightsPayload>({
+          path: `/lookup/event_highlights/${encodeURIComponent(input.eventId)}`,
+        });
+        highlight = extractEventHighlightsRows(highlightsPayload)[0] ?? null;
+      } catch {
+        highlight = null;
+      }
+
       const highlightVideoUrl = firstNonEmpty(highlight?.strVideo);
 
       if (highlight && highlightVideoUrl) {
