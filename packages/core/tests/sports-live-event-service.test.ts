@@ -33,16 +33,11 @@ type MockDb = {
     };
   };
   insertCalls: number;
-  updateCalls: number;
   findFirstCalls: number;
+  onDuplicateKeyUpdateCalls: number;
   insert: () => {
     values: (value: Partial<SportsLiveEventRow>) => {
       onDuplicateKeyUpdate: (_input: unknown) => Promise<void>;
-    };
-  };
-  update: () => {
-    set: (value: Partial<SportsLiveEventRow>) => {
-      where: (where: unknown) => Promise<void>;
     };
   };
 };
@@ -84,18 +79,18 @@ function makeRow(overrides: Partial<SportsLiveEventRow> = {}): SportsLiveEventRo
 
 function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
   let insertCalls = 0;
-  let updateCalls = 0;
   let findFirstCalls = 0;
+  let onDuplicateKeyUpdateCalls = 0;
 
   return {
     get insertCalls() {
       return insertCalls;
     },
-    get updateCalls() {
-      return updateCalls;
-    },
     get findFirstCalls() {
       return findFirstCalls;
+    },
+    get onDuplicateKeyUpdateCalls() {
+      return onDuplicateKeyUpdateCalls;
     },
     query: {
       sportsLiveEventChannels: {
@@ -118,61 +113,45 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
           guildId: String(value.guildId),
           eventId: String(value.eventId),
         };
-        const existing = rows.find((row) => row.guildId === key.guildId && row.eventId === key.eventId);
-
-        if (existing) {
-          Object.assign(existing, {
-            ...value,
-            id: existing.id,
-            guildId: key.guildId,
-            eventId: key.eventId,
-            createdAt: existing.createdAt,
-            updatedAt: value.updatedAt ?? existing.updatedAt,
-          });
-          return {
-            onDuplicateKeyUpdate: async (): Promise<void> => undefined,
-          };
-        }
-
-        rows.push({
-          id: String(value.id),
-          guildId: key.guildId,
-          sportName: String(value.sportName),
-          eventId: key.eventId,
-          eventName: String(value.eventName),
-          sportChannelId: String(value.sportChannelId),
-          eventChannelId: value.eventChannelId ?? null,
-          status: (value.status ?? 'scheduled') as SportsLiveEventRow['status'],
-          kickoffAtUtc: value.kickoffAtUtc ?? new Date('1970-01-01T00:00:00.000Z'),
-          lastScoreSnapshot: (value.lastScoreSnapshot ?? null) as Record<string, unknown> | null,
-          lastStateSnapshot: (value.lastStateSnapshot ?? null) as Record<string, unknown> | null,
-          lastSyncedAtUtc: value.lastSyncedAtUtc ?? null,
-          finishedAtUtc: value.finishedAtUtc ?? null,
-          deleteAfterUtc: value.deleteAfterUtc ?? null,
-          highlightsPosted: value.highlightsPosted ?? false,
-          createdAt: value.createdAt ?? new Date('1970-01-01T00:00:00.000Z'),
-          updatedAt: value.updatedAt ?? new Date('1970-01-01T00:00:00.000Z'),
-        });
         return {
-          onDuplicateKeyUpdate: async (): Promise<void> => undefined,
+          onDuplicateKeyUpdate: async (): Promise<void> => {
+            onDuplicateKeyUpdateCalls += 1;
+            const existing = rows.find((row) => row.guildId === key.guildId && row.eventId === key.eventId);
+
+            if (existing) {
+              Object.assign(existing, {
+                ...value,
+                id: existing.id,
+                guildId: key.guildId,
+                eventId: key.eventId,
+                createdAt: existing.createdAt,
+                updatedAt: value.updatedAt ?? existing.updatedAt,
+              });
+              return;
+            }
+
+            rows.push({
+              id: String(value.id),
+              guildId: key.guildId,
+              sportName: String(value.sportName),
+              eventId: key.eventId,
+              eventName: String(value.eventName),
+              sportChannelId: String(value.sportChannelId),
+              eventChannelId: value.eventChannelId ?? null,
+              status: (value.status ?? 'scheduled') as SportsLiveEventRow['status'],
+              kickoffAtUtc: value.kickoffAtUtc ?? new Date('1970-01-01T00:00:00.000Z'),
+              lastScoreSnapshot: (value.lastScoreSnapshot ?? null) as Record<string, unknown> | null,
+              lastStateSnapshot: (value.lastStateSnapshot ?? null) as Record<string, unknown> | null,
+              lastSyncedAtUtc: value.lastSyncedAtUtc ?? null,
+              finishedAtUtc: value.finishedAtUtc ?? null,
+              deleteAfterUtc: value.deleteAfterUtc ?? null,
+              highlightsPosted: value.highlightsPosted ?? false,
+              createdAt: value.createdAt ?? new Date('1970-01-01T00:00:00.000Z'),
+              updatedAt: value.updatedAt ?? new Date('1970-01-01T00:00:00.000Z'),
+            });
+          },
         };
       },
-    }),
-    update: () => ({
-      set: (value: Partial<SportsLiveEventRow>) => ({
-        where: async (where?: unknown): Promise<void> => {
-          updateCalls += 1;
-          const key = getQueryKey(where);
-          if (!key) {
-            return;
-          }
-
-          const row = rows.find((entry) => entry.guildId === key.guildId && entry.eventId === key.eventId);
-          if (row) {
-            Object.assign(row, value);
-          }
-        },
-      }),
     }),
   };
 }
@@ -224,6 +203,7 @@ describe('SportsLiveEventService', () => {
 
     expect(rows).toHaveLength(2);
     expect(mockDb.insertCalls).toBe(2);
+    expect(mockDb.onDuplicateKeyUpdateCalls).toBe(2);
     expect(mockDb.findFirstCalls).toBeGreaterThanOrEqual(2);
     expect(rows.filter((row) => row.guildId === 'guild-1' && row.eventId === 'evt-1')).toHaveLength(1);
     expect(first.id).toBe(second.id);
