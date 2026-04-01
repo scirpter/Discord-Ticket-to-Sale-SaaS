@@ -227,14 +227,15 @@ async function copyToClipboard(text: string) {
 
 function FlashBanner() {
   const { error, flash, clearFlash } = useDashboardContext();
+  const showErrorBanner = Boolean(error) && !(flash?.tone === 'error' && flash.message === error);
 
-  if (!error && !flash) {
+  if (!showErrorBanner && !flash) {
     return null;
   }
 
   return (
     <div className="space-y-3">
-      {error ? (
+      {showErrorBanner ? (
         <div className="rounded-[1.2rem] border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>

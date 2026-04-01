@@ -7,6 +7,7 @@
 - Handles Discord OAuth and session cookie auth.
 - Manages workspace member invites/removals plus Discord/Telegram connection controls from the dashboard.
 - Exposes filtered sales-history views, manual clear controls, scheduled auto-clear settings, and bot invite actions inside the dashboard shell.
+- Normalizes Voodoo Pay crypto wallet form values and returns field-specific validation feedback for dashboard saves.
 - Runs Woo webhook receiver and enqueue/retry logic.
 
 2. `bot-worker`

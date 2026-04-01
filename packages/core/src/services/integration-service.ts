@@ -22,20 +22,24 @@ const integrationInputSchema = z.object({
 const voodooIntegrationInputSchema = z.object({
   merchantWalletAddress: z
     .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'merchantWalletAddress must be a valid Polygon wallet address'),
+    .trim()
+    .regex(
+      /^0x[a-fA-F0-9]{40}$/i,
+      'merchantWalletAddress must be a valid Polygon wallet address',
+    ),
   checkoutDomain: z.string().max(255).optional().default(DEFAULT_VOODOO_PAY_CHECKOUT_DOMAIN),
   callbackSecret: z.string().min(16).max(255).optional(),
   cryptoGatewayEnabled: z.boolean().default(false),
   cryptoAddFees: z.boolean().default(false),
   cryptoWallets: z
     .object({
-      evm: z.string().max(191).optional(),
-      btc: z.string().max(191).optional(),
-      bitcoincash: z.string().max(191).optional(),
-      ltc: z.string().max(191).optional(),
-      doge: z.string().max(191).optional(),
-      trc20: z.string().max(191).optional(),
-      solana: z.string().max(191).optional(),
+      evm: z.string().max(191).nullish(),
+      btc: z.string().max(191).nullish(),
+      bitcoincash: z.string().max(191).nullish(),
+      ltc: z.string().max(191).nullish(),
+      doge: z.string().max(191).nullish(),
+      trc20: z.string().max(191).nullish(),
+      solana: z.string().max(191).nullish(),
     })
     .default({}),
 });
@@ -65,13 +69,13 @@ export function normalizeCheckoutDomain(value: string): string {
 }
 
 function normalizeCryptoWallets(input: {
-  evm?: string;
-  btc?: string;
-  bitcoincash?: string;
-  ltc?: string;
-  doge?: string;
-  trc20?: string;
-  solana?: string;
+  evm?: string | null;
+  btc?: string | null;
+  bitcoincash?: string | null;
+  ltc?: string | null;
+  doge?: string | null;
+  trc20?: string | null;
+  solana?: string | null;
 }): {
   evm: string | null;
   btc: string | null;
@@ -81,8 +85,8 @@ function normalizeCryptoWallets(input: {
   trc20: string | null;
   solana: string | null;
 } {
-  const normalize = (value?: string): string | null => {
-    if (!value) {
+  const normalize = (value?: string | null): string | null => {
+    if (typeof value !== 'string') {
       return null;
     }
     const trimmed = value.trim();

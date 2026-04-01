@@ -105,4 +105,51 @@ describe('voodoo pay integration service', () => {
 
     expect(result.value.checkoutDomain).toBe(DEFAULT_VOODOO_PAY_CHECKOUT_DOMAIN);
   });
+
+  it('accepts nullish crypto wallet fields during saves', async () => {
+    const service = new IntegrationService();
+
+    vi.spyOn((service as any).authorizationService, 'ensureTenantRole').mockResolvedValue(ok(undefined));
+    vi.spyOn((service as any).integrationRepository, 'getVoodooPayIntegrationByGuild').mockResolvedValue(
+      makeIntegrationRecord(),
+    );
+    const upsertSpy = vi
+      .spyOn((service as any).integrationRepository, 'upsertVoodooPayIntegration')
+      .mockResolvedValue(makeIntegrationRecord());
+
+    const result = await service.upsertVoodooPayConfig(makeSession(), {
+      tenantId: 'tenant-1',
+      guildId: 'guild-1',
+      payload: {
+        merchantWalletAddress: '0x1234567890123456789012345678901234567890',
+        checkoutDomain: 'merchant.example.com',
+        cryptoGatewayEnabled: false,
+        cryptoAddFees: false,
+        cryptoWallets: {
+          evm: null,
+          btc: null,
+          bitcoincash: null,
+          ltc: null,
+          doge: null,
+          trc20: null,
+          solana: null,
+        },
+      },
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(upsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cryptoWallets: {
+          evm: null,
+          btc: null,
+          bitcoincash: null,
+          ltc: null,
+          doge: null,
+          trc20: null,
+          solana: null,
+        },
+      }),
+    );
+  });
 });

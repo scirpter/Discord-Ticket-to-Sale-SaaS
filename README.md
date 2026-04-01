@@ -131,6 +131,7 @@ Copy `.env.example` to `.env` and fill values.
 - The dashboard sidebar now keeps a Discord bot invite button visible so merchants can reinstall or add the bot again after redesign updates.
 - Settings now uses an internal sidebar flow for default currency, staff roles, paid-log channel, and Telegram integration, including add/copy/regenerate Telegram actions when the Telegram feature is enabled.
 - Payments now separates the Voodoo Pay wallet, fixed `checkout.voodoo-pay.uk` host, callback secret rotation, and hosted crypto wallet controls into a dedicated page.
+- Payment saves now normalize empty/null crypto wallet fields and return field-specific validation errors instead of a generic `Validation failed` banner.
 - Coupons, points, referrals, and Telegram now use persisted feature toggles in `guild_configs`; when disabled, the UI hides those controls and the backend rejects the related actions.
 - Coupons now uses an internal step menu for `Coupon Settings`, `Create Coupon`, and `View Coupons` so coupon creation and deletion are separate, obvious actions.
 - Product management now lives in a dedicated catalog page with an internal sidebar for `Categories & Questions` and `Products`, plus category selection in the product builder.

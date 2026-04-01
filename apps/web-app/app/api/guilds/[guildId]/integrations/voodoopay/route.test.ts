@@ -94,4 +94,100 @@ describe('voodoo pay integration route', () => {
       }),
     );
   });
+
+  it('normalizes null crypto wallet inputs before calling the service', async () => {
+    const response = await PUT(
+      new NextRequest('https://voodoopaybot.online/api/guilds/guild-1/integrations/voodoopay', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tenantId: 'tenant-1',
+          merchantWalletAddress: '0x1234567890123456789012345678901234567890',
+          checkoutDomain: 'merchant.example.com',
+          cryptoGatewayEnabled: false,
+          cryptoAddFees: false,
+          cryptoWallets: {
+            evm: null,
+            btc: null,
+            bitcoincash: null,
+            ltc: null,
+            doge: null,
+            trc20: null,
+            solana: null,
+          },
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          guildId: 'guild-1',
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsertVoodooPayConfig).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          cryptoWallets: {
+            evm: undefined,
+            btc: undefined,
+            bitcoincash: undefined,
+            ltc: undefined,
+            doge: undefined,
+            trc20: undefined,
+            solana: undefined,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('returns actionable validation issue text when validation fails', async () => {
+    upsertVoodooPayConfig.mockResolvedValue({
+      isErr: () => true,
+      isOk: () => false,
+      error: {
+        statusCode: 422,
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [
+          {
+            path: ['merchantWalletAddress'],
+            message: 'merchantWalletAddress must be a valid Polygon wallet address',
+          },
+        ],
+      },
+    });
+
+    const response = await PUT(
+      new NextRequest('https://voodoopaybot.online/api/guilds/guild-1/integrations/voodoopay', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tenantId: 'tenant-1',
+          merchantWalletAddress: 'invalid-wallet',
+          checkoutDomain: 'merchant.example.com',
+          cryptoGatewayEnabled: false,
+          cryptoAddFees: false,
+          cryptoWallets: {},
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          guildId: 'guild-1',
+        }),
+      },
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'merchantWalletAddress: merchantWalletAddress must be a valid Polygon wallet address',
+    });
+  });
 });
