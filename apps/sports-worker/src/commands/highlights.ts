@@ -43,13 +43,16 @@ export const highlightsCommand = {
       }
 
       const query = interaction.options.getString('query', true).trim();
-      const eventMatch = await findBestMatchingEvent(query);
+      const eventMatch = await findBestMatchingEvent({
+        query,
+        preference: 'prefer-recent',
+      });
       if ('error' in eventMatch) {
         await sendEphemeralReply(interaction, eventMatch.error);
         return;
       }
 
-      if (!eventMatch.event) {
+      if (!eventMatch.match) {
         await sendEphemeralReply(
           interaction,
           `No matching event or recent result was found for \`${query}\`.`,
@@ -58,7 +61,7 @@ export const highlightsCommand = {
       }
 
       const highlightsResult = await sportsDataService.getEventHighlights({
-        eventId: eventMatch.event.eventId,
+        eventId: eventMatch.match.event.eventId,
       });
       if (highlightsResult.isErr()) {
         await sendEphemeralReply(interaction, mapSportsError(highlightsResult.error));
@@ -68,17 +71,17 @@ export const highlightsCommand = {
       if (!highlightsResult.value) {
         await sendEphemeralReply(
           interaction,
-          `No on-demand highlights are available yet for \`${eventMatch.event.eventName}\`.`,
+          `No on-demand highlights are available yet for \`${eventMatch.match.event.eventName}\`.`,
         );
         return;
       }
 
       await interaction.editReply({
-        content: `Highlights for \`${eventMatch.event.eventName}\`.`,
+        content: `Highlights for \`${eventMatch.match.event.eventName}\`.`,
         embeds: [
           buildHighlightEmbed({
-            eventName: eventMatch.event.eventName,
-            sportName: eventMatch.event.sportName,
+            eventName: eventMatch.match.event.eventName,
+            sportName: eventMatch.match.event.sportName,
             highlight: highlightsResult.value,
           }),
         ],

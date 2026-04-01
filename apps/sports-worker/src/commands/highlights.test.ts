@@ -161,4 +161,63 @@ describe('highlights command', () => {
       embeds: [expect.any(Object)],
     });
   });
+
+  it('prefers a recent result with highlights over an upcoming fixture for the same team query', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue(
+      createOkResult({
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getGuildActivationState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult(null) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'searchEvents').mockResolvedValue(
+      createOkResult([
+        {
+          eventId: 'evt-upcoming',
+          eventName: 'Rangers vs Hearts',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          dateEvent: '2026-03-25',
+          imageUrl: null,
+        },
+      ]) as Awaited<ReturnType<SportsDataService['searchEvents']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getResults').mockResolvedValue(
+      createOkResult([
+        {
+          eventId: 'evt-result',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          dateEvent: '2026-03-18',
+          imageUrl: null,
+        },
+      ]) as Awaited<ReturnType<SportsDataService['getResults']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getEventHighlights').mockImplementation(
+      async (input: { eventId: string }) =>
+        createOkResult(
+          input.eventId === 'evt-result'
+            ? {
+                eventId: 'evt-result',
+                eventName: 'Rangers vs Celtic',
+                sportName: 'Soccer',
+                videoUrl: 'https://youtube.com/watch?v=result',
+                imageUrl: null,
+              }
+            : null,
+        ) as Awaited<ReturnType<SportsDataService['getEventHighlights']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock('Rangers');
+
+    await highlightsCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Highlights for `Rangers vs Celtic`.',
+      embeds: [expect.any(Object)],
+    });
+  });
 });

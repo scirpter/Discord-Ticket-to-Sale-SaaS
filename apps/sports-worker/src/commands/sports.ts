@@ -155,11 +155,17 @@ function buildSportsLiveStatusMessage(input: {
   const liveCount = trackedEvents.filter((event) => event.status === 'live').length;
   const pendingCleanupCount = trackedEvents.filter((event) => event.status === 'cleanup_due').length;
   const staleThresholdMs = Math.max(input.pollIntervalMs * 3, 5 * 60 * 1000);
-  const staleCount = trackedEvents.filter(
-    (event) =>
-      !event.lastSyncedAtUtc ||
-      input.now.getTime() - event.lastSyncedAtUtc.getTime() > staleThresholdMs,
-  ).length;
+  const staleCount = trackedEvents.filter((event) => {
+    if (event.status === 'cleanup_due') {
+      return false;
+    }
+
+    if (!event.lastSyncedAtUtc) {
+      return true;
+    }
+
+    return input.now.getTime() - event.lastSyncedAtUtc.getTime() > staleThresholdMs;
+  }).length;
   const latestSync = trackedEvents
     .map((event) => event.lastSyncedAtUtc)
     .filter((value): value is Date => value instanceof Date)

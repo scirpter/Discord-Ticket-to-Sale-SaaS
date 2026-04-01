@@ -19,6 +19,12 @@ export const sportsDataService = new SportsDataService();
 export const sportsService = new SportsService();
 export const MAX_LOOKUP_EMBEDS = 10;
 
+export type MatchingEventSource = 'recent-result' | 'upcoming-fixture';
+export type MatchingEvent = {
+  event: SportsSearchResult;
+  source: MatchingEventSource;
+};
+
 function isSuperAdminUser(discordUserId: string): boolean {
   return getEnv().superAdminDiscordIds.includes(discordUserId);
 }
@@ -116,26 +122,43 @@ export async function resolveLookupContext(input: {
   };
 }
 
-export async function findBestMatchingEvent(
-  query: string,
-): Promise<{ event: SportsSearchResult | null } | { error: string }> {
-  const searchResult = await sportsDataService.searchEvents(query);
+export async function findBestMatchingEvent(input: {
+  query: string;
+  preference?: 'prefer-recent' | 'prefer-upcoming';
+}): Promise<{ match: MatchingEvent | null } | { error: string }> {
+  const searchResult = await sportsDataService.searchEvents(input.query);
   if (searchResult.isErr()) {
     return { error: mapSportsError(searchResult.error) };
   }
 
-  const directMatch = pickBestSportsSearchResult(query, searchResult.value);
-  if (directMatch) {
-    return { event: directMatch };
-  }
-
-  const recentResults = await sportsDataService.getResults({ query });
+  const recentResults = await sportsDataService.getResults({ query: input.query });
   if (recentResults.isErr()) {
     return { error: mapSportsError(recentResults.error) };
   }
 
+  const recentMatch = pickBestSportsSearchResult(input.query, recentResults.value);
+  const upcomingMatch = pickBestSportsSearchResult(input.query, searchResult.value);
+  const preferredMatches =
+    input.preference === 'prefer-upcoming'
+      ? [
+          upcomingMatch
+            ? ({ event: upcomingMatch, source: 'upcoming-fixture' } satisfies MatchingEvent)
+            : null,
+          recentMatch
+            ? ({ event: recentMatch, source: 'recent-result' } satisfies MatchingEvent)
+            : null,
+        ]
+      : [
+          recentMatch
+            ? ({ event: recentMatch, source: 'recent-result' } satisfies MatchingEvent)
+            : null,
+          upcomingMatch
+            ? ({ event: upcomingMatch, source: 'upcoming-fixture' } satisfies MatchingEvent)
+            : null,
+        ];
+
   return {
-    event: pickBestSportsSearchResult(query, recentResults.value),
+    match: preferredMatches.find((value): value is MatchingEvent => value !== null) ?? null,
   };
 }
 

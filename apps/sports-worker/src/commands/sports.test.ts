@@ -342,6 +342,54 @@ describe('sports command', () => {
     });
   });
 
+  it('keeps live-status healthy when only cleanup_due rows are old', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        {
+          id: 'tracked-cleanup-1',
+          guildId: 'guild-1',
+          sportName: 'Soccer',
+          eventId: 'evt-cleanup-1',
+          eventName: 'Hearts vs Hibs',
+          sportChannelId: 'sport-1',
+          eventChannelId: 'live-cleanup-1',
+          status: 'cleanup_due',
+          kickoffAtUtc: new Date('2026-03-20T12:00:00.000Z'),
+          lastScoreSnapshot: { scoreLabel: '1-0' },
+          lastStateSnapshot: { statusLabel: 'FT' },
+          lastSyncedAtUtc: new Date('2026-03-20T10:00:00.000Z'),
+          finishedAtUtc: new Date('2026-03-20T14:45:00.000Z'),
+          deleteAfterUtc: new Date('2026-03-20T17:45:00.000Z'),
+          highlightsPosted: false,
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T14:45:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'live-status',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Pending cleanup: 1'),
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Sync health: Healthy'),
+    });
+  });
+
   it('clears stale managed sport channels that have no listings today', async () => {
     vi.resetModules();
 

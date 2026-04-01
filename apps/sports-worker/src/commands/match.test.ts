@@ -143,6 +143,9 @@ describe('match command', () => {
         },
       ]) as Awaited<ReturnType<SportsDataService['searchEvents']>>,
     );
+    vi.spyOn(SportsDataService.prototype, 'getResults').mockResolvedValue(
+      createOkResult([]) as Awaited<ReturnType<SportsDataService['getResults']>>,
+    );
     vi.spyOn(SportsDataService.prototype, 'getEventDetails').mockResolvedValue(
       createOkResult({
         eventId: 'evt-1',
@@ -175,6 +178,115 @@ describe('match command', () => {
 
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining('Match centre for'),
+      embeds: [expect.any(Object)],
+    });
+  });
+
+  it('labels fallback responses as recent results when details are unavailable', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue(
+      createOkResult({
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getGuildActivationState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'searchEvents').mockResolvedValue(
+      createOkResult([
+        {
+          eventId: 'evt-upcoming',
+          eventName: 'Rangers vs Hearts',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          dateEvent: '2026-03-25',
+          imageUrl: null,
+        },
+      ]) as Awaited<ReturnType<SportsDataService['searchEvents']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getResults').mockResolvedValue(
+      createOkResult([
+        {
+          eventId: 'evt-result',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          dateEvent: '2026-03-18',
+          imageUrl: null,
+        },
+      ]) as Awaited<ReturnType<SportsDataService['getResults']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getEventDetails').mockResolvedValue(
+      createOkResult(null) as Awaited<ReturnType<SportsDataService['getEventDetails']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getEventHighlights').mockResolvedValue(
+      createOkResult({
+        eventId: 'evt-result',
+        eventName: 'Rangers vs Celtic',
+        sportName: 'Soccer',
+        videoUrl: 'https://youtube.com/watch?v=result',
+        imageUrl: null,
+      }) as Awaited<ReturnType<SportsDataService['getEventHighlights']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock('Rangers');
+
+    await matchCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Recent result match centre for `Rangers vs Celtic`.'),
+      embeds: [expect.any(Object)],
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('https://youtube.com/watch?v=result'),
+      embeds: [expect.any(Object)],
+    });
+  });
+
+  it('labels fallback responses as upcoming fixtures when details are unavailable', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue(
+      createOkResult({
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getGuildActivationState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'searchEvents').mockResolvedValue(
+      createOkResult([
+        {
+          eventId: 'evt-upcoming',
+          eventName: 'Rangers vs Hearts',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          dateEvent: '2026-03-25',
+          imageUrl: null,
+        },
+      ]) as Awaited<ReturnType<SportsDataService['searchEvents']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getResults').mockResolvedValue(
+      createOkResult([]) as Awaited<ReturnType<SportsDataService['getResults']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getEventDetails').mockResolvedValue(
+      createOkResult(null) as Awaited<ReturnType<SportsDataService['getEventDetails']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'getEventHighlights').mockResolvedValue(
+      createOkResult(null) as Awaited<ReturnType<SportsDataService['getEventHighlights']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock('Rangers');
+
+    await matchCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Upcoming fixture match centre for `Rangers vs Hearts`.',
       embeds: [expect.any(Object)],
     });
   });

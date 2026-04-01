@@ -43,13 +43,16 @@ export const matchCommand = {
       }
 
       const query = interaction.options.getString('query', true).trim();
-      const eventMatch = await findBestMatchingEvent(query);
+      const eventMatch = await findBestMatchingEvent({
+        query,
+        preference: 'prefer-recent',
+      });
       if ('error' in eventMatch) {
         await sendEphemeralReply(interaction, eventMatch.error);
         return;
       }
 
-      if (!eventMatch.event) {
+      if (!eventMatch.match) {
         await sendEphemeralReply(
           interaction,
           `No matching event or recent result was found for \`${query}\`.`,
@@ -59,12 +62,12 @@ export const matchCommand = {
 
       const [detailsResult, highlightsResult] = await Promise.all([
         sportsDataService.getEventDetails({
-          eventId: eventMatch.event.eventId,
+          eventId: eventMatch.match.event.eventId,
           timezone: context.timezone,
           broadcastCountry: context.broadcastCountry,
         }),
         sportsDataService.getEventHighlights({
-          eventId: eventMatch.event.eventId,
+          eventId: eventMatch.match.event.eventId,
         }),
       ]);
       if (detailsResult.isErr()) {
@@ -76,8 +79,20 @@ export const matchCommand = {
         return;
       }
 
+      const fallbackLabel =
+        eventMatch.match.source === 'recent-result'
+          ? 'Recent result match centre'
+          : 'Upcoming fixture match centre';
+
       await interaction.editReply({
-        content: `Match centre for \`${eventMatch.event.eventName}\`.`,
+        content: detailsResult.value
+          ? `Match centre for \`${eventMatch.match.event.eventName}\`.`
+          : [
+              `${fallbackLabel} for \`${eventMatch.match.event.eventName}\`.`,
+              highlightsResult.value?.videoUrl ? `Highlights: ${highlightsResult.value.videoUrl}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n'),
         embeds: detailsResult.value
           ? [
               buildMatchCenterEmbed({
@@ -87,8 +102,8 @@ export const matchCommand = {
             ]
           : [
               buildLookupScheduleEmbed({
-                result: eventMatch.event,
-                label: 'Fixture',
+                result: eventMatch.match.event,
+                label: eventMatch.match.source === 'recent-result' ? 'Result' : 'Fixture',
               }),
             ],
       });
