@@ -857,6 +857,50 @@ export const sportsChannelBindings = mysqlTable(
   }),
 );
 
+export const sportsLiveEventChannels = mysqlTable(
+  'sports_live_event_channels',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    sportName: varchar('sport_name', { length: 80 }).notNull(),
+    eventId: varchar('event_id', { length: 32 }).notNull(),
+    eventName: varchar('event_name', { length: 160 }).notNull(),
+    sportChannelId: varchar('sport_channel_id', { length: 32 }).notNull(),
+    eventChannelId: varchar('event_channel_id', { length: 32 }),
+    status: mysqlEnum('status', ['scheduled', 'live', 'finished', 'cleanup_due', 'deleted', 'failed'])
+      .notNull()
+      .default('scheduled'),
+    kickoffAtUtc: timestamp('kickoff_at_utc', { mode: 'date' }).notNull(),
+    lastScoreSnapshot: json('last_score_snapshot').$type<Record<string, unknown> | null>(),
+    lastStateSnapshot: json('last_state_snapshot').$type<Record<string, unknown> | null>(),
+    lastSyncedAtUtc: timestamp('last_synced_at_utc', { mode: 'date' }),
+    finishedAtUtc: timestamp('finished_at_utc', { mode: 'date' }),
+    deleteAfterUtc: timestamp('delete_after_utc', { mode: 'date' }),
+    highlightsPosted: boolean('highlights_posted').notNull().default(false),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    guildEventUnique: uniqueIndex('sports_live_event_channels_guild_event_uq').on(
+      table.guildId,
+      table.eventId,
+    ),
+    guildEventChannelUnique: uniqueIndex('sports_live_event_channels_guild_event_channel_uq').on(
+      table.guildId,
+      table.eventChannelId,
+    ),
+    statusSyncIdx: index('sports_live_event_channels_status_sync_idx').on(
+      table.status,
+      table.lastSyncedAtUtc,
+    ),
+    statusDeleteIdx: index('sports_live_event_channels_status_delete_idx').on(
+      table.status,
+      table.deleteAfterUtc,
+    ),
+    guildIdx: index('sports_live_event_channels_guild_idx').on(table.guildId),
+  }),
+);
+
 export const sportsAuthorizedUsers = mysqlTable(
   'sports_authorized_users',
   {

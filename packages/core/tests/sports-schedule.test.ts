@@ -33,4 +33,15 @@ describe('sports schedule helpers', () => {
     expect(localDate).toBe('2026-03-20');
     expect(nextRun.toISOString()).toBe('2026-03-20T01:00:00.000Z');
   });
+
+  it('computes the next UK run using the new default sports publish time', () => {
+    const now = new Date('2026-03-20T00:00:30.000Z');
+    const nextRun = computeNextRunAtUtc({
+      timezone: 'Europe/London',
+      timeHhMm: '00:01',
+      now,
+    });
+
+    expect(nextRun.toISOString()).toBe('2026-03-20T00:01:00.000Z');
+  });
 });

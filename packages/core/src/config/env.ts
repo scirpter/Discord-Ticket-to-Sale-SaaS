@@ -15,7 +15,7 @@ const envSchema = z.object({
   SPORTS_API_V1_BASE_URL: z.string().url().default('https://www.thesportsdb.com/api/v1/json'),
   SPORTS_API_BASE_URL: z.string().url().default('https://www.thesportsdb.com/api/v2/json'),
   SPORTS_DEFAULT_TIMEZONE: z.string().default('Europe/London'),
-  SPORTS_DEFAULT_PUBLISH_TIME: z.string().default('01:00'),
+  SPORTS_DEFAULT_PUBLISH_TIME: z.string().default('00:01'),
   SPORTS_BROADCAST_COUNTRY: z.string().default('United Kingdom'),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_BOT_USERNAME: z.string().default(''),
