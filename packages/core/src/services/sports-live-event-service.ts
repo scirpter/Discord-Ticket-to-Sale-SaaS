@@ -183,7 +183,6 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     deletedAtUtc: Date;
-    profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
     try {
       const record = await this.repository.markDeleted(input);

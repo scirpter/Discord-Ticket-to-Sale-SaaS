@@ -226,9 +226,8 @@ export class SportsRepository {
   public async getChannelBindingBySport(input: {
     guildId: string;
     sportName: string;
-    profileId?: string | null;
   }): Promise<SportsChannelBindingRecord | null> {
-    const profileId = input.profileId ?? (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
+    const profileId = (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
     const row = await this.db.query.sportsChannelBindings.findFirst({
       where: and(
         eq(sportsChannelBindings.profileId, profileId),
@@ -242,17 +241,15 @@ export class SportsRepository {
 
   public async upsertChannelBinding(input: {
     guildId: string;
-    profileId?: string | null;
     sportId: string | null;
     sportName: string;
     sportSlug: string;
     channelId: string;
   }): Promise<SportsChannelBindingRecord> {
-    const profileId = input.profileId ?? (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
+    const profileId = (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
     const existing = await this.getChannelBindingBySport({
       guildId: input.guildId,
       sportName: input.sportName,
-      profileId,
     });
     const now = new Date();
 
@@ -284,7 +281,6 @@ export class SportsRepository {
     const record = await this.getChannelBindingBySport({
       guildId: input.guildId,
       sportName: input.sportName,
-      profileId,
     });
     if (!record) {
       throw new Error('Failed to upsert sports channel binding');

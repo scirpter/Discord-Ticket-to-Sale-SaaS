@@ -32,7 +32,6 @@ export type SportsGuildConfigSummary = {
 
 export type SportsChannelBindingSummary = {
   bindingId: string;
-  profileId: string;
   guildId: string;
   sportId: string | null;
   sportName: string;
@@ -79,7 +78,6 @@ function mapChannelBindingSummary(
 ): SportsChannelBindingSummary {
   return {
     bindingId: binding.id,
-    profileId: binding.profileId,
     guildId: binding.guildId,
     sportId: binding.sportId,
     sportName: binding.sportName,
