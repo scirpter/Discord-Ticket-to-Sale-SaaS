@@ -2,10 +2,11 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
-import { sportsLiveEventChannels } from '../infra/db/schema/index.js';
+import { sportsLiveEventChannels, sportsProfiles } from '../infra/db/schema/index.js';
 
 export type SportsLiveEventChannelRecord = {
   id: string;
+  profileId: string;
   guildId: string;
   sportName: string;
   eventId: string;
@@ -34,6 +35,7 @@ function mapSportsLiveEventChannelRow(
 ): SportsLiveEventChannelRecord {
   return {
     id: row.id,
+    profileId: row.profileId,
     guildId: row.guildId,
     sportName: row.sportName,
     eventId: row.eventId,
@@ -56,6 +58,21 @@ function mapSportsLiveEventChannelRow(
 export class SportsLiveEventRepository {
   private readonly db = getDb();
 
+  private async resolveProfileId(input: {
+    guildId: string;
+    profileId?: string | null;
+  }): Promise<string> {
+    if (input.profileId) {
+      return input.profileId;
+    }
+
+    const defaultProfile = await this.db.query.sportsProfiles?.findFirst({
+      where: and(eq(sportsProfiles.guildId, input.guildId), eq(sportsProfiles.slug, 'default')),
+    });
+
+    return defaultProfile?.id ?? input.guildId;
+  }
+
   private getAffectedRowCount(result: unknown): number {
     if (typeof result === 'object' && result !== null) {
       if ('affectedRows' in result && typeof result.affectedRows === 'number') {
@@ -76,9 +93,12 @@ export class SportsLiveEventRepository {
   public async getTrackedEvent(input: {
     guildId: string;
     eventId: string;
+    profileId?: string | null;
   }): Promise<SportsLiveEventChannelRecord | null> {
+    const profileId = await this.resolveProfileId(input);
     const row = await this.db.query.sportsLiveEventChannels.findFirst({
       where: and(
+        eq(sportsLiveEventChannels.profileId, profileId),
         eq(sportsLiveEventChannels.guildId, input.guildId),
         eq(sportsLiveEventChannels.eventId, input.eventId),
       ),
@@ -108,7 +128,9 @@ export class SportsLiveEventRepository {
     guildId: string;
     eventId: string;
     postedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<SportsLiveEventHighlightClaimRecord> {
+    const profileId = await this.resolveProfileId(input);
     const updateResult = await this.db
       .update(sportsLiveEventChannels)
       .set({
@@ -118,6 +140,7 @@ export class SportsLiveEventRepository {
       })
       .where(
         and(
+          eq(sportsLiveEventChannels.profileId, profileId),
           eq(sportsLiveEventChannels.guildId, input.guildId),
           eq(sportsLiveEventChannels.eventId, input.eventId),
           eq(sportsLiveEventChannels.highlightsPosted, false),
@@ -139,7 +162,9 @@ export class SportsLiveEventRepository {
     guildId: string;
     eventId: string;
     releasedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<SportsLiveEventChannelRecord | null> {
+    const profileId = await this.resolveProfileId(input);
     await this.db
       .update(sportsLiveEventChannels)
       .set({
@@ -149,6 +174,7 @@ export class SportsLiveEventRepository {
       })
       .where(
         and(
+          eq(sportsLiveEventChannels.profileId, profileId),
           eq(sportsLiveEventChannels.guildId, input.guildId),
           eq(sportsLiveEventChannels.eventId, input.eventId),
           eq(sportsLiveEventChannels.highlightsPosted, true),
@@ -158,6 +184,7 @@ export class SportsLiveEventRepository {
     return this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
+      profileId,
     });
   }
 
@@ -165,7 +192,9 @@ export class SportsLiveEventRepository {
     guildId: string;
     eventId: string;
     failedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<SportsLiveEventChannelRecord | null> {
+    const profileId = await this.resolveProfileId(input);
     await this.db
       .update(sportsLiveEventChannels)
       .set({
@@ -175,6 +204,7 @@ export class SportsLiveEventRepository {
       })
       .where(
         and(
+          eq(sportsLiveEventChannels.profileId, profileId),
           eq(sportsLiveEventChannels.guildId, input.guildId),
           eq(sportsLiveEventChannels.eventId, input.eventId),
         ),
@@ -183,11 +213,13 @@ export class SportsLiveEventRepository {
     return this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
+      profileId,
     });
   }
 
   public async upsertTrackedEvent(input: {
     guildId: string;
+    profileId?: string | null;
     sportName: string;
     eventId: string;
     eventName: string;
@@ -203,11 +235,13 @@ export class SportsLiveEventRepository {
     highlightsPosted?: boolean;
   }): Promise<SportsLiveEventChannelRecord> {
     const now = new Date();
+    const profileId = await this.resolveProfileId(input);
 
     await this.db
       .insert(sportsLiveEventChannels)
       .values({
         id: ulid(),
+        profileId,
         guildId: input.guildId,
         sportName: input.sportName,
         eventId: input.eventId,
@@ -227,6 +261,7 @@ export class SportsLiveEventRepository {
       })
       .onDuplicateKeyUpdate({
         set: {
+          profileId,
           sportName: input.sportName,
           eventName: input.eventName,
           sportChannelId: input.sportChannelId,
@@ -246,6 +281,7 @@ export class SportsLiveEventRepository {
     const record = await this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
+      profileId,
     });
     if (!record) {
       throw new Error('Failed to load sports live event channel');
@@ -259,7 +295,9 @@ export class SportsLiveEventRepository {
     eventId: string;
     finishedAtUtc: Date;
     deleteAfterUtc: Date;
+    profileId?: string | null;
   }): Promise<SportsLiveEventChannelRecord | null> {
+    const profileId = await this.resolveProfileId(input);
     await this.db
       .update(sportsLiveEventChannels)
       .set({
@@ -270,6 +308,7 @@ export class SportsLiveEventRepository {
       })
       .where(
         and(
+          eq(sportsLiveEventChannels.profileId, profileId),
           eq(sportsLiveEventChannels.guildId, input.guildId),
           eq(sportsLiveEventChannels.eventId, input.eventId),
         ),
@@ -278,6 +317,7 @@ export class SportsLiveEventRepository {
     return this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
+      profileId,
     });
   }
 
@@ -285,7 +325,9 @@ export class SportsLiveEventRepository {
     guildId: string;
     eventId: string;
     deletedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<SportsLiveEventChannelRecord | null> {
+    const profileId = await this.resolveProfileId(input);
     await this.db
       .update(sportsLiveEventChannels)
       .set({
@@ -296,6 +338,7 @@ export class SportsLiveEventRepository {
       })
       .where(
         and(
+          eq(sportsLiveEventChannels.profileId, profileId),
           eq(sportsLiveEventChannels.guildId, input.guildId),
           eq(sportsLiveEventChannels.eventId, input.eventId),
         ),
@@ -304,6 +347,7 @@ export class SportsLiveEventRepository {
     return this.getTrackedEvent({
       guildId: input.guildId,
       eventId: input.eventId,
+      profileId,
     });
   }
 }

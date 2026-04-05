@@ -169,6 +169,13 @@
       "when": 1775079000000,
       "tag": "0023_sports_live_category",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1775079000001,
+      "tag": "0024_sports_multi_profiles",
+      "breakpoints": true
     }
   ]
 }

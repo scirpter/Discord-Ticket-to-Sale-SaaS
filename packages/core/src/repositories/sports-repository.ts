@@ -2,7 +2,7 @@ import { and, eq, lte } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
-import { sportsChannelBindings, sportsGuildConfigs } from '../infra/db/schema/index.js';
+import { sportsChannelBindings, sportsGuildConfigs, sportsProfiles } from '../infra/db/schema/index.js';
 
 export type SportsGuildConfigRecord = {
   id: string;
@@ -21,8 +21,22 @@ export type SportsGuildConfigRecord = {
   updatedAt: Date;
 };
 
+export type SportsProfileRecord = {
+  id: string;
+  guildId: string;
+  slug: string;
+  label: string;
+  broadcastCountry: string;
+  dailyCategoryChannelId: string | null;
+  liveCategoryChannelId: string | null;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type SportsChannelBindingRecord = {
   id: string;
+  profileId: string;
   guildId: string;
   sportId: string | null;
   sportName: string;
@@ -39,15 +53,30 @@ function mapGuildConfigRow(
     id: row.id,
     guildId: row.guildId,
     enabled: row.enabled,
-    managedCategoryChannelId: row.managedCategoryChannelId ?? null,
-    liveCategoryChannelId: row.liveCategoryChannelId ?? null,
+    managedCategoryChannelId: row.managedCategoryChannelIdLegacy ?? null,
+    liveCategoryChannelId: row.liveCategoryChannelIdLegacy ?? null,
     localTimeHhmm: row.localTimeHhmm,
     timezone: row.timezone,
-    broadcastCountry: row.broadcastCountry,
+    broadcastCountry: row.broadcastCountryLegacy,
     nextRunAtUtc: row.nextRunAtUtc,
     lastRunAtUtc: row.lastRunAtUtc ?? null,
     lastLocalRunDate: row.lastLocalRunDate ?? null,
     updatedByDiscordUserId: row.updatedByDiscordUserId ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapProfileRow(row: typeof sportsProfiles.$inferSelect): SportsProfileRecord {
+  return {
+    id: row.id,
+    guildId: row.guildId,
+    slug: row.slug,
+    label: row.label,
+    broadcastCountry: row.broadcastCountry,
+    dailyCategoryChannelId: row.dailyCategoryChannelId ?? null,
+    liveCategoryChannelId: row.liveCategoryChannelId ?? null,
+    enabled: row.enabled,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -58,6 +87,7 @@ function mapChannelBindingRow(
 ): SportsChannelBindingRecord {
   return {
     id: row.id,
+    profileId: row.profileId,
     guildId: row.guildId,
     sportId: row.sportId ?? null,
     sportName: row.sportName,
@@ -71,12 +101,29 @@ function mapChannelBindingRow(
 export class SportsRepository {
   private readonly db = getDb();
 
+  private async getDefaultProfileId(guildId: string): Promise<string | null> {
+    const row = await this.db.query.sportsProfiles?.findFirst({
+      where: and(eq(sportsProfiles.guildId, guildId), eq(sportsProfiles.slug, 'default')),
+    });
+
+    return row?.id ?? null;
+  }
+
   public async getGuildConfig(guildId: string): Promise<SportsGuildConfigRecord | null> {
     const row = await this.db.query.sportsGuildConfigs.findFirst({
       where: eq(sportsGuildConfigs.guildId, guildId),
     });
 
     return row ? mapGuildConfigRow(row) : null;
+  }
+
+  public async listProfiles(guildId: string): Promise<SportsProfileRecord[]> {
+    const rows = await this.db.query.sportsProfiles.findMany({
+      where: eq(sportsProfiles.guildId, guildId),
+      orderBy: (table, { asc }) => [asc(table.slug)],
+    });
+
+    return rows.map(mapProfileRow);
   }
 
   public async upsertGuildConfig(input: {
@@ -97,11 +144,11 @@ export class SportsRepository {
         .update(sportsGuildConfigs)
         .set({
           enabled: true,
-          managedCategoryChannelId: input.managedCategoryChannelId,
-          liveCategoryChannelId: input.liveCategoryChannelId,
+          managedCategoryChannelIdLegacy: input.managedCategoryChannelId,
+          liveCategoryChannelIdLegacy: input.liveCategoryChannelId,
           localTimeHhmm: input.localTimeHhmm,
           timezone: input.timezone,
-          broadcastCountry: input.broadcastCountry,
+          broadcastCountryLegacy: input.broadcastCountry,
           nextRunAtUtc: input.nextRunAtUtc,
           updatedByDiscordUserId: input.updatedByDiscordUserId,
           updatedAt: now,
@@ -112,11 +159,11 @@ export class SportsRepository {
         id: ulid(),
         guildId: input.guildId,
         enabled: true,
-        managedCategoryChannelId: input.managedCategoryChannelId,
-        liveCategoryChannelId: input.liveCategoryChannelId,
+        managedCategoryChannelIdLegacy: input.managedCategoryChannelId,
+        liveCategoryChannelIdLegacy: input.liveCategoryChannelId,
         localTimeHhmm: input.localTimeHhmm,
         timezone: input.timezone,
-        broadcastCountry: input.broadcastCountry,
+        broadcastCountryLegacy: input.broadcastCountry,
         nextRunAtUtc: input.nextRunAtUtc,
         updatedByDiscordUserId: input.updatedByDiscordUserId,
         createdAt: now,
@@ -179,9 +226,12 @@ export class SportsRepository {
   public async getChannelBindingBySport(input: {
     guildId: string;
     sportName: string;
+    profileId?: string | null;
   }): Promise<SportsChannelBindingRecord | null> {
+    const profileId = input.profileId ?? (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
     const row = await this.db.query.sportsChannelBindings.findFirst({
       where: and(
+        eq(sportsChannelBindings.profileId, profileId),
         eq(sportsChannelBindings.guildId, input.guildId),
         eq(sportsChannelBindings.sportName, input.sportName),
       ),
@@ -192,14 +242,17 @@ export class SportsRepository {
 
   public async upsertChannelBinding(input: {
     guildId: string;
+    profileId?: string | null;
     sportId: string | null;
     sportName: string;
     sportSlug: string;
     channelId: string;
   }): Promise<SportsChannelBindingRecord> {
+    const profileId = input.profileId ?? (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
     const existing = await this.getChannelBindingBySport({
       guildId: input.guildId,
       sportName: input.sportName,
+      profileId,
     });
     const now = new Date();
 
@@ -207,6 +260,7 @@ export class SportsRepository {
       await this.db
         .update(sportsChannelBindings)
         .set({
+          profileId,
           sportId: input.sportId,
           sportSlug: input.sportSlug,
           channelId: input.channelId,
@@ -216,6 +270,7 @@ export class SportsRepository {
     } else {
       await this.db.insert(sportsChannelBindings).values({
         id: ulid(),
+        profileId,
         guildId: input.guildId,
         sportId: input.sportId,
         sportName: input.sportName,
@@ -229,6 +284,7 @@ export class SportsRepository {
     const record = await this.getChannelBindingBySport({
       guildId: input.guildId,
       sportName: input.sportName,
+      profileId,
     });
     if (!record) {
       throw new Error('Failed to upsert sports channel binding');

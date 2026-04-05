@@ -7,6 +7,7 @@ import { SportsLiveEventService } from '../src/services/sports-live-event-servic
 
 type SportsLiveEventRow = {
   id: string;
+  profileId: string;
   guildId: string;
   sportName: string;
   eventId: string;
@@ -48,16 +49,16 @@ type MockDb = {
   };
 };
 
-function getQueryKey(where: unknown): { guildId: string; eventId: string } | null {
+function getQueryKey(where: unknown): { profileId: string; guildId: string; eventId: string } | null {
   const text = inspect(where, { depth: 8, compact: true, breakLength: Infinity });
   const values = [...text.matchAll(/Param \{[^}]*?value: '([^']+)'/g)].map((match) => match[1]);
-  const [guildId, eventId] = values;
+  const [profileId, guildId, eventId] = values;
 
-  if (guildId == null || eventId == null) {
+  if (profileId == null || guildId == null || eventId == null) {
     return null;
   }
 
-  return { guildId, eventId };
+  return { profileId, guildId, eventId };
 }
 
 function whereIncludesBoolean(where: unknown, value: boolean): boolean {
@@ -68,6 +69,7 @@ function whereIncludesBoolean(where: unknown, value: boolean): boolean {
 function makeRow(overrides: Partial<SportsLiveEventRow> = {}): SportsLiveEventRow {
   return {
     id: '01J0SPORTSLIVE000000000000',
+    profileId: 'guild-1',
     guildId: 'guild-1',
     sportName: 'Soccer',
     eventId: 'evt-1',
@@ -116,7 +118,14 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
             return null;
           }
 
-          return rows.find((row) => row.guildId === key.guildId && row.eventId === key.eventId) ?? null;
+          return (
+            rows.find(
+              (row) =>
+                row.profileId === key.profileId &&
+                row.guildId === key.guildId &&
+                row.eventId === key.eventId,
+            ) ?? null
+          );
         },
         findMany: async () => rows,
       },
@@ -124,19 +133,26 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
     insert: () => ({
       values: (value: Partial<SportsLiveEventRow>) => {
         insertCalls += 1;
-        const key = {
-          guildId: String(value.guildId),
-          eventId: String(value.eventId),
-        };
+          const key = {
+            profileId: String(value.profileId ?? value.guildId),
+            guildId: String(value.guildId),
+            eventId: String(value.eventId),
+          };
         return {
           onDuplicateKeyUpdate: async (): Promise<void> => {
             onDuplicateKeyUpdateCalls += 1;
-            const existing = rows.find((row) => row.guildId === key.guildId && row.eventId === key.eventId);
+            const existing = rows.find(
+              (row) =>
+                row.profileId === key.profileId &&
+                row.guildId === key.guildId &&
+                row.eventId === key.eventId,
+            );
 
             if (existing) {
               Object.assign(existing, {
                 ...value,
                 id: existing.id,
+                profileId: String(value.profileId ?? existing.profileId),
                 guildId: key.guildId,
                 eventId: key.eventId,
                 createdAt: existing.createdAt,
@@ -147,6 +163,7 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
 
             rows.push({
               id: String(value.id),
+              profileId: String(value.profileId ?? value.guildId),
               guildId: key.guildId,
               sportName: String(value.sportName),
               eventId: key.eventId,
@@ -213,6 +230,55 @@ describe('SportsLiveEventService', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it('stores live tracked events per profile instead of only per guild', async () => {
+    const values = vi.fn().mockResolvedValue(undefined);
+    const mockDb: MockDb = {
+      query: {
+        sportsLiveEventChannels: {
+          findFirst: vi.fn().mockResolvedValue(
+            makeRow({
+              id: '01J0SPORTSLIVE000000000020',
+              guildId: 'guild-1',
+              eventId: 'evt-1',
+              eventName: 'Rangers vs Celtic',
+            }),
+          ),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      },
+      insert: vi.fn(() => ({ values })),
+      update: vi.fn(),
+    };
+
+    const service = new SportsLiveEventService(createRepositoryWithMockDb(mockDb));
+
+    await service.upsertTrackedEvent({
+      profileId: 'profile-uk',
+      guildId: 'guild-1',
+      sportName: 'Soccer',
+      eventId: 'evt-1',
+      eventName: 'Rangers vs Celtic',
+      sportChannelId: 'sport-uk',
+      eventChannelId: 'live-uk-1',
+      status: 'live',
+      kickoffAtUtc: new Date('2026-04-05T14:00:00.000Z'),
+      lastScoreSnapshot: { scoreLabel: '1-0' },
+      lastStateSnapshot: { statusLabel: 'Live' },
+      lastSyncedAtUtc: new Date('2026-04-05T14:05:00.000Z'),
+      finishedAtUtc: null,
+      deleteAfterUtc: null,
+      highlightsPosted: false,
+    });
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 'profile-uk',
+        guildId: 'guild-1',
+        eventId: 'evt-1',
+      }),
+    );
   });
 
   it('creates one tracked row per guild and event', async () => {

@@ -8,6 +8,7 @@ import {
 
 export type SportsLiveEventChannelSummary = {
   id: string;
+  profileId: string;
   guildId: string;
   sportName: string;
   eventId: string;
@@ -36,6 +37,7 @@ function mapSportsLiveEventChannelSummary(
 ): SportsLiveEventChannelSummary {
   return {
     id: record.id,
+    profileId: record.profileId,
     guildId: record.guildId,
     sportName: record.sportName,
     eventId: record.eventId,
@@ -60,6 +62,7 @@ export class SportsLiveEventService {
 
   public async upsertTrackedEvent(input: {
     guildId: string;
+    profileId?: string | null;
     sportName: string;
     eventId: string;
     eventName: string;
@@ -122,6 +125,7 @@ export class SportsLiveEventService {
   public async getTrackedEvent(input: {
     guildId: string;
     eventId: string;
+    profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary | null, AppError>> {
     try {
       const record = await this.repository.getTrackedEvent(input);
@@ -143,6 +147,7 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     finishedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
     const deleteAfterUtc = new Date(input.finishedAtUtc.getTime() + 3 * 60 * 60 * 1000);
 
@@ -178,6 +183,7 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     deletedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
     try {
       const record = await this.repository.markDeleted(input);
@@ -206,6 +212,7 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     postedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<Result<SportsLiveEventHighlightClaimSummary, AppError>> {
     try {
       const result = await this.repository.markHighlightsPosted(input);
@@ -230,6 +237,7 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     releasedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
     try {
       const record = await this.repository.releaseHighlightClaim(input);
@@ -258,6 +266,7 @@ export class SportsLiveEventService {
     guildId: string;
     eventId: string;
     failedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
     try {
       const record = await this.repository.markFailed(input);

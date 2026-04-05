@@ -6,6 +6,7 @@ import {
   SportsRepository,
   type SportsChannelBindingRecord,
   type SportsGuildConfigRecord,
+  type SportsProfileRecord,
 } from '../repositories/sports-repository.js';
 import { SportsAccessService } from './sports-access-service.js';
 import {
@@ -31,11 +32,23 @@ export type SportsGuildConfigSummary = {
 
 export type SportsChannelBindingSummary = {
   bindingId: string;
+  profileId: string;
   guildId: string;
   sportId: string | null;
   sportName: string;
   sportSlug: string;
   channelId: string;
+};
+
+export type SportsProfileSummary = {
+  profileId: string;
+  guildId: string;
+  slug: string;
+  label: string;
+  broadcastCountry: string;
+  dailyCategoryChannelId: string | null;
+  liveCategoryChannelId: string | null;
+  enabled: boolean;
 };
 
 export type SportsGuildStatus = {
@@ -66,11 +79,27 @@ function mapChannelBindingSummary(
 ): SportsChannelBindingSummary {
   return {
     bindingId: binding.id,
+    profileId: binding.profileId,
     guildId: binding.guildId,
     sportId: binding.sportId,
     sportName: binding.sportName,
     sportSlug: binding.sportSlug,
     channelId: binding.channelId,
+  };
+}
+
+function mapProfileSummary(profile: SportsProfileRecord): SportsProfileSummary {
+  const profileId = profile.id ?? (profile as SportsProfileRecord & { profileId?: string }).profileId;
+
+  return {
+    profileId,
+    guildId: profile.guildId,
+    slug: profile.slug,
+    label: profile.label,
+    broadcastCountry: profile.broadcastCountry,
+    dailyCategoryChannelId: profile.dailyCategoryChannelId,
+    liveCategoryChannelId: profile.liveCategoryChannelId,
+    enabled: profile.enabled,
   };
 }
 
@@ -174,6 +203,21 @@ export class SportsService {
         error instanceof AppError
           ? error
           : new AppError('SPORTS_CONFIG_READ_FAILED', 'Sports configuration read failed.', 500),
+      );
+    }
+  }
+
+  public async listProfiles(input: {
+    guildId: string;
+  }): Promise<Result<SportsProfileSummary[], AppError>> {
+    try {
+      const profiles = await this.sportsRepository.listProfiles(input.guildId);
+      return ok(profiles.map(mapProfileSummary));
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('SPORTS_CONFIG_READ_FAILED', 'Sports profile read failed.', 500),
       );
     }
   }

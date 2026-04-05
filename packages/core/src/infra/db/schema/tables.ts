@@ -812,11 +812,11 @@ export const sportsGuildConfigs = mysqlTable(
     id: varchar('id', { length: 26 }).primaryKey(),
     guildId: varchar('guild_id', { length: 32 }).notNull(),
     enabled: boolean('enabled').notNull().default(true),
-    managedCategoryChannelId: varchar('managed_category_channel_id', { length: 32 }),
-    liveCategoryChannelId: varchar('live_category_channel_id', { length: 32 }),
+    managedCategoryChannelIdLegacy: varchar('managed_category_channel_id_legacy', { length: 32 }),
+    liveCategoryChannelIdLegacy: varchar('live_category_channel_id_legacy', { length: 32 }),
     localTimeHhmm: varchar('local_time_hhmm', { length: 5 }).notNull(),
     timezone: varchar('timezone', { length: 64 }).notNull(),
-    broadcastCountry: varchar('broadcast_country', { length: 120 }).notNull(),
+    broadcastCountryLegacy: varchar('broadcast_country_legacy', { length: 120 }).notNull(),
     nextRunAtUtc: timestamp('next_run_at_utc', { mode: 'date' }).notNull(),
     lastRunAtUtc: timestamp('last_run_at_utc', { mode: 'date' }),
     lastLocalRunDate: varchar('last_local_run_date', { length: 10 }),
@@ -833,10 +833,31 @@ export const sportsGuildConfigs = mysqlTable(
   }),
 );
 
+export const sportsProfiles = mysqlTable(
+  'sports_profiles',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    slug: varchar('slug', { length: 48 }).notNull(),
+    label: varchar('label', { length: 80 }).notNull(),
+    broadcastCountry: varchar('broadcast_country', { length: 120 }).notNull(),
+    dailyCategoryChannelId: varchar('daily_category_channel_id', { length: 32 }),
+    liveCategoryChannelId: varchar('live_category_channel_id', { length: 32 }),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    guildSlugUnique: uniqueIndex('sports_profiles_guild_slug_uq').on(table.guildId, table.slug),
+    guildIdx: index('sports_profiles_guild_idx').on(table.guildId),
+  }),
+);
+
 export const sportsChannelBindings = mysqlTable(
   'sports_channel_bindings',
   {
     id: varchar('id', { length: 26 }).primaryKey(),
+    profileId: varchar('profile_id', { length: 26 }).notNull(),
     guildId: varchar('guild_id', { length: 32 }).notNull(),
     sportId: varchar('sport_id', { length: 16 }),
     sportName: varchar('sport_name', { length: 80 }).notNull(),
@@ -846,14 +867,15 @@ export const sportsChannelBindings = mysqlTable(
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (table) => ({
-    guildSportUnique: uniqueIndex('sports_channel_bindings_guild_sport_uq').on(
-      table.guildId,
+    profileSportUnique: uniqueIndex('sports_channel_bindings_profile_sport_uq').on(
+      table.profileId,
       table.sportName,
     ),
     guildChannelUnique: uniqueIndex('sports_channel_bindings_guild_channel_uq').on(
       table.guildId,
       table.channelId,
     ),
+    profileIdx: index('sports_channel_bindings_profile_idx').on(table.profileId),
     guildIdx: index('sports_channel_bindings_guild_idx').on(table.guildId),
   }),
 );
@@ -862,6 +884,7 @@ export const sportsLiveEventChannels = mysqlTable(
   'sports_live_event_channels',
   {
     id: varchar('id', { length: 26 }).primaryKey(),
+    profileId: varchar('profile_id', { length: 26 }).notNull(),
     guildId: varchar('guild_id', { length: 32 }).notNull(),
     sportName: varchar('sport_name', { length: 80 }).notNull(),
     eventId: varchar('event_id', { length: 32 }).notNull(),
@@ -882,8 +905,8 @@ export const sportsLiveEventChannels = mysqlTable(
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
   },
   (table) => ({
-    guildEventUnique: uniqueIndex('sports_live_event_channels_guild_event_uq').on(
-      table.guildId,
+    profileEventUnique: uniqueIndex('sports_live_event_channels_profile_event_uq').on(
+      table.profileId,
       table.eventId,
     ),
     guildEventChannelUnique: uniqueIndex('sports_live_event_channels_guild_event_channel_uq').on(
@@ -898,6 +921,7 @@ export const sportsLiveEventChannels = mysqlTable(
       table.status,
       table.deleteAfterUtc,
     ),
+    profileIdx: index('sports_live_event_channels_profile_idx').on(table.profileId),
     guildIdx: index('sports_live_event_channels_guild_idx').on(table.guildId),
   }),
 );
