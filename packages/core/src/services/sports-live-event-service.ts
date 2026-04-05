@@ -95,6 +95,7 @@ export class SportsLiveEventService {
 
   public async listTrackedEvents(input: {
     guildId: string;
+    profileId?: string | null;
     statuses?: SportsLiveEventChannelSummary['status'][];
   }): Promise<Result<SportsLiveEventChannelSummary[], AppError>> {
     try {

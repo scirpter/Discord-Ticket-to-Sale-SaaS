@@ -220,6 +220,38 @@ export class SportsService {
     }
   }
 
+  public async upsertProfile(input: {
+    guildId: string;
+    slug: string;
+    label: string;
+    broadcastCountry: string;
+    dailyCategoryChannelId: string | null;
+    liveCategoryChannelId: string | null;
+    enabled: boolean;
+    actorDiscordUserId: string | null;
+  }): Promise<Result<SportsProfileSummary, AppError>> {
+    try {
+      const profile = await this.sportsRepository.upsertProfile({
+        guildId: input.guildId,
+        slug: input.slug.trim(),
+        label: input.label.trim(),
+        broadcastCountry: input.broadcastCountry.trim(),
+        dailyCategoryChannelId: input.dailyCategoryChannelId,
+        liveCategoryChannelId: input.liveCategoryChannelId,
+        enabled: input.enabled,
+        actorDiscordUserId: input.actorDiscordUserId,
+      });
+
+      return ok(mapProfileSummary(profile));
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('SPORTS_CONFIG_WRITE_FAILED', 'Sports profile update failed.', 500),
+      );
+    }
+  }
+
   public async upsertChannelBinding(input: {
     guildId: string;
     sportId: string | null;

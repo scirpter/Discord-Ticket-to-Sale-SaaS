@@ -109,16 +109,24 @@ export class SportsLiveEventRepository {
 
   public async listTrackedEvents(input: {
     guildId: string;
+    profileId?: string | null;
     statuses?: SportsLiveEventChannelRecord['status'][];
   }): Promise<SportsLiveEventChannelRecord[]> {
+    const profileId = input.profileId ? await this.resolveProfileId(input) : null;
     const rows = await this.db.query.sportsLiveEventChannels.findMany({
       where:
         input.statuses && input.statuses.length > 0
           ? and(
+              ...(profileId ? [eq(sportsLiveEventChannels.profileId, profileId)] : []),
               eq(sportsLiveEventChannels.guildId, input.guildId),
               inArray(sportsLiveEventChannels.status, input.statuses),
             )
-          : eq(sportsLiveEventChannels.guildId, input.guildId),
+          : profileId
+            ? and(
+                eq(sportsLiveEventChannels.profileId, profileId),
+                eq(sportsLiveEventChannels.guildId, input.guildId),
+              )
+            : eq(sportsLiveEventChannels.guildId, input.guildId),
     });
 
     return rows.map((row) => mapSportsLiveEventChannelRow(row));

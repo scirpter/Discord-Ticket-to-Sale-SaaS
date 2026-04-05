@@ -15,6 +15,7 @@ type SportsProfileRecord = {
 
 type SportsRepositoryLike = {
   listProfiles: ReturnType<typeof vi.fn>;
+  upsertProfile: ReturnType<typeof vi.fn>;
 };
 
 function createServiceWithMockRepository(repository: SportsRepositoryLike): SportsService {
@@ -46,6 +47,7 @@ describe('SportsService', () => {
           enabled: true,
         } satisfies SportsProfileRecord,
       ]),
+      upsertProfile: vi.fn(),
     };
     const service = createServiceWithMockRepository(repository);
 
@@ -64,6 +66,62 @@ describe('SportsService', () => {
         broadcastCountry: 'United Kingdom',
         dailyCategoryChannelId: 'daily-uk',
         liveCategoryChannelId: 'live-uk',
+      }),
+    ]);
+  });
+
+  it('creates a sports profile and returns it from listProfiles', async () => {
+    const profile = {
+      profileId: 'profile-usa',
+      guildId: 'guild-1',
+      slug: 'usa',
+      label: 'USA',
+      broadcastCountry: 'United States',
+      dailyCategoryChannelId: 'daily-usa',
+      liveCategoryChannelId: 'live-usa',
+      enabled: true,
+    } satisfies SportsProfileRecord;
+    const repository: SportsRepositoryLike = {
+      listProfiles: vi.fn().mockResolvedValue([profile]),
+      upsertProfile: vi.fn().mockResolvedValue(profile),
+    };
+    const service = createServiceWithMockRepository(repository);
+
+    const created = await service.upsertProfile({
+      guildId: 'guild-1',
+      slug: 'usa',
+      label: 'USA',
+      broadcastCountry: 'United States',
+      dailyCategoryChannelId: 'daily-usa',
+      liveCategoryChannelId: 'live-usa',
+      enabled: true,
+      actorDiscordUserId: 'user-1',
+    });
+
+    expect(created.isOk()).toBe(true);
+    expect(repository.upsertProfile).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      slug: 'usa',
+      label: 'USA',
+      broadcastCountry: 'United States',
+      dailyCategoryChannelId: 'daily-usa',
+      liveCategoryChannelId: 'live-usa',
+      enabled: true,
+      actorDiscordUserId: 'user-1',
+    });
+
+    const profiles = await service.listProfiles({ guildId: 'guild-1' });
+
+    expect(profiles.isOk()).toBe(true);
+    if (created.isErr() || profiles.isErr()) {
+      return;
+    }
+
+    expect(created.value).toEqual(expect.objectContaining({ slug: 'usa' }));
+    expect(profiles.value).toEqual([
+      expect.objectContaining({
+        slug: 'usa',
+        broadcastCountry: 'United States',
       }),
     ]);
   });

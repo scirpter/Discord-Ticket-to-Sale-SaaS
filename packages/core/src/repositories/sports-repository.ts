@@ -109,6 +109,17 @@ export class SportsRepository {
     return row?.id ?? null;
   }
 
+  private async getProfileBySlug(input: {
+    guildId: string;
+    slug: string;
+  }): Promise<SportsProfileRecord | null> {
+    const row = await this.db.query.sportsProfiles.findFirst({
+      where: and(eq(sportsProfiles.guildId, input.guildId), eq(sportsProfiles.slug, input.slug)),
+    });
+
+    return row ? mapProfileRow(row) : null;
+  }
+
   public async getGuildConfig(guildId: string): Promise<SportsGuildConfigRecord | null> {
     const row = await this.db.query.sportsGuildConfigs.findFirst({
       where: eq(sportsGuildConfigs.guildId, guildId),
@@ -124,6 +135,60 @@ export class SportsRepository {
     });
 
     return rows.map(mapProfileRow);
+  }
+
+  public async upsertProfile(input: {
+    guildId: string;
+    slug: string;
+    label: string;
+    broadcastCountry: string;
+    dailyCategoryChannelId: string | null;
+    liveCategoryChannelId: string | null;
+    enabled: boolean;
+    actorDiscordUserId: string | null;
+  }): Promise<SportsProfileRecord> {
+    const existing = await this.getProfileBySlug({
+      guildId: input.guildId,
+      slug: input.slug,
+    });
+    const now = new Date();
+
+    if (existing) {
+      await this.db
+        .update(sportsProfiles)
+        .set({
+          label: input.label,
+          broadcastCountry: input.broadcastCountry,
+          dailyCategoryChannelId: input.dailyCategoryChannelId,
+          liveCategoryChannelId: input.liveCategoryChannelId,
+          enabled: input.enabled,
+          updatedAt: now,
+        })
+        .where(eq(sportsProfiles.id, existing.id));
+    } else {
+      await this.db.insert(sportsProfiles).values({
+        id: ulid(),
+        guildId: input.guildId,
+        slug: input.slug,
+        label: input.label,
+        broadcastCountry: input.broadcastCountry,
+        dailyCategoryChannelId: input.dailyCategoryChannelId,
+        liveCategoryChannelId: input.liveCategoryChannelId,
+        enabled: input.enabled,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const profile = await this.getProfileBySlug({
+      guildId: input.guildId,
+      slug: input.slug,
+    });
+    if (!profile) {
+      throw new Error('Failed to upsert sports profile');
+    }
+
+    return profile;
   }
 
   public async upsertGuildConfig(input: {

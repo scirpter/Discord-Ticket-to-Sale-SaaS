@@ -281,6 +281,42 @@ describe('SportsLiveEventService', () => {
     );
   });
 
+  it('lists tracked events filtered by profile', async () => {
+    const repository = new SportsLiveEventRepository();
+    const listTrackedEventsSpy = vi.spyOn(repository, 'listTrackedEvents').mockResolvedValue([
+      makeRow({
+        id: '01J0SPORTSLIVE000000000120',
+        profileId: 'profile-usa',
+        guildId: 'guild-1',
+        eventId: 'evt-usa',
+        eventName: 'Lakers vs Celtics',
+        status: 'live',
+      }),
+    ]);
+    const service = new SportsLiveEventService(repository);
+
+    const result = await service.listTrackedEvents({
+      guildId: 'guild-1',
+      profileId: 'profile-usa',
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+
+    expect(listTrackedEventsSpy).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      profileId: 'profile-usa',
+    });
+    expect(result.value).toEqual([
+      expect.objectContaining({
+        profileId: 'profile-usa',
+        eventId: 'evt-usa',
+      }),
+    ]);
+  });
+
   it('creates one tracked row per guild and event', async () => {
     const rows: SportsLiveEventRow[] = [
       makeRow({
