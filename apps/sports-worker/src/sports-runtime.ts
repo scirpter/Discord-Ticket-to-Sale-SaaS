@@ -10,6 +10,7 @@ import {
   type SportsChannelBindingSummary,
   type SportsGuildConfigSummary,
   type SportsListing,
+  type SportsProfileSummary,
 } from '@voodoo/core';
 import { ChannelType, type CategoryChannel, type Client, type Guild, type TextChannel } from 'discord.js';
 
@@ -140,13 +141,15 @@ async function ensureManagedTextChannel(input: {
   category: CategoryChannel;
   binding: SportsChannelBindingSummary | null;
   sport: Pick<SportDefinition, 'sportId' | 'sportName' | 'channelSlug'>;
-  config: SportsGuildConfigSummary;
+  broadcastCountry: string;
+  publishTime: string;
+  timezone: string;
   usedNames: Set<string>;
 }): Promise<{ channel: TextChannel; created: boolean }> {
   const desiredTopic = buildManagedChannelTopic({
-    timezone: input.config.timezone,
-    publishTime: input.config.localTimeHhMm,
-    broadcastCountry: input.config.broadcastCountry,
+    timezone: input.timezone,
+    publishTime: input.publishTime,
+    broadcastCountry: input.broadcastCountry,
   });
 
   if (input.binding?.channelId) {
@@ -205,18 +208,18 @@ async function clearManagedChannel(channel: TextChannel): Promise<void> {
 
 async function getRequiredGuildContext(guildId: string): Promise<{
   config: SportsGuildConfigSummary;
-  bindings: SportsChannelBindingSummary[];
+  profiles: SportsProfileSummary[];
 }> {
-  const [configResult, bindingsResult] = await Promise.all([
+  const [configResult, profilesResult] = await Promise.all([
     sportsService.getGuildConfig({ guildId }),
-    sportsService.listChannelBindings({ guildId }),
+    sportsService.listProfiles({ guildId }),
   ]);
 
   if (configResult.isErr()) {
     throw configResult.error;
   }
-  if (bindingsResult.isErr()) {
-    throw bindingsResult.error;
+  if (profilesResult.isErr()) {
+    throw profilesResult.error;
   }
   if (!configResult.value) {
     throw new AppError('SPORTS_CONFIG_NOT_FOUND', 'Sports configuration not found for this server.', 404);
@@ -224,21 +227,37 @@ async function getRequiredGuildContext(guildId: string): Promise<{
 
   return {
     config: configResult.value,
-    bindings: bindingsResult.value,
+    profiles: profilesResult.value,
   };
 }
 
-async function getTodayListingsBySport(config: SportsGuildConfigSummary): Promise<{
+function normalizeProfileSlug(value: string): string {
+  return normalizeChannelName(value).slice(0, 48) || 'default';
+}
+
+async function getUsedChannelNames(guild: Guild): Promise<Set<string>> {
+  const fetchedChannels = await guild.channels.fetch();
+  return new Set(
+    [...fetchedChannels.values()]
+      .filter((channel): channel is NonNullable<typeof channel> => channel !== null)
+      .map((channel) => channel.name),
+  );
+}
+
+async function getTodayListingsBySport(input: {
+  timezone: string;
+  broadcastCountry: string;
+}): Promise<{
   localDate: string;
   dateLabel: string;
   listingsBySport: Map<string, SportsListing[]>;
 }> {
   const localDate = resolveSportsLocalDate({
-    timezone: config.timezone,
+    timezone: input.timezone,
     at: new Date(),
   });
   const dateLabel = new Intl.DateTimeFormat('en-GB', {
-    timeZone: config.timezone,
+    timeZone: input.timezone,
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -247,8 +266,8 @@ async function getTodayListingsBySport(config: SportsGuildConfigSummary): Promis
 
   const listingsResult = await sportsDataService.listDailyListingsForLocalDate({
     localDate,
-    timezone: config.timezone,
-    broadcastCountry: config.broadcastCountry,
+    timezone: input.timezone,
+    broadcastCountry: input.broadcastCountry,
   });
   if (listingsResult.isErr()) {
     throw listingsResult.error;
@@ -264,6 +283,192 @@ async function getTodayListingsBySport(config: SportsGuildConfigSummary): Promis
     localDate,
     dateLabel,
     listingsBySport,
+  };
+}
+
+async function ensureSharedGuildConfig(input: {
+  guildId: string;
+  actorDiscordUserId: string | null;
+  existingConfig: SportsGuildConfigSummary | null;
+  fallbackBroadcastCountry: string;
+}): Promise<SportsGuildConfigSummary> {
+  const configResult = await sportsService.upsertGuildConfig({
+    guildId: input.guildId,
+    managedCategoryChannelId: input.existingConfig?.managedCategoryChannelId ?? null,
+    liveCategoryChannelId: input.existingConfig?.liveCategoryChannelId ?? null,
+    localTimeHhMm: input.existingConfig?.localTimeHhMm ?? env.SPORTS_DEFAULT_PUBLISH_TIME,
+    timezone: input.existingConfig?.timezone ?? env.SPORTS_DEFAULT_TIMEZONE,
+    broadcastCountry:
+      input.existingConfig?.broadcastCountry ??
+      input.fallbackBroadcastCountry ??
+      env.SPORTS_BROADCAST_COUNTRY,
+    actorDiscordUserId: input.actorDiscordUserId ?? 'system',
+  });
+  if (configResult.isErr()) {
+    throw configResult.error;
+  }
+
+  return configResult.value;
+}
+
+async function syncProfileChannels(input: {
+  guild: Guild;
+  config: SportsGuildConfigSummary;
+  profile: SportsProfileSummary;
+}): Promise<{
+  channelCount: number;
+  createdChannelCount: number;
+  updatedChannelCount: number;
+}> {
+  if (!input.profile.dailyCategoryChannelId) {
+    return {
+      channelCount: 0,
+      createdChannelCount: 0,
+      updatedChannelCount: 0,
+    };
+  }
+
+  const category = await input.guild.channels
+    .fetch(input.profile.dailyCategoryChannelId)
+    .catch(() => null);
+  if (!isCategoryChannel(category)) {
+    return {
+      channelCount: 0,
+      createdChannelCount: 0,
+      updatedChannelCount: 0,
+    };
+  }
+
+  const bindingsResult = await sportsService.listChannelBindings({
+    guildId: input.guild.id,
+    profileId: input.profile.profileId,
+  });
+  if (bindingsResult.isErr()) {
+    throw bindingsResult.error;
+  }
+
+  const { listingsBySport } = await getTodayListingsBySport({
+    timezone: input.config.timezone,
+    broadcastCountry: input.profile.broadcastCountry,
+  });
+  const bindingsBySport = new Map(bindingsResult.value.map((binding) => [binding.sportName, binding]));
+  const usedNames = await getUsedChannelNames(input.guild);
+
+  let createdChannelCount = 0;
+  let updatedChannelCount = 0;
+
+  for (const [sportName] of listingsBySport) {
+    const binding = bindingsBySport.get(sportName) ?? null;
+    const ensured = await ensureManagedTextChannel({
+      guild: input.guild,
+      category,
+      binding,
+      sport: {
+        sportId: binding?.sportId ?? null,
+        sportName,
+        channelSlug: binding?.sportSlug ?? normalizeChannelName(sportName),
+      },
+      broadcastCountry: input.profile.broadcastCountry,
+      publishTime: input.config.localTimeHhMm,
+      timezone: input.config.timezone,
+      usedNames,
+    });
+
+    const bindingResult = await sportsService.upsertChannelBinding({
+      guildId: input.guild.id,
+      profileId: input.profile.profileId,
+      sportId: binding?.sportId ?? null,
+      sportName,
+      sportSlug: ensured.channel.name,
+      channelId: ensured.channel.id,
+    });
+    if (bindingResult.isErr()) {
+      throw bindingResult.error;
+    }
+
+    if (ensured.created) {
+      createdChannelCount += 1;
+    } else {
+      updatedChannelCount += 1;
+    }
+  }
+
+  return {
+    channelCount: listingsBySport.size,
+    createdChannelCount,
+    updatedChannelCount,
+  };
+}
+
+export async function upsertSportsProfileChannels(input: {
+  guild: Guild;
+  actorDiscordUserId: string;
+  label: string;
+  broadcastCountry: string;
+  dailyCategoryName: string | null;
+  liveCategoryName: string | null;
+  slug?: string | null;
+}): Promise<{
+  config: SportsGuildConfigSummary;
+  profile: SportsProfileSummary;
+  channelCount: number;
+  createdChannelCount: number;
+  updatedChannelCount: number;
+}> {
+  const existingConfigResult = await sportsService.getGuildConfig({ guildId: input.guild.id });
+  if (existingConfigResult.isErr()) {
+    throw existingConfigResult.error;
+  }
+
+  const sharedConfig = await ensureSharedGuildConfig({
+    guildId: input.guild.id,
+    actorDiscordUserId: input.actorDiscordUserId,
+    existingConfig: existingConfigResult.value,
+    fallbackBroadcastCountry: input.broadcastCountry,
+  });
+
+  const profilesResult = await sportsService.listProfiles({ guildId: input.guild.id });
+  if (profilesResult.isErr()) {
+    throw profilesResult.error;
+  }
+
+  const slug = normalizeProfileSlug(input.slug?.trim() || input.label);
+  const existingProfile = profilesResult.value.find((profile) => profile.slug === slug) ?? null;
+  const category = await ensureManagedCategory({
+    guild: input.guild,
+    existingCategoryChannelId: existingProfile?.dailyCategoryChannelId,
+    categoryName: input.dailyCategoryName,
+  });
+  const liveCategory = await ensureOptionalManagedCategory({
+    guild: input.guild,
+    existingCategoryChannelId: existingProfile?.liveCategoryChannelId,
+    categoryName: input.liveCategoryName,
+  });
+
+  const profileResult = await sportsService.upsertProfile({
+    guildId: input.guild.id,
+    slug,
+    label: input.label,
+    broadcastCountry: input.broadcastCountry,
+    dailyCategoryChannelId: category.id,
+    liveCategoryChannelId: liveCategory?.id ?? null,
+    enabled: true,
+    actorDiscordUserId: input.actorDiscordUserId,
+  });
+  if (profileResult.isErr()) {
+    throw profileResult.error;
+  }
+
+  const syncResult = await syncProfileChannels({
+    guild: input.guild,
+    config: sharedConfig,
+    profile: profileResult.value,
+  });
+
+  return {
+    config: sharedConfig,
+    profile: profileResult.value,
+    ...syncResult,
   };
 }
 
@@ -284,88 +489,35 @@ export async function syncSportsGuildChannels(input: {
     throw existingConfigResult.error;
   }
 
-  const category = await ensureManagedCategory({
+  const result = await upsertSportsProfileChannels({
     guild: input.guild,
-    existingCategoryChannelId: existingConfigResult.value?.managedCategoryChannelId,
-    categoryName: input.categoryName,
-  });
-  const liveCategory = await ensureOptionalManagedCategory({
-    guild: input.guild,
-    existingCategoryChannelId: existingConfigResult.value?.liveCategoryChannelId,
-    categoryName: input.liveCategoryName ?? null,
+    actorDiscordUserId: input.actorDiscordUserId,
+    label: input.broadcastCountry?.trim() || env.SPORTS_BROADCAST_COUNTRY,
+    slug: 'default',
+    broadcastCountry:
+      input.broadcastCountry?.trim() || env.SPORTS_BROADCAST_COUNTRY,
+    dailyCategoryName: input.categoryName,
+    liveCategoryName: input.liveCategoryName ?? null,
   });
 
   const configResult = await sportsService.upsertGuildConfig({
     guildId: input.guild.id,
-    managedCategoryChannelId: category.id,
-    liveCategoryChannelId: liveCategory?.id ?? null,
-    localTimeHhMm: existingConfigResult.value?.localTimeHhMm ?? env.SPORTS_DEFAULT_PUBLISH_TIME,
-    timezone: existingConfigResult.value?.timezone ?? env.SPORTS_DEFAULT_TIMEZONE,
-    broadcastCountry:
-      input.broadcastCountry?.trim() ||
-      existingConfigResult.value?.broadcastCountry ||
-      env.SPORTS_BROADCAST_COUNTRY,
+    managedCategoryChannelId: result.profile.dailyCategoryChannelId,
+    liveCategoryChannelId: result.profile.liveCategoryChannelId,
+    localTimeHhMm: existingConfigResult.value?.localTimeHhMm ?? result.config.localTimeHhMm,
+    timezone: existingConfigResult.value?.timezone ?? result.config.timezone,
+    broadcastCountry: result.profile.broadcastCountry,
     actorDiscordUserId: input.actorDiscordUserId,
   });
   if (configResult.isErr()) {
     throw configResult.error;
   }
 
-  const bindingsResult = await sportsService.listChannelBindings({ guildId: input.guild.id });
-  if (bindingsResult.isErr()) {
-    throw bindingsResult.error;
-  }
-
-  const { listingsBySport } = await getTodayListingsBySport(configResult.value);
-  const bindingsBySport = new Map(bindingsResult.value.map((binding) => [binding.sportName, binding]));
-  const fetchedChannels = await input.guild.channels.fetch();
-  const usedNames = new Set(
-    [...fetchedChannels.values()]
-      .filter((channel): channel is NonNullable<typeof channel> => channel !== null)
-      .map((channel) => channel.name),
-  );
-
-  let createdChannelCount = 0;
-  let updatedChannelCount = 0;
-
-  for (const [sportName] of listingsBySport) {
-    const binding = bindingsBySport.get(sportName) ?? null;
-    const ensured = await ensureManagedTextChannel({
-      guild: input.guild,
-      category,
-      binding,
-      sport: {
-        sportId: binding?.sportId ?? null,
-        sportName,
-        channelSlug: binding?.sportSlug ?? normalizeChannelName(sportName),
-      },
-      config: configResult.value,
-      usedNames,
-    });
-
-    const bindingResult = await sportsService.upsertChannelBinding({
-      guildId: input.guild.id,
-      sportId: binding?.sportId ?? null,
-      sportName,
-      sportSlug: ensured.channel.name,
-      channelId: ensured.channel.id,
-    });
-    if (bindingResult.isErr()) {
-      throw bindingResult.error;
-    }
-
-    if (ensured.created) {
-      createdChannelCount += 1;
-    } else {
-      updatedChannelCount += 1;
-    }
-  }
-
   return {
     config: configResult.value,
-    channelCount: listingsBySport.size,
-    createdChannelCount,
-    updatedChannelCount,
+    channelCount: result.channelCount,
+    createdChannelCount: result.createdChannelCount,
+    updatedChannelCount: result.updatedChannelCount,
   };
 }
 
@@ -373,105 +525,125 @@ export async function publishSportsForGuild(input: {
   guild: Guild;
   actorDiscordUserId: string | null;
 }): Promise<{
+  publishedProfileCount: number;
   publishedChannelCount: number;
   listingCount: number;
   createdChannelCount: number;
 }> {
-  const { config, bindings } = await getRequiredGuildContext(input.guild.id);
-  const { dateLabel, listingsBySport } = await getTodayListingsBySport(config);
-  const category =
-    config.managedCategoryChannelId &&
-    (await input.guild.channels.fetch(config.managedCategoryChannelId).catch(() => null));
+  const { config, profiles } = await getRequiredGuildContext(input.guild.id);
+  const usedNames = await getUsedChannelNames(input.guild);
 
-  const fetchedChannels = await input.guild.channels.fetch();
-  const usedNames = new Set(
-    [...fetchedChannels.values()]
-      .filter((channel): channel is NonNullable<typeof channel> => channel !== null)
-      .map((channel) => channel.name),
-  );
-
-  let createdChannelCount = 0;
-  const bindingMap = new Map(bindings.map((binding) => [binding.sportName, binding]));
-
-  for (const [sportName] of listingsBySport) {
-    if (bindingMap.has(sportName) || !isCategoryChannel(category)) {
-      continue;
-    }
-
-    const ensured = await ensureManagedTextChannel({
-      guild: input.guild,
-      category,
-      binding: null,
-      sport: {
-        sportId: null,
-        sportName,
-        channelSlug: normalizeChannelName(sportName),
-      },
-      config,
-      usedNames,
-    });
-    const bindingResult = await sportsService.upsertChannelBinding({
-      guildId: input.guild.id,
-      sportId: null,
-      sportName,
-      sportSlug: ensured.channel.name,
-      channelId: ensured.channel.id,
-    });
-    if (bindingResult.isErr()) {
-      throw bindingResult.error;
-    }
-
-    bindingMap.set(sportName, bindingResult.value);
-    createdChannelCount += 1;
-  }
-
+  let publishedProfileCount = 0;
   let publishedChannelCount = 0;
   let listingCount = 0;
+  let createdChannelCount = 0;
 
-  for (const [sportName, listings] of listingsBySport) {
-    const binding = bindingMap.get(sportName);
-    if (!binding) {
+  for (const profile of profiles.filter((entry) => entry.enabled)) {
+    const category =
+      profile.dailyCategoryChannelId &&
+      (await input.guild.channels.fetch(profile.dailyCategoryChannelId).catch(() => null));
+    if (!isCategoryChannel(category)) {
       continue;
     }
 
-    const channel = await input.guild.channels.fetch(binding.channelId).catch(() => null);
-    if (!isManagedTextChannel(channel)) {
-      continue;
-    }
-
-    await clearManagedChannel(channel);
-    await channel.send({
-      content: buildSportHeaderMessage({
-        sportName: binding.sportName,
-        dateLabel,
-        broadcastCountry: config.broadcastCountry,
-        listingsCount: listings.length,
-      }),
+    const bindingsResult = await sportsService.listChannelBindings({
+      guildId: input.guild.id,
+      profileId: profile.profileId,
     });
-
-    const embeds = listings.map((listing) => buildSportEventEmbed(listing, config.timezone));
-    for (const embedChunk of chunkArray(embeds, 10)) {
-      await channel.send({ embeds: embedChunk });
+    if (bindingsResult.isErr()) {
+      throw bindingsResult.error;
     }
 
-    listingCount += listings.length;
-    publishedChannelCount += 1;
-  }
+    const { dateLabel, listingsBySport } = await getTodayListingsBySport({
+      timezone: config.timezone,
+      broadcastCountry: profile.broadcastCountry,
+    });
+    const bindingMap = new Map(bindingsResult.value.map((binding) => [binding.sportName, binding]));
 
-  for (const binding of bindingMap.values()) {
-    if (listingsBySport.has(binding.sportName)) {
-      continue;
+    for (const [sportName] of listingsBySport) {
+      if (bindingMap.has(sportName)) {
+        continue;
+      }
+
+      const ensured = await ensureManagedTextChannel({
+        guild: input.guild,
+        category,
+        binding: null,
+        sport: {
+          sportId: null,
+          sportName,
+          channelSlug: normalizeChannelName(sportName),
+        },
+        broadcastCountry: profile.broadcastCountry,
+        publishTime: config.localTimeHhMm,
+        timezone: config.timezone,
+        usedNames,
+      });
+      const bindingResult = await sportsService.upsertChannelBinding({
+        guildId: input.guild.id,
+        profileId: profile.profileId,
+        sportId: null,
+        sportName,
+        sportSlug: ensured.channel.name,
+        channelId: ensured.channel.id,
+      });
+      if (bindingResult.isErr()) {
+        throw bindingResult.error;
+      }
+
+      bindingMap.set(sportName, bindingResult.value);
+      createdChannelCount += 1;
     }
 
-    const channel = await input.guild.channels.fetch(binding.channelId).catch(() => null);
-    if (!isManagedTextChannel(channel)) {
-      continue;
+    for (const [sportName, listings] of listingsBySport) {
+      const binding = bindingMap.get(sportName);
+      if (!binding) {
+        continue;
+      }
+
+      const channel = await input.guild.channels.fetch(binding.channelId).catch(() => null);
+      if (!isManagedTextChannel(channel)) {
+        continue;
+      }
+
+      await clearManagedChannel(channel);
+      await channel.send({
+        content: buildSportHeaderMessage({
+          profileLabel: profile.label,
+          sportName: binding.sportName,
+          dateLabel,
+          broadcastCountry: profile.broadcastCountry,
+          listingsCount: listings.length,
+        }),
+      });
+
+      const embeds = listings.map((listing) => buildSportEventEmbed(listing, config.timezone));
+      for (const embedChunk of chunkArray(embeds, 10)) {
+        await channel.send({ embeds: embedChunk });
+      }
+
+      listingCount += listings.length;
+      publishedChannelCount += 1;
     }
 
-    await clearManagedChannel(channel);
+    for (const binding of bindingMap.values()) {
+      if (listingsBySport.has(binding.sportName)) {
+        continue;
+      }
+
+      const channel = await input.guild.channels.fetch(binding.channelId).catch(() => null);
+      if (!isManagedTextChannel(channel)) {
+        continue;
+      }
+
+      await clearManagedChannel(channel);
+    }
+
+    publishedProfileCount += 1;
   }
 
   return {
+    publishedProfileCount,
     publishedChannelCount,
     listingCount,
     createdChannelCount,

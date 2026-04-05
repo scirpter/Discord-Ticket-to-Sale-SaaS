@@ -279,9 +279,18 @@ export class SportsRepository {
       .where(eq(sportsGuildConfigs.guildId, input.guildId));
   }
 
-  public async listChannelBindings(guildId: string): Promise<SportsChannelBindingRecord[]> {
+  public async listChannelBindings(input: {
+    guildId: string;
+    profileId?: string | null;
+  }): Promise<SportsChannelBindingRecord[]> {
+    const profileId = input.profileId ? await this.resolveProfileId(input) : null;
     const rows = await this.db.query.sportsChannelBindings.findMany({
-      where: eq(sportsChannelBindings.guildId, guildId),
+      where: profileId
+        ? and(
+            eq(sportsChannelBindings.profileId, profileId),
+            eq(sportsChannelBindings.guildId, input.guildId),
+          )
+        : eq(sportsChannelBindings.guildId, input.guildId),
       orderBy: (table, { asc }) => [asc(table.sportName)],
     });
 
@@ -291,8 +300,9 @@ export class SportsRepository {
   public async getChannelBindingBySport(input: {
     guildId: string;
     sportName: string;
+    profileId?: string | null;
   }): Promise<SportsChannelBindingRecord | null> {
-    const profileId = (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
+    const profileId = await this.resolveProfileId(input);
     const row = await this.db.query.sportsChannelBindings.findFirst({
       where: and(
         eq(sportsChannelBindings.profileId, profileId),
@@ -306,15 +316,17 @@ export class SportsRepository {
 
   public async upsertChannelBinding(input: {
     guildId: string;
+    profileId?: string | null;
     sportId: string | null;
     sportName: string;
     sportSlug: string;
     channelId: string;
   }): Promise<SportsChannelBindingRecord> {
-    const profileId = (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
+    const profileId = await this.resolveProfileId(input);
     const existing = await this.getChannelBindingBySport({
       guildId: input.guildId,
       sportName: input.sportName,
+      profileId,
     });
     const now = new Date();
 
@@ -346,11 +358,19 @@ export class SportsRepository {
     const record = await this.getChannelBindingBySport({
       guildId: input.guildId,
       sportName: input.sportName,
+      profileId,
     });
     if (!record) {
       throw new Error('Failed to upsert sports channel binding');
     }
 
     return record;
+  }
+
+  private async resolveProfileId(input: {
+    guildId: string;
+    profileId?: string | null;
+  }): Promise<string> {
+    return input.profileId ?? (await this.getDefaultProfileId(input.guildId)) ?? input.guildId;
   }
 }

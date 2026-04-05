@@ -23,6 +23,10 @@ vi.mock('@voodoo/core', () => {
       throw new Error('Mock getGuildStatus not implemented');
     }
 
+    public async listProfiles(): Promise<never> {
+      throw new Error('Mock listProfiles not implemented');
+    }
+
     public async getGuildConfig(): Promise<never> {
       throw new Error('Mock getGuildConfig not implemented');
     }
@@ -72,6 +76,7 @@ vi.mock('../sports-runtime.js', () => ({
   mapSportsError: (error: unknown) => (error instanceof Error ? error.message : 'sports error'),
   publishSportsForGuild: vi.fn(async () => ({
     publishedChannelCount: 2,
+    publishedProfileCount: 1,
     listingCount: 4,
     createdChannelCount: 0,
   })),
@@ -90,6 +95,33 @@ vi.mock('../sports-runtime.js', () => ({
     },
     channelCount: 2,
     createdChannelCount: 2,
+    updatedChannelCount: 0,
+  })),
+  upsertSportsProfileChannels: vi.fn(async () => ({
+    config: {
+      configId: 'cfg-1',
+      guildId: 'guild-1',
+      enabled: true,
+      managedCategoryChannelId: null,
+      localTimeHhMm: '00:01',
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+      lastRunAtUtc: null,
+      lastLocalRunDate: null,
+    },
+    profile: {
+      profileId: 'profile-usa',
+      guildId: 'guild-1',
+      slug: 'usa',
+      label: 'USA',
+      broadcastCountry: 'United States',
+      dailyCategoryChannelId: 'daily-usa',
+      liveCategoryChannelId: 'live-usa',
+      enabled: true,
+    },
+    channelCount: 1,
+    createdChannelCount: 1,
     updatedChannelCount: 0,
   })),
 }));
@@ -116,8 +148,16 @@ function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; va
 
 function createInteractionMock(input?: {
   userId?: string;
-  subcommand?: 'setup' | 'sync' | 'refresh' | 'status' | 'live-status';
+  subcommand?:
+    | 'setup'
+    | 'sync'
+    | 'refresh'
+    | 'status'
+    | 'live-status'
+    | 'profile-add';
+  label?: string | null;
   categoryName?: string | null;
+  dailyCategoryName?: string | null;
   broadcastCountry?: string | null;
   liveCategoryName?: string | null;
 }): {
@@ -160,8 +200,14 @@ function createInteractionMock(input?: {
     options: {
       getSubcommand: vi.fn().mockReturnValue(input?.subcommand ?? 'status'),
       getString: vi.fn((name: string) => {
+        if (name === 'label') {
+          return input?.label ?? null;
+        }
         if (name === 'category_name') {
           return input?.categoryName ?? null;
+        }
+        if (name === 'daily_category_name') {
+          return input?.dailyCategoryName ?? null;
         }
         if (name === 'broadcast_country') {
           return input?.broadcastCountry ?? null;
@@ -425,10 +471,25 @@ describe('sports command', () => {
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
     );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([
+        {
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          slug: 'default',
+          label: 'UK',
+          broadcastCountry: 'United Kingdom',
+          dailyCategoryChannelId: 'category-1',
+          liveCategoryChannelId: 'live-category-1',
+          enabled: true,
+        },
+      ]) as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([
         {
           bindingId: 'binding-1',
+          profileId: 'profile-uk',
           guildId: 'guild-1',
           sportId: 'soccer',
           sportName: 'Soccer',
@@ -439,6 +500,7 @@ describe('sports command', () => {
         },
         {
           bindingId: 'binding-2',
+          profileId: 'profile-uk',
           guildId: 'guild-1',
           sportId: 'rugby',
           sportName: 'Rugby Union',
@@ -561,6 +623,40 @@ describe('sports command', () => {
         categoryName: 'Sports Listings',
         broadcastCountry: 'United States',
         liveCategoryName: 'Live Sports',
+      }),
+    );
+  });
+
+  it('creates a sports profile through /sports profile-add', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+
+    const sportsRuntime = await import('../sports-runtime.js');
+    const { interaction } = createInteractionMock({
+      userId: 'user-1',
+      subcommand: 'profile-add',
+      label: 'USA',
+      dailyCategoryName: 'USA Daily Sport',
+      broadcastCountry: 'United States',
+      liveCategoryName: 'USA Live Sport',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(sportsRuntime.upsertSportsProfileChannels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guild: interaction.guild,
+        actorDiscordUserId: 'user-1',
+        label: 'USA',
+        broadcastCountry: 'United States',
+        dailyCategoryName: 'USA Daily Sport',
+        liveCategoryName: 'USA Live Sport',
       }),
     );
   });

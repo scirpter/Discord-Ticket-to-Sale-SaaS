@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSearchResultEmbed,
   buildSportEventEmbed,
+  buildSportHeaderMessage,
 } from './sports-embeds.js';
 
 describe('sports embeds', () => {
@@ -49,5 +50,18 @@ describe('sports embeds', () => {
     expect(embed.description).toContain('Start time (America/New_York): **19:00**');
     expect(embed.description).not.toContain('Start time (UK)');
     expect(embed.footer?.text).toBe('Times shown in the configured server timezone (America/New_York).');
+  });
+
+  it('renders sport headers with the profile label and broadcaster country', () => {
+    const message = buildSportHeaderMessage({
+      profileLabel: 'USA',
+      sportName: 'Basketball',
+      dateLabel: 'Friday, 20 March 2026',
+      broadcastCountry: 'United States',
+      listingsCount: 3,
+    });
+
+    expect(message).toContain('**USA - Basketball**');
+    expect(message).toContain('United States televised events: 3');
   });
 });

@@ -333,6 +333,7 @@ export class SportsLiveEventRepository {
     guildId: string;
     eventId: string;
     deletedAtUtc: Date;
+    profileId?: string | null;
   }): Promise<SportsLiveEventChannelRecord | null> {
     const profileId = await this.resolveProfileId(input);
     await this.db

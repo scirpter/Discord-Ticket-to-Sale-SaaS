@@ -32,6 +32,7 @@ export type SportsGuildConfigSummary = {
 
 export type SportsChannelBindingSummary = {
   bindingId: string;
+  profileId: string;
   guildId: string;
   sportId: string | null;
   sportName: string;
@@ -78,6 +79,7 @@ function mapChannelBindingSummary(
 ): SportsChannelBindingSummary {
   return {
     bindingId: binding.id,
+    profileId: binding.profileId,
     guildId: binding.guildId,
     sportId: binding.sportId,
     sportName: binding.sportName,
@@ -112,7 +114,7 @@ export class SportsService {
     try {
       const [config, bindings, activationState] = await Promise.all([
         this.sportsRepository.getGuildConfig(input.guildId),
-        this.sportsRepository.listChannelBindings(input.guildId),
+        this.sportsRepository.listChannelBindings({ guildId: input.guildId }),
         this.sportsAccessService.getGuildActivationState({ guildId: input.guildId }),
       ]);
 
@@ -192,9 +194,13 @@ export class SportsService {
 
   public async listChannelBindings(input: {
     guildId: string;
+    profileId?: string | null;
   }): Promise<Result<SportsChannelBindingSummary[], AppError>> {
     try {
-      const bindings = await this.sportsRepository.listChannelBindings(input.guildId);
+      const bindings = await this.sportsRepository.listChannelBindings({
+        guildId: input.guildId,
+        profileId: input.profileId,
+      });
       return ok(bindings.map(mapChannelBindingSummary));
     } catch (error) {
       return err(
@@ -254,6 +260,7 @@ export class SportsService {
 
   public async upsertChannelBinding(input: {
     guildId: string;
+    profileId?: string | null;
     sportId: string | null;
     sportName: string;
     sportSlug: string;
@@ -262,6 +269,7 @@ export class SportsService {
     try {
       const binding = await this.sportsRepository.upsertChannelBinding({
         guildId: input.guildId,
+        profileId: input.profileId,
         sportId: input.sportId,
         sportName: input.sportName,
         sportSlug: input.sportSlug,

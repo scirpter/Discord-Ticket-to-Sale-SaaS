@@ -32,16 +32,16 @@ function buildTimezoneFooter(timezone: string): string {
 }
 
 export function buildSportHeaderMessage(input: {
+  profileLabel: string;
   sportName: string;
   dateLabel: string;
   broadcastCountry: string;
   listingsCount: number;
 }): string {
   return [
-    `**${input.sportName}**`,
-    `${input.broadcastCountry} TV listings for ${input.dateLabel}.`,
-    `Tracked broadcaster country: ${input.broadcastCountry}.`,
-    `Events today: ${input.listingsCount}.`,
+    `**${input.profileLabel} - ${input.sportName}**`,
+    `${input.dateLabel}`,
+    `${input.broadcastCountry} televised events: ${input.listingsCount}`,
   ].join('\n');
 }
 

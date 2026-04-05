@@ -18,6 +18,7 @@ import {
   mapSportsError,
   publishSportsForGuild,
   syncSportsGuildChannels,
+  upsertSportsProfileChannels,
 } from '../sports-runtime.js';
 
 const sportsAccessService = new SportsAccessService();
@@ -223,6 +224,20 @@ function buildSetupMessage(input: {
   return lines.join('\n');
 }
 
+function buildProfileAddMessage(input: {
+  result: Awaited<ReturnType<typeof upsertSportsProfileChannels>>;
+}): string {
+  return [
+    `Sports profile \`${input.result.profile.label}\` is configured.`,
+    `Broadcast country: ${input.result.profile.broadcastCountry}`,
+    `Daily category: ${input.result.profile.dailyCategoryChannelId ? `<#${input.result.profile.dailyCategoryChannelId}>` : 'Not set'}`,
+    `Live category: ${input.result.profile.liveCategoryChannelId ? `<#${input.result.profile.liveCategoryChannelId}>` : 'Not set'}`,
+    `Tracked sport channels: ${input.result.channelCount}`,
+    `Channels created: ${input.result.createdChannelCount}`,
+    `Channels updated: ${input.result.updatedChannelCount}`,
+  ].join('\n');
+}
+
 export const sportsCommand = {
   data: new SlashCommandBuilder()
     .setName('sports')
@@ -288,6 +303,35 @@ export const sportsCommand = {
       subcommand
         .setName('live-status')
         .setDescription('Show tracked live events, cleanup counts, and sync health'),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('profile-add')
+        .setDescription('Add a sports profile for one broadcast country')
+        .addStringOption((option) =>
+          option.setName('label').setDescription('Profile label').setRequired(true).setMaxLength(80),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('broadcast_country')
+            .setDescription('Broadcast country for this profile')
+            .setRequired(true)
+            .setMaxLength(120),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('daily_category_name')
+            .setDescription('Category name for daily listings')
+            .setRequired(true)
+            .setMaxLength(90),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('live_category_name')
+            .setDescription('Category name for live scores and highlights')
+            .setRequired(true)
+            .setMaxLength(90),
+        ),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.inGuild() || !interaction.guild) {
@@ -390,6 +434,29 @@ export const sportsCommand = {
             `Channels updated: ${syncResult.updatedChannelCount}`,
             `Next scheduled run (UTC): ${syncResult.config.nextRunAtUtc}`,
           ].join('\n'),
+        );
+        return;
+      }
+
+      if (subcommand === 'profile-add') {
+        const label = interaction.options.getString('label', true);
+        const broadcastCountry = interaction.options.getString('broadcast_country', true);
+        const dailyCategoryName = interaction.options.getString('daily_category_name', true);
+        const liveCategoryName = interaction.options.getString('live_category_name', true);
+        const result = await upsertSportsProfileChannels({
+          guild: interaction.guild,
+          actorDiscordUserId: interaction.user.id,
+          label,
+          broadcastCountry,
+          dailyCategoryName,
+          liveCategoryName,
+        });
+
+        await sendEphemeralReply(
+          interaction,
+          buildProfileAddMessage({
+            result,
+          }),
         );
         return;
       }

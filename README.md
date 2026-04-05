@@ -99,18 +99,19 @@ Copy `.env.example` to `.env` and fill values.
 ## Sports Listings Worker
 
 - Runs from separate worker/token (`apps/sports-worker`).
-- Creates and manages persistent sport channels under a managed category, but only posts daily listings for sports that actually have televised events that day.
+- Creates and manages persistent sport channels under one or more country-specific sports profiles, and only posts daily listings for sports that actually have televised events that day.
 - Default schedule is `00:01` in `Europe/London`, and the worker clears the previous day’s managed posts before sending the new listings.
-- Televised live events now get temporary event channels with live status updates, optional highlight auto-posting, retention of the final score/state until cleanup, and automatic deletion 3 hours after the event finishes.
+- Live event channels can be split into separate per-profile categories, update while the event is live even when broadcaster enrichment is temporarily missing, keep the final score/state visible until cleanup, and delete automatically 3 hours after finish.
 - Highlights can post automatically inside managed live event channels when available, and the same highlight data can also be requested on demand.
 - Uses TheSportsDB for sport, event, broadcaster, and image data. A paid API key is required for full daily coverage because the public `123` key is heavily truncated.
 - Daily sport channels stay persistent. When a sport has no events that day, its channel is cleared and left empty instead of being deleted.
 - `/sports setup [category_name] [broadcast_country] [live_category_name]` creates or refreshes the managed sports category, optionally updates the broadcaster-country filter, optionally configures the dedicated live-event category, and publishes the current day’s listings immediately.
 - `/sports sync [category_name] [broadcast_country] [live_category_name]` creates missing sport channels, optionally updates the broadcaster-country filter, optionally configures the dedicated live-event category, and refreshes the saved channel bindings without republishing.
+- `/sports profile-add label:<name> broadcast_country:<country> daily_category_name:<name> live_category_name:<name>` adds another country-specific daily/live profile, for example `UK Daily Sport` plus `UK Live Sport` and `USA Daily Sport` plus `USA Live Sport`.
 - `/sports refresh` clears the managed sport channels and republishes today’s listings on demand.
 - `/sports status` shows activation state, managed category, live event category, channel count, and the next scheduled run.
 - `/sports live-status` shows tracked live events, pending cleanup counts, and current live-sync health.
-- Listings and `/search` use the server’s configured timezone and broadcaster-country filter. If a server never overrides it, the worker falls back to the environment defaults.
+- Daily listings and live channels follow the configured sports profiles. Lookup commands still use the server timezone and the saved/default broadcaster-country context unless a command-specific selector is added later.
 - New live-event channels are only created when a dedicated live event category has been configured. Until then, live-event channel creation is intentionally disabled.
 - `/search query:"Rangers v Celtic"` or `/search query:"New York Rangers"` returns upcoming televised matches from today through the next 7 days, including configured-timezone kickoff times, channels, and artwork.
 - `/live [sport] [league]` returns current live televised events, with optional sport/league filters.

@@ -71,6 +71,10 @@ vi.mock('@voodoo/core', () => {
       throw new Error('Mock getGuildConfig not implemented');
     }
 
+    public async listProfiles(): Promise<never> {
+      throw new Error('Mock listProfiles not implemented');
+    }
+
     public async listChannelBindings(): Promise<never> {
       throw new Error('Mock listChannelBindings not implemented');
     }
@@ -347,6 +351,9 @@ describe('live event runtime', () => {
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
     );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([
         {
@@ -420,6 +427,18 @@ describe('live event runtime', () => {
             eventChannelId: 'live-2',
           }),
         ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      )
+      .mockResolvedValueOnce(
+        createOkResult(
+          makeTrackedEvent({
+            id: 'tracked-3',
+            eventId: 'evt-3',
+            eventName: 'Closed-Door Friendly',
+            sportName: 'Soccer',
+            sportChannelId: 'sport-1',
+            eventChannelId: 'live-3',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
       );
 
     const result = await reconcileLiveEventsForGuild({
@@ -429,8 +448,8 @@ describe('live event runtime', () => {
       now: new Date('2026-03-20T15:05:00.000Z'),
     });
 
-    expect(result.createdChannelCount).toBe(2);
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(result.createdChannelCount).toBe(3);
+    expect(create).toHaveBeenCalledTimes(3);
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ name: expect.stringMatching(/^live-/), parent: liveCategory.id }),
     );
@@ -469,6 +488,12 @@ describe('live event runtime', () => {
         lastRunAtUtc: null,
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
     );
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
@@ -921,6 +946,9 @@ describe('live event runtime', () => {
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
     );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
     );
@@ -1007,6 +1035,9 @@ describe('live event runtime', () => {
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
     );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
     );
@@ -1075,6 +1106,9 @@ describe('live event runtime', () => {
         lastRunAtUtc: null,
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
     );
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
@@ -1749,6 +1783,9 @@ describe('live event runtime', () => {
     );
     vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listProfiles']>>,
     );
     const listRecoverableEvents = vi
       .spyOn(SportsLiveEventService.prototype, 'listRecoverableEvents')

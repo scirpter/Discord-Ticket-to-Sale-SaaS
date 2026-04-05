@@ -454,7 +454,9 @@ The sports worker uses those permissions to manage persistent sport channels, cr
 The sports worker also needs a paid `SPORTS_API_KEY` from TheSportsDB for full daily coverage. The public test key is not enough for a production sports schedule bot.
 By default, the sports worker publishes at `00:01` in `Europe/London`, and persistent sport channels only receive posts on days where that sport actually has televised events. When a sport has no events that day, its channel is cleared and left empty.
 Highlights can be auto-posted into temporary live event channels when available, and users can also request them on demand with `/highlights`. Finished live-event channels keep the final score/state visible until the 3-hour cleanup window expires.
-New live-event channels are intentionally disabled until you configure a dedicated live-event category through `/sports setup live_category_name:<name>` or `/sports sync live_category_name:<name>`.
+Use `/sports profile-add` to add extra country-specific daily/live category pairs, for example one UK profile and one USA profile, while keeping the shared `00:01` publish time.
+The older `/sports setup` and `/sports sync` commands still manage the default single-profile path for backward compatibility.
+New live-event channels are intentionally disabled until the relevant profile has a dedicated live-event category configured.
 
 After updates:
 

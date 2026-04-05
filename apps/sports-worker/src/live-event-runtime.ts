@@ -183,13 +183,16 @@ async function clearManagedChannel(channel: TextChannel): Promise<void> {
   }
 }
 
-async function getManagedGuildContext(guildId: string): Promise<{
+async function getManagedGuildContext(input: {
+  guildId: string;
+  profileId?: string | null;
+}): Promise<{
   config: SportsGuildConfigSummary | null;
   bindings: SportsChannelBindingSummary[];
 }> {
   const [configResult, bindingsResult] = await Promise.all([
-    sportsService.getGuildConfig({ guildId }),
-    sportsService.listChannelBindings({ guildId }),
+    sportsService.getGuildConfig({ guildId: input.guildId }),
+    sportsService.listChannelBindings({ guildId: input.guildId, profileId: input.profileId }),
   ]);
 
   if (configResult.isErr()) {
@@ -224,6 +227,8 @@ async function ensureSportChannelForLiveEvent(input: {
   bindingsBySport: Map<string, SportsChannelBindingSummary>;
   usedNames: Set<string>;
   sportName: string;
+  profileId?: string | null;
+  broadcastCountry: string;
 }): Promise<TextChannel | null> {
   const existingBinding = input.bindingsBySport.get(input.sportName) ?? null;
   if (existingBinding) {
@@ -245,7 +250,7 @@ async function ensureSportChannelForLiveEvent(input: {
       topic: buildManagedChannelTopic({
         timezone: input.config.timezone,
         publishTime: input.config.localTimeHhMm,
-        broadcastCountry: input.config.broadcastCountry,
+        broadcastCountry: input.broadcastCountry,
       }),
       reason: `Create the managed ${input.sportName} sport channel for live event publishing.`,
     }),
@@ -253,6 +258,7 @@ async function ensureSportChannelForLiveEvent(input: {
 
   const bindingResult = await sportsService.upsertChannelBinding({
     guildId: input.guild.id,
+    profileId: input.profileId,
     sportId: null,
     sportName: input.sportName,
     sportSlug: createdChannel.name,
@@ -286,10 +292,17 @@ async function renderFinishedLiveEventChannel(input: {
   eventName: string;
   sportName: string;
   deleteAfterUtc: string;
+  finalScoreLabel?: string | null;
 }): Promise<void> {
   await LIVE_EVENT_QUEUE.add(async () => {
     await input.channel.send({
-      content: `**${input.eventName}**\nThis televised ${input.sportName} event has finished. This temporary channel will be deleted after the cleanup window ends.`,
+      content: [
+        `**${input.eventName}**`,
+        input.finalScoreLabel ? `Final score: ${input.finalScoreLabel}` : null,
+        `This televised ${input.sportName} event has finished. This temporary channel will be deleted after the cleanup window ends.`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
     });
     await input.channel.send({
       embeds: [
@@ -305,6 +318,7 @@ async function renderFinishedLiveEventChannel(input: {
 
 async function postLiveEventHighlightsIfAvailable(input: {
   guildId: string;
+  profileId?: string | null;
   trackedEvent: {
     eventId: string;
     eventName: string;
@@ -339,6 +353,7 @@ async function postLiveEventHighlightsIfAvailable(input: {
 
   const markHighlightsPostedResult = await sportsLiveEventService.markHighlightsPosted({
     guildId: input.guildId,
+    profileId: input.profileId,
     eventId: input.trackedEvent.eventId,
     postedAtUtc: input.now,
   });
@@ -373,6 +388,7 @@ async function postLiveEventHighlightsIfAvailable(input: {
   } catch (error) {
     const releaseHighlightClaimResult = await sportsLiveEventService.releaseHighlightClaim({
       guildId: input.guildId,
+      profileId: input.profileId,
       eventId: input.trackedEvent.eventId,
       releasedAtUtc: input.now,
     });
@@ -457,6 +473,7 @@ async function cleanupTrackedEventIfDue(input: {
 
   const markDeletedResult = await sportsLiveEventService.markDeleted({
     guildId: input.guild.id,
+    profileId: input.trackedEvent.profileId,
     eventId: input.trackedEvent.eventId,
     deletedAtUtc: input.now,
   });
@@ -468,6 +485,7 @@ async function cleanupTrackedEventIfDue(input: {
 }
 
 type SportsLiveEventChannelSummaryLike = {
+  profileId: string;
   eventId: string;
   eventName: string;
   sportName: string;
@@ -515,6 +533,7 @@ export async function resumeTrackedLiveEventsForGuild(input: {
     if (channelLookup.status === 'missing') {
       const markFailedResult = await sportsLiveEventService.markFailed({
         guildId: input.guild.id,
+        profileId: trackedEvent.profileId,
         eventId: trackedEvent.eventId,
         failedAtUtc: now,
       });
@@ -548,6 +567,7 @@ export async function resumeTrackedLiveEventsForGuild(input: {
 
       const postedHighlights = await postLiveEventHighlightsIfAvailable({
         guildId: input.guild.id,
+        profileId: trackedEvent.profileId,
         trackedEvent,
         channel,
         now,
@@ -569,6 +589,12 @@ export async function reconcileLiveEventsForGuild(input: {
   guild: Guild;
   timezone: string;
   broadcastCountry: string;
+  profile?: {
+    profileId: string;
+    label: string;
+    dailyCategoryChannelId: string | null;
+    liveCategoryChannelId: string | null;
+  };
   now?: Date;
 }): Promise<{
   createdChannelCount: number;
@@ -576,7 +602,10 @@ export async function reconcileLiveEventsForGuild(input: {
   markedFinishedCount: number;
 }> {
   const now = input.now ?? new Date();
-  const { config, bindings } = await getManagedGuildContext(input.guild.id);
+  const { config, bindings } = await getManagedGuildContext({
+    guildId: input.guild.id,
+    profileId: input.profile?.profileId,
+  });
   if (!config) {
     return {
       createdChannelCount: 0,
@@ -585,7 +614,10 @@ export async function reconcileLiveEventsForGuild(input: {
     };
   }
 
-  const listingsCategory = await fetchManagedCategory(input.guild, config.managedCategoryChannelId);
+  const listingsCategory = await fetchManagedCategory(
+    input.guild,
+    input.profile?.dailyCategoryChannelId ?? config.managedCategoryChannelId,
+  );
   if (!listingsCategory) {
     return {
       createdChannelCount: 0,
@@ -593,7 +625,10 @@ export async function reconcileLiveEventsForGuild(input: {
       markedFinishedCount: 0,
     };
   }
-  const liveCategory = await fetchManagedCategory(input.guild, config.liveCategoryChannelId ?? null);
+  const liveCategory = await fetchManagedCategory(
+    input.guild,
+    input.profile?.liveCategoryChannelId ?? config.liveCategoryChannelId ?? null,
+  );
 
   const liveEventsResult = await sportsDataService.listLiveEvents({
     timezone: input.timezone,
@@ -604,13 +639,14 @@ export async function reconcileLiveEventsForGuild(input: {
   }
   const trackedEventsResult = await sportsLiveEventService.listTrackedEvents({
     guildId: input.guild.id,
+    profileId: input.profile?.profileId,
   });
   if (trackedEventsResult.isErr()) {
     throw trackedEventsResult.error;
   }
 
   const televisedLiveEvents = liveEventsResult.value.filter(
-    (event) => event.broadcasters.length > 0 && typeof event.sportName === 'string' && event.sportName.trim().length > 0,
+    (event) => typeof event.sportName === 'string' && event.sportName.trim().length > 0,
   );
   const trackedEventsByEventId = new Map(
     trackedEventsResult.value.map((trackedEvent) => [trackedEvent.eventId, trackedEvent]),
@@ -647,6 +683,8 @@ export async function reconcileLiveEventsForGuild(input: {
       bindingsBySport,
       usedNames,
       sportName,
+      profileId: input.profile?.profileId,
+      broadcastCountry: input.broadcastCountry,
     });
     if (!sportChannel) {
       continue;
@@ -683,6 +721,7 @@ export async function reconcileLiveEventsForGuild(input: {
     if (existingChannel && isPlacementUnchanged && isTrackedStateUnchanged) {
       const heartbeatResult = await sportsLiveEventService.upsertTrackedEvent({
         guildId: input.guild.id,
+        profileId: input.profile?.profileId,
         sportName,
         eventId: event.eventId,
         eventName: event.eventName,
@@ -754,6 +793,7 @@ export async function reconcileLiveEventsForGuild(input: {
 
     const persistedTrackedEvent = await sportsLiveEventService.upsertTrackedEvent({
       guildId: input.guild.id,
+      profileId: input.profile?.profileId,
       sportName,
       eventId: event.eventId,
       eventName: event.eventName,
@@ -786,6 +826,7 @@ export async function reconcileLiveEventsForGuild(input: {
 
     const finishedResult = await sportsLiveEventService.markFinished({
       guildId: input.guild.id,
+      profileId: input.profile?.profileId,
       eventId: trackedEvent.eventId,
       finishedAtUtc: now,
     });
@@ -807,9 +848,14 @@ export async function reconcileLiveEventsForGuild(input: {
         eventName: trackedEvent.eventName,
         sportName: trackedEvent.sportName,
         deleteAfterUtc,
+        finalScoreLabel:
+          typeof finishedResult.value.lastScoreSnapshot?.scoreLabel === 'string'
+            ? finishedResult.value.lastScoreSnapshot.scoreLabel
+            : null,
       });
       await postLiveEventHighlightsIfAvailable({
         guildId: input.guild.id,
+        profileId: input.profile?.profileId,
         trackedEvent: finishedResult.value,
         channel: eventChannel,
         now,
@@ -830,6 +876,7 @@ export async function reconcileLiveEventsForGuild(input: {
 
     await postLiveEventHighlightsIfAvailable({
       guildId: input.guild.id,
+      profileId: trackedEvent.profileId,
       trackedEvent,
       channel: eventChannel,
       now,
@@ -875,6 +922,7 @@ export async function runPendingLiveEventCleanup(input: {
     }
     const markDeletedResult = await sportsLiveEventService.markDeleted({
       guildId: input.guild.id,
+      profileId: trackedEvent.profileId,
       eventId: trackedEvent.eventId,
       deletedAtUtc: now,
     });
@@ -910,12 +958,34 @@ async function runLiveEventScheduler(client: Client): Promise<void> {
         continue;
       }
 
+      const profilesResult = await sportsService.listProfiles({ guildId: guildPreview.id });
+      if (profilesResult.isErr()) {
+        throw profilesResult.error;
+      }
+
       const guild = await client.guilds.fetch(guildPreview.id);
-      await reconcileLiveEventsForGuild({
-        guild,
-        timezone: configResult.value.timezone,
-        broadcastCountry: configResult.value.broadcastCountry,
-      });
+      const enabledProfiles = profilesResult.value.filter((profile) => profile.enabled);
+      if (enabledProfiles.length === 0) {
+        await reconcileLiveEventsForGuild({
+          guild,
+          timezone: configResult.value.timezone,
+          broadcastCountry: configResult.value.broadcastCountry,
+        });
+      } else {
+        for (const profile of enabledProfiles) {
+          await reconcileLiveEventsForGuild({
+            guild,
+            timezone: configResult.value.timezone,
+            broadcastCountry: profile.broadcastCountry,
+            profile: {
+              profileId: profile.profileId,
+              label: profile.label,
+              dailyCategoryChannelId: profile.dailyCategoryChannelId,
+              liveCategoryChannelId: profile.liveCategoryChannelId,
+            },
+          });
+        }
+      }
       await runPendingLiveEventCleanup({ guild });
     } catch (error) {
       logger.warn(
