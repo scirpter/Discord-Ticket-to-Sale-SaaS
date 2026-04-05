@@ -7,16 +7,15 @@ import {
 import {
   SportsAccessService,
   SportsDataService,
-  SportsService,
   getEnv,
 } from '@voodoo/core';
 
 import { buildSearchFallbackEmbed, buildSearchResultEmbed } from '../ui/sports-embeds.js';
 import { mapSportsError } from '../sports-runtime.js';
+import { resolveLookupContext } from './lookup-command-support.js';
 
 const sportsAccessService = new SportsAccessService();
 const sportsDataService = new SportsDataService();
-const sportsService = new SportsService();
 const MAX_SEARCH_RESULT_EMBEDS = 10;
 
 function isSuperAdminUser(discordUserId: string): boolean {
@@ -85,6 +84,12 @@ export const searchCommand = {
         .setRequired(true)
         .setMinLength(2)
         .setMaxLength(120),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('profile')
+        .setDescription('Optional sports profile, for example UK or USA')
+        .setMaxLength(80),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const permissionError = getSearchPermissionError(interaction);
@@ -127,30 +132,29 @@ export const searchCommand = {
         return;
       }
 
-      const guildConfigResult = await sportsService.getGuildConfig({ guildId });
-      if (guildConfigResult.isErr()) {
-        await sendEphemeralReply(interaction, mapSportsError(guildConfigResult.error));
+      const context = await resolveLookupContext({
+        interaction,
+        commandName: 'search',
+      });
+      if ('error' in context) {
+        await sendEphemeralReply(interaction, context.error);
         return;
       }
 
-      const env = getEnv();
-      const timezone = guildConfigResult.value?.timezone ?? env.SPORTS_DEFAULT_TIMEZONE;
-      const broadcastCountry =
-        guildConfigResult.value?.broadcastCountry ?? env.SPORTS_BROADCAST_COUNTRY;
       const visibleResults = searchResult.value.slice(0, MAX_SEARCH_RESULT_EMBEDS);
       const embeds = await Promise.all(
         visibleResults.map(async (result) => {
           const detailsResult = await sportsDataService.getEventDetails({
             eventId: result.eventId,
-            timezone,
-            broadcastCountry,
+            timezone: context.timezone,
+            broadcastCountry: context.broadcastCountry,
           });
 
           if (detailsResult.isErr() || !detailsResult.value) {
             return buildSearchFallbackEmbed(result);
           }
 
-          return buildSearchResultEmbed(detailsResult.value, timezone);
+          return buildSearchResultEmbed(detailsResult.value, context.timezone);
         }),
       );
 

@@ -2,7 +2,12 @@ import { and, eq, lte } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
-import { sportsChannelBindings, sportsGuildConfigs, sportsProfiles } from '../infra/db/schema/index.js';
+import {
+  sportsChannelBindings,
+  sportsGuildConfigs,
+  sportsLiveEventChannels,
+  sportsProfiles,
+} from '../infra/db/schema/index.js';
 
 export type SportsGuildConfigRecord = {
   id: string;
@@ -189,6 +194,35 @@ export class SportsRepository {
     }
 
     return profile;
+  }
+
+  public async deleteProfile(input: {
+    guildId: string;
+    profileId: string;
+  }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(sportsLiveEventChannels)
+        .where(
+          and(
+            eq(sportsLiveEventChannels.guildId, input.guildId),
+            eq(sportsLiveEventChannels.profileId, input.profileId),
+          ),
+        );
+
+      await tx
+        .delete(sportsChannelBindings)
+        .where(
+          and(
+            eq(sportsChannelBindings.guildId, input.guildId),
+            eq(sportsChannelBindings.profileId, input.profileId),
+          ),
+        );
+
+      await tx
+        .delete(sportsProfiles)
+        .where(and(eq(sportsProfiles.guildId, input.guildId), eq(sportsProfiles.id, input.profileId)));
+    });
   }
 
   public async upsertGuildConfig(input: {

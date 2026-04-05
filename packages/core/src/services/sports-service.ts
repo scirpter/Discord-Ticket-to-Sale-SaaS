@@ -58,6 +58,10 @@ export type SportsGuildStatus = {
   authorizedUserCount: number;
 };
 
+function normalizeProfileSelector(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function mapGuildConfigSummary(config: SportsGuildConfigRecord): SportsGuildConfigSummary {
   return {
     configId: config.id,
@@ -226,6 +230,28 @@ export class SportsService {
     }
   }
 
+  public async getProfile(input: {
+    guildId: string;
+    selector: string;
+  }): Promise<Result<SportsProfileSummary | null, AppError>> {
+    try {
+      const selector = normalizeProfileSelector(input.selector);
+      const profiles = await this.sportsRepository.listProfiles(input.guildId);
+      const profile =
+        profiles.find((entry) => normalizeProfileSelector(entry.slug) === selector) ??
+        profiles.find((entry) => normalizeProfileSelector(entry.label) === selector) ??
+        null;
+
+      return ok(profile ? mapProfileSummary(profile) : null);
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('SPORTS_CONFIG_READ_FAILED', 'Sports profile read failed.', 500),
+      );
+    }
+  }
+
   public async upsertProfile(input: {
     guildId: string;
     slug: string;
@@ -254,6 +280,40 @@ export class SportsService {
         error instanceof AppError
           ? error
           : new AppError('SPORTS_CONFIG_WRITE_FAILED', 'Sports profile update failed.', 500),
+      );
+    }
+  }
+
+  public async removeProfile(input: {
+    guildId: string;
+    selector: string;
+  }): Promise<Result<SportsProfileSummary, AppError>> {
+    try {
+      const profileResult = await this.getProfile({
+        guildId: input.guildId,
+        selector: input.selector,
+      });
+      if (profileResult.isErr()) {
+        return err(profileResult.error);
+      }
+
+      if (!profileResult.value) {
+        return err(
+          new AppError('SPORTS_PROFILE_NOT_FOUND', 'Sports profile not found for this server.', 404),
+        );
+      }
+
+      await this.sportsRepository.deleteProfile({
+        guildId: input.guildId,
+        profileId: profileResult.value.profileId,
+      });
+
+      return ok(profileResult.value);
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('SPORTS_CONFIG_WRITE_FAILED', 'Sports profile removal failed.', 500),
       );
     }
   }

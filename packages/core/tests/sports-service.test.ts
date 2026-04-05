@@ -16,6 +16,7 @@ type SportsProfileRecord = {
 type SportsRepositoryLike = {
   listProfiles: ReturnType<typeof vi.fn>;
   upsertProfile: ReturnType<typeof vi.fn>;
+  deleteProfile: ReturnType<typeof vi.fn>;
 };
 
 function createServiceWithMockRepository(repository: SportsRepositoryLike): SportsService {
@@ -48,6 +49,7 @@ describe('SportsService', () => {
         } satisfies SportsProfileRecord,
       ]),
       upsertProfile: vi.fn(),
+      deleteProfile: vi.fn(),
     };
     const service = createServiceWithMockRepository(repository);
 
@@ -84,6 +86,7 @@ describe('SportsService', () => {
     const repository: SportsRepositoryLike = {
       listProfiles: vi.fn().mockResolvedValue([profile]),
       upsertProfile: vi.fn().mockResolvedValue(profile),
+      deleteProfile: vi.fn(),
     };
     const service = createServiceWithMockRepository(repository);
 
@@ -124,5 +127,47 @@ describe('SportsService', () => {
         broadcastCountry: 'United States',
       }),
     ]);
+  });
+
+  it('resolves profiles by slug and removes them with their profile id', async () => {
+    const profile = {
+      profileId: 'profile-usa',
+      guildId: 'guild-1',
+      slug: 'usa',
+      label: 'USA',
+      broadcastCountry: 'United States',
+      dailyCategoryChannelId: 'daily-usa',
+      liveCategoryChannelId: 'live-usa',
+      enabled: true,
+    } satisfies SportsProfileRecord;
+    const repository: SportsRepositoryLike = {
+      listProfiles: vi.fn().mockResolvedValue([profile]),
+      upsertProfile: vi.fn(),
+      deleteProfile: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = createServiceWithMockRepository(repository);
+
+    const resolved = await service.getProfile({
+      guildId: 'guild-1',
+      selector: 'usa',
+    });
+
+    expect(resolved.isOk()).toBe(true);
+    if (resolved.isErr()) {
+      return;
+    }
+
+    expect(resolved.value).toEqual(expect.objectContaining({ profileId: 'profile-usa' }));
+
+    const removed = await service.removeProfile({
+      guildId: 'guild-1',
+      selector: 'USA',
+    });
+
+    expect(removed.isOk()).toBe(true);
+    expect(repository.deleteProfile).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      profileId: 'profile-usa',
+    });
   });
 });

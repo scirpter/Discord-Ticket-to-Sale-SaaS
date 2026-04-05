@@ -104,7 +104,7 @@ async function ensureManagedCategory(input: {
   if (input.existingCategoryChannelId) {
     const existing = await input.guild.channels.fetch(input.existingCategoryChannelId).catch(() => null);
     if (isCategoryChannel(existing)) {
-      if (existing.name !== desiredName) {
+      if (input.categoryName?.trim() && existing.name !== desiredName) {
         await existing.setName(desiredName);
       }
       return existing;
@@ -408,6 +408,7 @@ export async function upsertSportsProfileChannels(input: {
   dailyCategoryName: string | null;
   liveCategoryName: string | null;
   slug?: string | null;
+  enabled?: boolean;
 }): Promise<{
   config: SportsGuildConfigSummary;
   profile: SportsProfileSummary;
@@ -452,7 +453,7 @@ export async function upsertSportsProfileChannels(input: {
     broadcastCountry: input.broadcastCountry,
     dailyCategoryChannelId: category.id,
     liveCategoryChannelId: liveCategory?.id ?? null,
-    enabled: true,
+    enabled: input.enabled ?? true,
     actorDiscordUserId: input.actorDiscordUserId,
   });
   if (profileResult.isErr()) {

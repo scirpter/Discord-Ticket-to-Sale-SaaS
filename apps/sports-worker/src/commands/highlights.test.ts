@@ -26,6 +26,10 @@ vi.mock('@voodoo/core', () => {
     public async getGuildConfig(): Promise<never> {
       throw new Error('Mock getGuildConfig not implemented');
     }
+
+    public async getProfile(): Promise<never> {
+      throw new Error('Mock getProfile not implemented');
+    }
   }
 
   return {
@@ -69,7 +73,7 @@ function createOkResult<T>(value: T): any {
   };
 }
 
-function createInteractionMock(query = 'Rangers vs Celtic'): {
+function createInteractionMock(query = 'Rangers vs Celtic', profile: string | null = null): {
   interaction: ChatInputCommandInteraction;
   editReply: ReturnType<typeof vi.fn>;
 } {
@@ -92,7 +96,7 @@ function createInteractionMock(query = 'Rangers vs Celtic'): {
     guildId: 'guild-1',
     inGuild: vi.fn().mockReturnValue(true),
     options: {
-      getString: vi.fn(() => query),
+      getString: vi.fn((name: string) => (name === 'profile' ? profile : query)),
     },
     replied: false,
     reply: vi.fn(async () => undefined),

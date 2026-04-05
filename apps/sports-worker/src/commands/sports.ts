@@ -11,6 +11,7 @@ import {
   SportsLiveEventService,
   SportsService,
   type SportsGuildConfigSummary,
+  type SportsProfileSummary,
   getEnv,
 } from '@voodoo/core';
 
@@ -117,7 +118,23 @@ function buildSportsStatusMessage(input: {
   authorizedUserCount: number;
   channelCount: number;
   config: SportsGuildConfigSummary | null;
+  profiles: SportsProfileSummary[];
 }): string {
+  const profileLines =
+    input.profiles.length === 0
+      ? ['Profiles: none configured']
+      : [
+          'Profiles:',
+          ...input.profiles.map(
+            (profile) =>
+              `- ${profile.label} [${profile.slug}] | ${profile.broadcastCountry} | daily: ${
+                profile.dailyCategoryChannelId ? `<#${profile.dailyCategoryChannelId}>` : 'Not set'
+              } | live: ${profile.liveCategoryChannelId ? `<#${profile.liveCategoryChannelId}>` : 'Not set'} | ${
+                profile.enabled ? 'Enabled' : 'Disabled'
+              }`,
+          ),
+        ];
+
   if (!input.config) {
     return [
       'Sports worker status for this server:',
@@ -125,23 +142,43 @@ function buildSportsStatusMessage(input: {
       `Authorized users: ${input.authorizedUserCount}`,
       `Managed channels: ${input.channelCount}`,
       'No sports configuration exists yet.',
+      ...profileLines,
       'Next step: run `/sports setup` to create the managed channels and publish today\'s schedule.',
     ].join('\n');
   }
 
   return [
-      'Sports worker status for this server:',
-      `Activation: ${input.activated ? 'Active' : 'Pending'}`,
-      `Authorized users: ${input.authorizedUserCount}`,
-      `Managed category: ${input.config.managedCategoryChannelId ? `<#${input.config.managedCategoryChannelId}>` : 'Not set'}`,
-      `Live event category: ${input.config.liveCategoryChannelId ? `<#${input.config.liveCategoryChannelId}>` : 'Not set'}`,
-      `Managed channels: ${input.channelCount}`,
-      `Publish time: ${input.config.localTimeHhMm}`,
-      `Timezone: ${input.config.timezone}`,
+    'Sports worker status for this server:',
+    `Activation: ${input.activated ? 'Active' : 'Pending'}`,
+    `Authorized users: ${input.authorizedUserCount}`,
+    `Managed category: ${input.config.managedCategoryChannelId ? `<#${input.config.managedCategoryChannelId}>` : 'Not set'}`,
+    `Live event category: ${input.config.liveCategoryChannelId ? `<#${input.config.liveCategoryChannelId}>` : 'Not set'}`,
+    `Managed channels: ${input.channelCount}`,
+    `Publish time: ${input.config.localTimeHhMm}`,
+    `Timezone: ${input.config.timezone}`,
     `Broadcaster country: ${input.config.broadcastCountry}`,
     `Next run (UTC): ${input.config.nextRunAtUtc}`,
     `Last run (UTC): ${input.config.lastRunAtUtc ?? 'Never'}`,
     `Last local run date: ${input.config.lastLocalRunDate ?? 'Never'}`,
+    ...profileLines,
+  ].join('\n');
+}
+
+function buildProfilesMessage(profiles: SportsProfileSummary[]): string {
+  if (profiles.length === 0) {
+    return 'No sports profiles are configured for this server yet.';
+  }
+
+  return [
+    `Sports profiles for this server: ${profiles.length}`,
+    ...profiles.map(
+      (profile) =>
+        `- ${profile.label} [${profile.slug}] | ${profile.broadcastCountry} | daily: ${
+          profile.dailyCategoryChannelId ? `<#${profile.dailyCategoryChannelId}>` : 'Not set'
+        } | live: ${profile.liveCategoryChannelId ? `<#${profile.liveCategoryChannelId}>` : 'Not set'} | ${
+          profile.enabled ? 'Enabled' : 'Disabled'
+        }`,
+    ),
   ].join('\n');
 }
 
@@ -226,16 +263,71 @@ function buildSetupMessage(input: {
 
 function buildProfileAddMessage(input: {
   result: Awaited<ReturnType<typeof upsertSportsProfileChannels>>;
+  action: 'added' | 'updated';
 }): string {
   return [
-    `Sports profile \`${input.result.profile.label}\` is configured.`,
+    `Sports profile \`${input.result.profile.label}\` was ${input.action}.`,
     `Broadcast country: ${input.result.profile.broadcastCountry}`,
     `Daily category: ${input.result.profile.dailyCategoryChannelId ? `<#${input.result.profile.dailyCategoryChannelId}>` : 'Not set'}`,
     `Live category: ${input.result.profile.liveCategoryChannelId ? `<#${input.result.profile.liveCategoryChannelId}>` : 'Not set'}`,
+    `Enabled: ${input.result.profile.enabled ? 'Yes' : 'No'}`,
     `Tracked sport channels: ${input.result.channelCount}`,
     `Channels created: ${input.result.createdChannelCount}`,
     `Channels updated: ${input.result.updatedChannelCount}`,
   ].join('\n');
+}
+
+function buildProfileRemovedMessage(profile: SportsProfileSummary): string {
+  return [
+    `Sports profile \`${profile.label}\` was removed.`,
+    'Managed Discord categories and channels were left in place.',
+    'Daily publishing and live tracking for this profile are now disabled.',
+  ].join('\n');
+}
+
+async function reconcileGuildConfigAfterProfileRemoval(input: {
+  guildId: string;
+  actorDiscordUserId: string;
+  removedProfile: SportsProfileSummary;
+}): Promise<void> {
+  const [configResult, profilesResult] = await Promise.all([
+    sportsService.getGuildConfig({ guildId: input.guildId }),
+    sportsService.listProfiles({ guildId: input.guildId }),
+  ]);
+
+  if (configResult.isErr()) {
+    throw configResult.error;
+  }
+  if (profilesResult.isErr()) {
+    throw profilesResult.error;
+  }
+
+  const config = configResult.value;
+  if (!config) {
+    return;
+  }
+
+  const overlapsManagedCategory = config.managedCategoryChannelId === input.removedProfile.dailyCategoryChannelId;
+  const overlapsLiveCategory = config.liveCategoryChannelId === input.removedProfile.liveCategoryChannelId;
+  const overlapsCountry = config.broadcastCountry === input.removedProfile.broadcastCountry;
+
+  if (!overlapsManagedCategory && !overlapsLiveCategory && !overlapsCountry) {
+    return;
+  }
+
+  const replacement = profilesResult.value[0] ?? null;
+  const updatedConfigResult = await sportsService.upsertGuildConfig({
+    guildId: input.guildId,
+    managedCategoryChannelId: replacement?.dailyCategoryChannelId ?? null,
+    liveCategoryChannelId: replacement?.liveCategoryChannelId ?? null,
+    localTimeHhMm: config.localTimeHhMm,
+    timezone: config.timezone,
+    broadcastCountry: replacement?.broadcastCountry ?? getEnv().SPORTS_BROADCAST_COUNTRY,
+    actorDiscordUserId: input.actorDiscordUserId,
+  });
+  if (updatedConfigResult.isErr()) {
+    throw updatedConfigResult.error;
+  }
 }
 
 export const sportsCommand = {
@@ -332,6 +424,57 @@ export const sportsCommand = {
             .setRequired(true)
             .setMaxLength(90),
         ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand.setName('profiles').setDescription('List configured sports profiles'),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('profile-update')
+        .setDescription('Update an existing sports profile')
+        .addStringOption((option) =>
+          option
+            .setName('profile')
+            .setDescription('Existing profile slug or label')
+            .setRequired(true)
+            .setMaxLength(80),
+        )
+        .addStringOption((option) =>
+          option.setName('label').setDescription('New profile label').setMaxLength(80),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('broadcast_country')
+            .setDescription('New broadcast country')
+            .setMaxLength(120),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('daily_category_name')
+            .setDescription('Rename or reuse the daily listings category')
+            .setMaxLength(90),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('live_category_name')
+            .setDescription('Rename or reuse the live scores and highlights category')
+            .setMaxLength(90),
+        )
+        .addBooleanOption((option) =>
+          option.setName('enabled').setDescription('Enable or disable this profile'),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('profile-remove')
+        .setDescription('Remove a sports profile from this server')
+        .addStringOption((option) =>
+          option
+            .setName('profile')
+            .setDescription('Profile slug or label')
+            .setRequired(true)
+            .setMaxLength(80),
+        ),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.inGuild() || !interaction.guild) {
@@ -375,21 +518,40 @@ export const sportsCommand = {
       }
 
       if (subcommand === 'status') {
-        const result = await sportsService.getGuildStatus({ guildId });
-        if (result.isErr()) {
-          await sendEphemeralReply(interaction, mapSportsError(result.error));
+        const [statusResult, profilesResult] = await Promise.all([
+          sportsService.getGuildStatus({ guildId }),
+          sportsService.listProfiles({ guildId }),
+        ]);
+        if (statusResult.isErr()) {
+          await sendEphemeralReply(interaction, mapSportsError(statusResult.error));
+          return;
+        }
+        if (profilesResult.isErr()) {
+          await sendEphemeralReply(interaction, mapSportsError(profilesResult.error));
           return;
         }
 
         await sendEphemeralReply(
           interaction,
           buildSportsStatusMessage({
-            activated: result.value.activated,
-            authorizedUserCount: result.value.authorizedUserCount,
-            channelCount: result.value.channelCount,
-            config: result.value.config,
+            activated: statusResult.value.activated,
+            authorizedUserCount: statusResult.value.authorizedUserCount,
+            channelCount: statusResult.value.channelCount,
+            config: statusResult.value.config,
+            profiles: profilesResult.value,
           }),
         );
+        return;
+      }
+
+      if (subcommand === 'profiles') {
+        const profilesResult = await sportsService.listProfiles({ guildId });
+        if (profilesResult.isErr()) {
+          await sendEphemeralReply(interaction, mapSportsError(profilesResult.error));
+          return;
+        }
+
+        await sendEphemeralReply(interaction, buildProfilesMessage(profilesResult.value));
         return;
       }
 
@@ -456,8 +618,74 @@ export const sportsCommand = {
           interaction,
           buildProfileAddMessage({
             result,
+            action: 'added',
           }),
         );
+        return;
+      }
+
+      if (subcommand === 'profile-update') {
+        const selector = interaction.options.getString('profile', true);
+        const label = interaction.options.getString('label');
+        const broadcastCountry = interaction.options.getString('broadcast_country');
+        const dailyCategoryName = interaction.options.getString('daily_category_name');
+        const liveCategoryName = interaction.options.getString('live_category_name');
+        const enabled = interaction.options.getBoolean('enabled');
+        const profileResult = await sportsService.getProfile({
+          guildId,
+          selector,
+        });
+        if (profileResult.isErr()) {
+          await sendEphemeralReply(interaction, mapSportsError(profileResult.error));
+          return;
+        }
+        if (!profileResult.value) {
+          await sendEphemeralReply(
+            interaction,
+            `No sports profile matched \`${selector}\` for this server.`,
+          );
+          return;
+        }
+
+        const result = await upsertSportsProfileChannels({
+          guild: interaction.guild,
+          actorDiscordUserId: interaction.user.id,
+          slug: profileResult.value.slug,
+          label: label?.trim() || profileResult.value.label,
+          broadcastCountry: broadcastCountry?.trim() || profileResult.value.broadcastCountry,
+          dailyCategoryName,
+          liveCategoryName,
+          enabled: enabled ?? profileResult.value.enabled,
+        });
+
+        await sendEphemeralReply(
+          interaction,
+          buildProfileAddMessage({
+            result,
+            action: 'updated',
+          }),
+        );
+        return;
+      }
+
+      if (subcommand === 'profile-remove') {
+        const selector = interaction.options.getString('profile', true);
+        const removedProfileResult = await sportsService.removeProfile({
+          guildId,
+          selector,
+        });
+        if (removedProfileResult.isErr()) {
+          await sendEphemeralReply(interaction, mapSportsError(removedProfileResult.error));
+          return;
+        }
+
+        await reconcileGuildConfigAfterProfileRemoval({
+          guildId,
+          actorDiscordUserId: interaction.user.id,
+          removedProfile: removedProfileResult.value,
+        });
+
+        await sendEphemeralReply(interaction, buildProfileRemovedMessage(removedProfileResult.value));
         return;
       }
 

@@ -22,6 +22,10 @@ vi.mock('@voodoo/core', () => {
     public async getGuildConfig(): Promise<never> {
       throw new Error('Mock getGuildConfig not implemented');
     }
+
+    public async getProfile(): Promise<never> {
+      throw new Error('Mock getProfile not implemented');
+    }
   }
 
   return {
@@ -71,6 +75,7 @@ function createOkResult<T>(value: T): any {
 function createInteractionMock(input?: {
   userId?: string;
   query?: string;
+  profile?: string | null;
 }): {
   interaction: ChatInputCommandInteraction;
   editReply: ReturnType<typeof vi.fn>;
@@ -96,7 +101,13 @@ function createInteractionMock(input?: {
     guildId: 'guild-1',
     inGuild: vi.fn().mockReturnValue(true),
     options: {
-      getString: vi.fn().mockReturnValue(input?.query ?? 'Rangers v Celtic'),
+      getString: vi.fn((name: string) => {
+        if (name === 'profile') {
+          return input?.profile ?? null;
+        }
+
+        return input?.query ?? 'Rangers v Celtic';
+      }),
     },
     replied: false,
     reply,
@@ -229,5 +240,86 @@ describe('search command', () => {
       content: 'Found 2 upcoming televised events for `Rangers v Celtic` from today through the next 7 days.',
       embeds: [expect.any(Object), expect.any(Object)],
     });
+  });
+
+  it('uses the selected sports profile country for event details', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue(
+      createOkResult({
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getGuildActivationState']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'searchEvents').mockResolvedValue(
+      createOkResult([
+        {
+          eventId: 'event-1',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          dateEvent: '2026-03-21',
+          imageUrl: null,
+        },
+      ]) as Awaited<ReturnType<SportsDataService['searchEvents']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: null,
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getProfile').mockResolvedValue(
+      createOkResult({
+        profileId: 'profile-usa',
+        guildId: 'guild-1',
+        slug: 'usa',
+        label: 'USA',
+        broadcastCountry: 'United States',
+        dailyCategoryChannelId: 'daily-usa',
+        liveCategoryChannelId: 'live-usa',
+        enabled: true,
+      }) as Awaited<ReturnType<SportsService['getProfile']>>,
+    );
+    const getEventDetails = vi.spyOn(SportsDataService.prototype, 'getEventDetails').mockResolvedValue(
+      createOkResult({
+        eventId: 'event-1',
+        eventName: 'Rangers vs Celtic',
+        sportName: 'Soccer',
+        leagueName: 'Scottish Premiership',
+        venueName: 'Ibrox',
+        country: 'United States',
+        city: 'Glasgow',
+        dateUkLabel: 'Saturday, 21 March 2026',
+        startTimeUkLabel: '12:30',
+        imageUrl: null,
+        description: null,
+        broadcasters: [],
+      }) as Awaited<ReturnType<SportsDataService['getEventDetails']>>,
+    );
+
+    const { interaction } = createInteractionMock({
+      userId: 'user-2',
+      query: 'Rangers v Celtic',
+      profile: 'usa',
+    });
+
+    await searchCommand.execute(interaction);
+
+    expect(getEventDetails).toHaveBeenCalledWith(
+      expect.objectContaining({
+        broadcastCountry: 'United States',
+      }),
+    );
   });
 });

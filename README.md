@@ -108,16 +108,19 @@ Copy `.env.example` to `.env` and fill values.
 - `/sports setup [category_name] [broadcast_country] [live_category_name]` creates or refreshes the managed sports category, optionally updates the broadcaster-country filter, optionally configures the dedicated live-event category, and publishes the current day’s listings immediately.
 - `/sports sync [category_name] [broadcast_country] [live_category_name]` creates missing sport channels, optionally updates the broadcaster-country filter, optionally configures the dedicated live-event category, and refreshes the saved channel bindings without republishing.
 - `/sports profile-add label:<name> broadcast_country:<country> daily_category_name:<name> live_category_name:<name>` adds another country-specific daily/live profile, for example `UK Daily Sport` plus `UK Live Sport` and `USA Daily Sport` plus `USA Live Sport`.
+- `/sports profiles` lists every configured sports profile in the server.
+- `/sports profile-update profile:<slug-or-label> [label] [broadcast_country] [daily_category_name] [live_category_name] [enabled]` updates an existing profile without changing the shared `00:01` schedule.
+- `/sports profile-remove profile:<slug-or-label>` removes a profile from automation but leaves its existing Discord categories and channels in place.
 - `/sports refresh` clears the managed sport channels and republishes today’s listings on demand.
 - `/sports status` shows activation state, managed category, live event category, channel count, and the next scheduled run.
 - `/sports live-status` shows tracked live events, pending cleanup counts, and current live-sync health.
-- Daily listings and live channels follow the configured sports profiles. Lookup commands still use the server timezone and the saved/default broadcaster-country context unless a command-specific selector is added later.
+- Daily listings and live channels follow the configured sports profiles. Lookup commands use the server timezone and can optionally target a specific sports profile with `profile:<slug-or-label>`.
 - New live-event channels are only created when a dedicated live event category has been configured. Until then, live-event channel creation is intentionally disabled.
-- `/search query:"Rangers v Celtic"` or `/search query:"New York Rangers"` returns upcoming televised matches from today through the next 7 days, including configured-timezone kickoff times, channels, and artwork.
-- `/live [sport] [league]` returns current live televised events, with optional sport/league filters.
-- `/highlights query:"Rangers v Celtic"` returns on-demand highlights for a finished or matching event when a video is available.
-- `/match query:"Rangers v Celtic"` returns a richer match-centre view for a team or event, including highlights when available.
-- `/standings league:"Scottish Premiership"` returns current league standings.
+- `/search query:"Rangers v Celtic" [profile]` or `/search query:"New York Rangers" [profile]` returns upcoming televised matches from today through the next 7 days, including configured-timezone kickoff times, channels, and artwork.
+- `/live [sport] [league] [profile]` returns current live televised events, with optional sport/league/profile filters.
+- `/highlights query:"Rangers v Celtic" [profile]` returns on-demand highlights for a finished or matching event when a video is available.
+- `/match query:"Rangers v Celtic" [profile]` returns a richer match-centre view for a team or event, including highlights when available.
+- `/standings league:"Scottish Premiership" [profile]` returns current league standings.
 - `/fixtures query:"Rangers"` returns upcoming fixtures for a team or league.
 - `/results query:"Rangers"` returns recent results for a team or league.
 - `/team query:"Rangers"` returns a team profile summary.

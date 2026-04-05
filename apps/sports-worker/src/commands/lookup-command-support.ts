@@ -9,6 +9,7 @@ import {
   SportsService,
   getEnv,
   pickBestSportsSearchResult,
+  type SportsProfileSummary,
   type SportsSearchResult,
 } from '@voodoo/core';
 
@@ -88,7 +89,7 @@ export async function resolveLookupContext(input: {
   interaction: ChatInputCommandInteraction;
   commandName: string;
 }): Promise<
-  | { guildId: string; timezone: string; broadcastCountry: string }
+  | { guildId: string; timezone: string; broadcastCountry: string; profile: SportsProfileSummary | null }
   | { error: string }
 > {
   const { interaction, commandName } = input;
@@ -114,11 +115,33 @@ export async function resolveLookupContext(input: {
     return { error: mapSportsError(configResult.error) };
   }
 
+  const profileSelector = interaction.options.getString('profile')?.trim() || null;
+  let selectedProfile: SportsProfileSummary | null = null;
+  if (profileSelector) {
+    const profileResult = await sportsService.getProfile({
+      guildId: interaction.guildId,
+      selector: profileSelector,
+    });
+    if (profileResult.isErr()) {
+      return { error: mapSportsError(profileResult.error) };
+    }
+    if (!profileResult.value || !profileResult.value.enabled) {
+      return {
+        error: `No enabled sports profile matched \`${profileSelector}\` for this server.`,
+      };
+    }
+    selectedProfile = profileResult.value;
+  }
+
   const env = getEnv();
   return {
     guildId: interaction.guildId,
     timezone: configResult.value?.timezone ?? env.SPORTS_DEFAULT_TIMEZONE,
-    broadcastCountry: configResult.value?.broadcastCountry ?? env.SPORTS_BROADCAST_COUNTRY,
+    broadcastCountry:
+      selectedProfile?.broadcastCountry ??
+      configResult.value?.broadcastCountry ??
+      env.SPORTS_BROADCAST_COUNTRY,
+    profile: selectedProfile,
   };
 }
 

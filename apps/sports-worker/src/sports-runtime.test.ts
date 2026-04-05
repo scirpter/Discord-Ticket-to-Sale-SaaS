@@ -257,6 +257,94 @@ describe('sports runtime country handling', () => {
     );
   });
 
+  it('keeps the existing daily category name when sync runs without a rename override', async () => {
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([
+        {
+          profileId: 'profile-default',
+          guildId: 'guild-1',
+          slug: 'default',
+          label: 'United Kingdom',
+          broadcastCountry: 'United Kingdom',
+          dailyCategoryChannelId: 'category-1',
+          liveCategoryChannelId: null,
+          enabled: true,
+        },
+      ]) as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'upsertProfile').mockResolvedValue(
+      createOkResult({
+        profileId: 'profile-default',
+        guildId: 'guild-1',
+        slug: 'default',
+        label: 'United Kingdom',
+        broadcastCountry: 'United Kingdom',
+        dailyCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        enabled: true,
+      }) as Awaited<ReturnType<SportsService['upsertProfile']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'upsertGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['upsertGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
+    );
+
+    const setName = vi.fn(async () => undefined);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        fetch: vi.fn(async (channelId?: string) => {
+          if (channelId === 'category-1') {
+            return { id: 'category-1', name: 'UK Daily Sport', type: 4, setName };
+          }
+
+          return new Map<string, unknown>([['category-1', { id: 'category-1', name: 'UK Daily Sport', type: 4 }]]);
+        }),
+        create: vi.fn(async () => ({ id: 'category-1', name: 'UK Daily Sport', type: 4 })),
+      },
+    };
+
+    await syncSportsGuildChannels({
+      guild: guild as never,
+      actorDiscordUserId: 'user-1',
+      categoryName: null,
+    });
+
+    expect(setName).not.toHaveBeenCalled();
+  });
+
   it('publishes daily listings separately for uk and usa profiles', async () => {
     vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
       createOkResult({

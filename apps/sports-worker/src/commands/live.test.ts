@@ -18,6 +18,10 @@ vi.mock('@voodoo/core', () => {
     public async getGuildConfig(): Promise<never> {
       throw new Error('Mock getGuildConfig not implemented');
     }
+
+    public async getProfile(): Promise<never> {
+      throw new Error('Mock getProfile not implemented');
+    }
   }
 
   return {

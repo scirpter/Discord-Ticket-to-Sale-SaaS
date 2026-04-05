@@ -22,6 +22,12 @@ export const highlightsCommand = {
         .setRequired(true)
         .setMinLength(2)
         .setMaxLength(120),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('profile')
+        .setDescription('Optional sports profile, for example UK or USA')
+        .setMaxLength(80),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const permissionError = getLookupPermissionError(interaction);

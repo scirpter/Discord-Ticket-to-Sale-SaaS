@@ -27,7 +27,7 @@
 - Uses only guild-scoped nuke activation/schedule state and does not depend on workspace/panel tenant mapping.
 
 5. `sports-worker`
-- Runs as a separate Discord application/token for daily sports listings, live event channels, `/sports live-status`, and public sports lookup commands.
+- Runs as a separate Discord application/token for daily sports listings, live event channels, `/sports live-status`, and public sports lookup commands with optional profile-based country selection.
 - Maintains one or more country-specific sports profiles per guild, republishes daily sport listings at `00:01`, creates temporary live event channels in per-profile live categories, auto-posts highlights when available, and resolves event/team/player lookups from TheSportsDB.
 
 6. `telegram-worker`

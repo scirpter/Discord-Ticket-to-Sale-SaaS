@@ -27,6 +27,14 @@ vi.mock('@voodoo/core', () => {
       throw new Error('Mock listProfiles not implemented');
     }
 
+    public async getProfile(): Promise<never> {
+      throw new Error('Mock getProfile not implemented');
+    }
+
+    public async removeProfile(): Promise<never> {
+      throw new Error('Mock removeProfile not implemented');
+    }
+
     public async getGuildConfig(): Promise<never> {
       throw new Error('Mock getGuildConfig not implemented');
     }
@@ -154,12 +162,17 @@ function createInteractionMock(input?: {
     | 'refresh'
     | 'status'
     | 'live-status'
-    | 'profile-add';
+    | 'profile-add'
+    | 'profiles'
+    | 'profile-update'
+    | 'profile-remove';
+  profile?: string | null;
   label?: string | null;
   categoryName?: string | null;
   dailyCategoryName?: string | null;
   broadcastCountry?: string | null;
   liveCategoryName?: string | null;
+  enabled?: boolean | null;
 }): {
   interaction: ChatInputCommandInteraction;
   deferReply: ReturnType<typeof vi.fn>;
@@ -203,6 +216,9 @@ function createInteractionMock(input?: {
         if (name === 'label') {
           return input?.label ?? null;
         }
+        if (name === 'profile') {
+          return input?.profile ?? null;
+        }
         if (name === 'category_name') {
           return input?.categoryName ?? null;
         }
@@ -214,6 +230,13 @@ function createInteractionMock(input?: {
         }
         if (name === 'live_category_name') {
           return input?.liveCategoryName ?? null;
+        }
+
+        return null;
+      }),
+      getBoolean: vi.fn((name: string) => {
+        if (name === 'enabled') {
+          return input?.enabled ?? null;
         }
 
         return null;
@@ -587,11 +610,17 @@ describe('sports command', () => {
     const topLevelOptions = (commandJson.options ?? []) as APIApplicationCommandSubcommandOption[];
     const setup = topLevelOptions.find((option) => option.name === 'setup');
     const sync = topLevelOptions.find((option) => option.name === 'sync');
+    const profiles = topLevelOptions.find((option) => option.name === 'profiles');
+    const profileUpdate = topLevelOptions.find((option) => option.name === 'profile-update');
+    const profileRemove = topLevelOptions.find((option) => option.name === 'profile-remove');
 
     expect((setup?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(true);
     expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(true);
     expect((setup?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'live_category_name')).toBe(true);
     expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'live_category_name')).toBe(true);
+    expect(profiles).toBeDefined();
+    expect((profileUpdate?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'profile')).toBe(true);
+    expect((profileRemove?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'profile')).toBe(true);
   });
 
   it('passes the selected broadcaster country and live category into setup sync', async () => {
@@ -657,6 +686,195 @@ describe('sports command', () => {
         broadcastCountry: 'United States',
         dailyCategoryName: 'USA Daily Sport',
         liveCategoryName: 'USA Live Sport',
+      }),
+    );
+  });
+
+  it('lists configured sports profiles through /sports profiles', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([
+        {
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          slug: 'uk',
+          label: 'UK',
+          broadcastCountry: 'United Kingdom',
+          dailyCategoryChannelId: 'daily-uk',
+          liveCategoryChannelId: 'live-uk',
+          enabled: true,
+        },
+        {
+          profileId: 'profile-usa',
+          guildId: 'guild-1',
+          slug: 'usa',
+          label: 'USA',
+          broadcastCountry: 'United States',
+          dailyCategoryChannelId: 'daily-usa',
+          liveCategoryChannelId: 'live-usa',
+          enabled: true,
+        },
+      ]) as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-1',
+      subcommand: 'profiles',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Sports profiles for this server: 2'),
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('USA [usa] | United States'),
+    });
+  });
+
+  it('updates a sports profile through /sports profile-update', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getProfile').mockResolvedValue(
+      createOkResult({
+        profileId: 'profile-usa',
+        guildId: 'guild-1',
+        slug: 'usa',
+        label: 'USA',
+        broadcastCountry: 'United States',
+        dailyCategoryChannelId: 'daily-usa',
+        liveCategoryChannelId: 'live-usa',
+        enabled: true,
+      }) as Awaited<ReturnType<SportsService['getProfile']>>,
+    );
+
+    const sportsRuntime = await import('../sports-runtime.js');
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-1',
+      subcommand: 'profile-update',
+      profile: 'usa',
+      label: 'USA Prime',
+      broadcastCountry: 'United States',
+      dailyCategoryName: 'USA Prime Daily',
+      liveCategoryName: 'USA Prime Live',
+      enabled: false,
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(sportsRuntime.upsertSportsProfileChannels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guild: interaction.guild,
+        actorDiscordUserId: 'user-1',
+        slug: 'usa',
+        label: 'USA Prime',
+        broadcastCountry: 'United States',
+        dailyCategoryName: 'USA Prime Daily',
+        liveCategoryName: 'USA Prime Live',
+        enabled: false,
+      }),
+    );
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('was updated'),
+    });
+  });
+
+  it('removes a sports profile through /sports profile-remove', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'removeProfile').mockResolvedValue(
+      createOkResult({
+        profileId: 'profile-usa',
+        guildId: 'guild-1',
+        slug: 'usa',
+        label: 'USA',
+        broadcastCountry: 'United States',
+        dailyCategoryChannelId: 'daily-usa',
+        liveCategoryChannelId: 'live-usa',
+        enabled: true,
+      }) as Awaited<ReturnType<SportsService['removeProfile']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'daily-usa',
+        liveCategoryChannelId: 'live-usa',
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United States',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([
+        {
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          slug: 'uk',
+          label: 'UK',
+          broadcastCountry: 'United Kingdom',
+          dailyCategoryChannelId: 'daily-uk',
+          liveCategoryChannelId: 'live-uk',
+          enabled: true,
+        },
+      ]) as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'upsertGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'daily-uk',
+        liveCategoryChannelId: 'live-uk',
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['upsertGuildConfig']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-1',
+      subcommand: 'profile-remove',
+      profile: 'usa',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('was removed'),
+    });
+    expect(SportsService.prototype.upsertGuildConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: 'guild-1',
+        managedCategoryChannelId: 'daily-uk',
+        liveCategoryChannelId: 'live-uk',
+        broadcastCountry: 'United Kingdom',
       }),
     );
   });
