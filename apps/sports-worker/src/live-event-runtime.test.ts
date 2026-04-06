@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   ChannelType,
   Collection,
@@ -19,6 +19,10 @@ vi.mock('@voodoo/core', () => {
   class SportsDataService {
     public async listLiveEvents(): Promise<never> {
       throw new Error('Mock listLiveEvents not implemented');
+    }
+
+    public async listDailyListingsForLocalDate(): Promise<never> {
+      throw new Error('Mock listDailyListingsForLocalDate not implemented');
     }
 
     public async getEventHighlights(): Promise<never> {
@@ -89,6 +93,7 @@ vi.mock('@voodoo/core', () => {
     SportsAccessService,
     SportsLiveEventService,
     SportsService,
+    resolveSportsLocalDate: () => '2026-03-20',
     logger: {
       info: vi.fn(),
       warn: vi.fn(),
@@ -327,6 +332,25 @@ function makeTrackedEvent(overrides: Partial<MockTrackedEvent> = {}): MockTracke
 }
 
 describe('live event runtime', () => {
+  beforeEach(() => {
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
+      createOkResult([
+        {
+          sportName: 'Soccer',
+          listings: [{ eventId: 'evt-1' }, { eventId: 'evt-3' }, { eventId: 'evt-99' }],
+        },
+        {
+          sportName: 'Rugby Union',
+          listings: [{ eventId: 'evt-2' }],
+        },
+        {
+          sportName: 'Other',
+          listings: [{ eventId: 'evt-overdue' }],
+        },
+      ]) as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
+    );
+  });
+
   afterEach(() => {
     stopLiveEventScheduler();
     vi.useRealTimers();
@@ -399,6 +423,26 @@ describe('live event runtime', () => {
         }),
       ]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
     );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
+      createOkResult([
+        {
+          sportName: 'Soccer',
+          listings: [
+            {
+              eventId: 'evt-1',
+            },
+          ],
+        },
+        {
+          sportName: 'Rugby Union',
+          listings: [
+            {
+              eventId: 'evt-2',
+            },
+          ],
+        },
+      ]) as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
+    );
     vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
     );
@@ -428,18 +472,7 @@ describe('live event runtime', () => {
           }),
         ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
       )
-      .mockResolvedValueOnce(
-        createOkResult(
-          makeTrackedEvent({
-            id: 'tracked-3',
-            eventId: 'evt-3',
-            eventName: 'Closed-Door Friendly',
-            sportName: 'Soccer',
-            sportChannelId: 'sport-1',
-            eventChannelId: 'live-3',
-          }),
-        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
-      );
+      ;
 
     const result = await reconcileLiveEventsForGuild({
       guild,
@@ -448,8 +481,8 @@ describe('live event runtime', () => {
       now: new Date('2026-03-20T15:05:00.000Z'),
     });
 
-    expect(result.createdChannelCount).toBe(3);
-    expect(create).toHaveBeenCalledTimes(3);
+    expect(result.createdChannelCount).toBe(2);
+    expect(create).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ name: expect.stringMatching(/^live-/), parent: liveCategory.id }),
     );
@@ -469,6 +502,7 @@ describe('live event runtime', () => {
         status: 'live',
       }),
     );
+    expect(upsertTrackedEvent).toHaveBeenCalledTimes(2);
   });
 
   it('does not create live event channels until a live event category is configured', async () => {
@@ -500,6 +534,14 @@ describe('live event runtime', () => {
     );
     vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
       createOkResult([makeLiveEvent()]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
+      createOkResult([
+        {
+          sportName: 'Soccer',
+          listings: [{ eventId: 'evt-1' }],
+        },
+      ]) as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
     );
     vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
@@ -535,6 +577,85 @@ describe('live event runtime', () => {
     expect(create).not.toHaveBeenCalled();
     expect(upsertChannelBinding).not.toHaveBeenCalled();
     expect(upsertTrackedEvent).not.toHaveBeenCalled();
+  });
+
+  it('only creates live event channels for events that are present in the profile daily listings', async () => {
+    const { guild, create, liveCategory } = createGuildFixture();
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: liveCategory.id,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: 'soccer',
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listLiveEvents').mockResolvedValue(
+      createOkResult([
+        makeLiveEvent({ eventId: 'evt-1', eventName: 'Rangers vs Celtic' }),
+        makeLiveEvent({ eventId: 'evt-99', eventName: 'Other Live Match', sportName: 'Soccer' }),
+      ]) as Awaited<ReturnType<SportsDataService['listLiveEvents']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
+      createOkResult([
+        {
+          sportName: 'Soccer',
+          listings: [{ eventId: 'evt-1' }],
+        },
+      ]) as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            id: 'tracked-1',
+            eventId: 'evt-1',
+            eventName: 'Rangers vs Celtic',
+            eventChannelId: 'live-1',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
+
+    const result = await reconcileLiveEventsForGuild({
+      guild,
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      now: new Date('2026-03-20T15:05:00.000Z'),
+    });
+
+    expect(result.createdChannelCount).toBe(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(upsertTrackedEvent).toHaveBeenCalledTimes(1);
+    expect(upsertTrackedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+      }),
+    );
   });
 
   it('does not update tracked live event channels while the live event category is unavailable', async () => {

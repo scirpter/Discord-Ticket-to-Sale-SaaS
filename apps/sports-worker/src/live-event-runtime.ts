@@ -13,6 +13,7 @@ import {
   SportsLiveEventService,
   SportsService,
   logger,
+  resolveSportsLocalDate,
   type SportsChannelBindingSummary,
   type SportsGuildConfigSummary,
   type SportsLiveEvent,
@@ -218,6 +219,33 @@ async function fetchManagedCategory(
 
   const category = await guild.channels.fetch(categoryChannelId).catch(() => null);
   return isCategoryChannel(category) ? category : null;
+}
+
+async function getAllowedDailyLiveEventIds(input: {
+  timezone: string;
+  broadcastCountry: string;
+  now: Date;
+}): Promise<Set<string>> {
+  const localDate = resolveSportsLocalDate({
+    timezone: input.timezone,
+    at: input.now,
+  });
+  const listingsResult = await sportsDataService.listDailyListingsForLocalDate({
+    localDate,
+    timezone: input.timezone,
+    broadcastCountry: input.broadcastCountry,
+  });
+  if (listingsResult.isErr()) {
+    throw listingsResult.error;
+  }
+
+  return new Set(
+    listingsResult.value.flatMap((entry) =>
+      entry.listings
+        .map((listing) => listing.eventId?.trim() ?? '')
+        .filter((eventId) => eventId.length > 0),
+    ),
+  );
 }
 
 async function ensureSportChannelForLiveEvent(input: {
@@ -637,6 +665,11 @@ export async function reconcileLiveEventsForGuild(input: {
   if (liveEventsResult.isErr()) {
     throw liveEventsResult.error;
   }
+  const allowedDailyEventIds = await getAllowedDailyLiveEventIds({
+    timezone: input.timezone,
+    broadcastCountry: input.broadcastCountry,
+    now,
+  });
   const trackedEventsResult = await sportsLiveEventService.listTrackedEvents({
     guildId: input.guild.id,
     profileId: input.profile?.profileId,
@@ -646,7 +679,10 @@ export async function reconcileLiveEventsForGuild(input: {
   }
 
   const televisedLiveEvents = liveEventsResult.value.filter(
-    (event) => typeof event.sportName === 'string' && event.sportName.trim().length > 0,
+    (event) =>
+      typeof event.sportName === 'string' &&
+      event.sportName.trim().length > 0 &&
+      allowedDailyEventIds.has(event.eventId),
   );
   const trackedEventsByEventId = new Map(
     trackedEventsResult.value.map((trackedEvent) => [trackedEvent.eventId, trackedEvent]),
