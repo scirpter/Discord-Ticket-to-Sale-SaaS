@@ -36,8 +36,9 @@ const LIVE_EVENT_QUEUE = new PQueue({
   intervalCap: 4,
   interval: 1_000,
 });
-const LIVE_EVENT_CLEANUP_WINDOW_MS = 3 * 60 * 60 * 1000;
+const LIVE_EVENT_CLEANUP_WINDOW_MS = 30 * 60 * 1000;
 const DEFAULT_CATEGORY_NAME = 'Sports Listings';
+const MANAGED_LIVE_EVENT_TOPIC_PREFIX = 'Managed by the sports worker for live event ';
 
 let liveEventSchedulerTimer: NodeJS.Timeout | null = null;
 let liveEventSchedulerInFlight = false;
@@ -93,7 +94,7 @@ function buildLiveEventChannelName(eventName: string): string {
 }
 
 function buildLiveEventChannelTopic(eventId: string): string {
-  return `Managed by the sports worker for live event ${eventId}.`;
+  return `${MANAGED_LIVE_EVENT_TOPIC_PREFIX}${eventId}.`;
 }
 
 function buildLiveEventSnapshots(event: SportsLiveEvent): {
@@ -122,6 +123,14 @@ function isCategoryChannel(channel: unknown): channel is CategoryChannel {
 
 function isManagedTextChannel(channel: unknown): channel is TextChannel {
   return typeof channel === 'object' && channel !== null && 'type' in channel && channel.type === ChannelType.GuildText;
+}
+
+function isManagedLiveEventChannel(channel: unknown): channel is TextChannel {
+  return (
+    isManagedTextChannel(channel) &&
+    typeof channel.topic === 'string' &&
+    channel.topic.startsWith(MANAGED_LIVE_EVENT_TOPIC_PREFIX)
+  );
 }
 
 function isUnknownChannelError(error: unknown): boolean {
@@ -559,6 +568,29 @@ export async function resumeTrackedLiveEventsForGuild(input: {
       continue;
     }
     if (channelLookup.status === 'missing') {
+      if (trackedEvent.status === 'cleanup_due' || trackedEvent.status === 'finished') {
+        const markDeletedResult = await sportsLiveEventService.markDeleted({
+          guildId: input.guild.id,
+          profileId: trackedEvent.profileId,
+          eventId: trackedEvent.eventId,
+          deletedAtUtc: now,
+        });
+        if (markDeletedResult.isErr()) {
+          logger.warn(
+            { guildId: input.guild.id, eventId: trackedEvent.eventId, err: markDeletedResult.error },
+            'live event runtime could not mark the tracked event deleted during recovery',
+          );
+        } else {
+          deletedChannelCount += 1;
+        }
+
+        logger.warn(
+          { guildId: input.guild.id, eventId: trackedEvent.eventId, eventChannelId: trackedEvent.eventChannelId },
+          'live event runtime found a finished tracked event channel already missing during recovery',
+        );
+        continue;
+      }
+
       const markFailedResult = await sportsLiveEventService.markFailed({
         guildId: input.guild.id,
         profileId: trackedEvent.profileId,
@@ -969,6 +1001,188 @@ export async function runPendingLiveEventCleanup(input: {
   }
 
   return { deletedChannelCount };
+}
+
+export async function clearLiveEventChannelsForGuild(input: {
+  guild: Guild;
+  now?: Date;
+}): Promise<{ deletedChannelCount: number; markedDeletedCount: number }> {
+  const now = input.now ?? new Date();
+  const configResult = await sportsService.getGuildConfig({ guildId: input.guild.id });
+  if (configResult.isErr()) {
+    throw configResult.error;
+  }
+
+  const profilesResult = await sportsService.listProfiles({ guildId: input.guild.id });
+  if (profilesResult.isErr()) {
+    throw profilesResult.error;
+  }
+
+  const liveCategoryIds = new Set<string>();
+  for (const profile of profilesResult.value) {
+    if (profile.liveCategoryChannelId) {
+      liveCategoryIds.add(profile.liveCategoryChannelId);
+    }
+  }
+
+  if (liveCategoryIds.size === 0 && configResult.value?.liveCategoryChannelId) {
+    liveCategoryIds.add(configResult.value.liveCategoryChannelId);
+  }
+
+  const trackedEventsResult = await sportsLiveEventService.listTrackedEvents({
+    guildId: input.guild.id,
+  });
+  if (trackedEventsResult.isErr()) {
+    throw trackedEventsResult.error;
+  }
+
+  const trackedEventsByChannelId = new Map(
+    trackedEventsResult.value.flatMap((trackedEvent) =>
+      trackedEvent.eventChannelId ? [[trackedEvent.eventChannelId, trackedEvent] as const] : [],
+    ),
+  );
+  const guildChannels = await input.guild.channels.fetch();
+  const markedDeletedEventKeys = new Set<string>();
+  let deletedChannelCount = 0;
+  let markedDeletedCount = 0;
+
+  for (const channel of guildChannels.values()) {
+    if (
+      !isManagedLiveEventChannel(channel) ||
+      !channel.parentId ||
+      !liveCategoryIds.has(channel.parentId)
+    ) {
+      continue;
+    }
+
+    await LIVE_EVENT_QUEUE.add(() =>
+      channel.delete(`Clear the managed live event channel ${channel.name}.`),
+    );
+    deletedChannelCount += 1;
+
+    const trackedEvent = trackedEventsByChannelId.get(channel.id);
+    if (!trackedEvent || trackedEvent.status === 'deleted') {
+      continue;
+    }
+
+    const markDeletedResult = await sportsLiveEventService.markDeleted({
+      guildId: input.guild.id,
+      profileId: trackedEvent.profileId,
+      eventId: trackedEvent.eventId,
+      deletedAtUtc: now,
+    });
+    if (markDeletedResult.isErr()) {
+      throw markDeletedResult.error;
+    }
+    markedDeletedEventKeys.add(`${trackedEvent.profileId}:${trackedEvent.eventId}`);
+    markedDeletedCount += 1;
+  }
+
+  for (const trackedEvent of trackedEventsResult.value) {
+    const trackedEventKey = `${trackedEvent.profileId}:${trackedEvent.eventId}`;
+    if (trackedEvent.status === 'deleted' || markedDeletedEventKeys.has(trackedEventKey)) {
+      continue;
+    }
+
+    const markDeletedResult = await sportsLiveEventService.markDeleted({
+      guildId: input.guild.id,
+      profileId: trackedEvent.profileId,
+      eventId: trackedEvent.eventId,
+      deletedAtUtc: now,
+    });
+    if (markDeletedResult.isErr()) {
+      throw markDeletedResult.error;
+    }
+    markedDeletedEventKeys.add(trackedEventKey);
+    markedDeletedCount += 1;
+  }
+
+  return {
+    deletedChannelCount,
+    markedDeletedCount,
+  };
+}
+
+export async function refreshLiveEventsForGuild(input: {
+  guild: Guild;
+  now?: Date;
+}): Promise<{
+  refreshedProfileCount: number;
+  createdChannelCount: number;
+  updatedChannelCount: number;
+  markedFinishedCount: number;
+  deletedChannelCount: number;
+}> {
+  const now = input.now ?? new Date();
+  const configResult = await sportsService.getGuildConfig({ guildId: input.guild.id });
+  if (configResult.isErr()) {
+    throw configResult.error;
+  }
+  if (!configResult.value) {
+    return {
+      refreshedProfileCount: 0,
+      createdChannelCount: 0,
+      updatedChannelCount: 0,
+      markedFinishedCount: 0,
+      deletedChannelCount: 0,
+    };
+  }
+
+  const profilesResult = await sportsService.listProfiles({ guildId: input.guild.id });
+  if (profilesResult.isErr()) {
+    throw profilesResult.error;
+  }
+
+  let refreshedProfileCount = 0;
+  let createdChannelCount = 0;
+  let updatedChannelCount = 0;
+  let markedFinishedCount = 0;
+
+  const enabledProfiles = profilesResult.value.filter((profile) => profile.enabled);
+  if (enabledProfiles.length === 0) {
+    const result = await reconcileLiveEventsForGuild({
+      guild: input.guild,
+      timezone: configResult.value.timezone,
+      broadcastCountry: configResult.value.broadcastCountry,
+      now,
+    });
+    refreshedProfileCount = 1;
+    createdChannelCount += result.createdChannelCount;
+    updatedChannelCount += result.updatedChannelCount;
+    markedFinishedCount += result.markedFinishedCount;
+  } else {
+    for (const profile of enabledProfiles) {
+      const result = await reconcileLiveEventsForGuild({
+        guild: input.guild,
+        timezone: configResult.value.timezone,
+        broadcastCountry: profile.broadcastCountry,
+        profile: {
+          profileId: profile.profileId,
+          label: profile.label,
+          dailyCategoryChannelId: profile.dailyCategoryChannelId,
+          liveCategoryChannelId: profile.liveCategoryChannelId,
+        },
+        now,
+      });
+      refreshedProfileCount += 1;
+      createdChannelCount += result.createdChannelCount;
+      updatedChannelCount += result.updatedChannelCount;
+      markedFinishedCount += result.markedFinishedCount;
+    }
+  }
+
+  const cleanupResult = await runPendingLiveEventCleanup({
+    guild: input.guild,
+    now,
+  });
+
+  return {
+    refreshedProfileCount,
+    createdChannelCount,
+    updatedChannelCount,
+    markedFinishedCount,
+    deletedChannelCount: cleanupResult.deletedChannelCount,
+  };
 }
 
 async function runLiveEventScheduler(client: Client): Promise<void> {

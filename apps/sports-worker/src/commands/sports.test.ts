@@ -134,6 +134,20 @@ vi.mock('../sports-runtime.js', () => ({
   })),
 }));
 
+vi.mock('../live-event-runtime.js', () => ({
+  clearLiveEventChannelsForGuild: vi.fn(async () => ({
+    deletedChannelCount: 2,
+    markedDeletedCount: 2,
+  })),
+  refreshLiveEventsForGuild: vi.fn(async () => ({
+    refreshedProfileCount: 2,
+    createdChannelCount: 1,
+    updatedChannelCount: 3,
+    markedFinishedCount: 1,
+    deletedChannelCount: 2,
+  })),
+}));
+
 import {
   SportsAccessService,
   SportsDataService,
@@ -142,6 +156,7 @@ import {
   resetEnvForTests,
 } from '@voodoo/core';
 
+import { clearLiveEventChannelsForGuild, refreshLiveEventsForGuild } from '../live-event-runtime.js';
 import { sportsCommand } from './sports.js';
 
 const ORIGINAL_SUPER_ADMIN_DISCORD_IDS = process.env.SUPER_ADMIN_DISCORD_IDS;
@@ -162,6 +177,8 @@ function createInteractionMock(input?: {
     | 'refresh'
     | 'status'
     | 'live-status'
+    | 'live-refresh'
+    | 'live-clear'
     | 'profile-add'
     | 'profiles'
     | 'profile-update'
@@ -477,6 +494,151 @@ describe('sports command', () => {
     });
   });
 
+  it('excludes failed and finished rows from live-status tracking totals', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        {
+          id: 'tracked-live-1',
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          sportName: 'Soccer',
+          eventId: 'evt-live-1',
+          eventName: 'Rangers vs Celtic',
+          sportChannelId: 'sport-1',
+          eventChannelId: 'live-1',
+          status: 'live',
+          kickoffAtUtc: new Date('2026-03-20T15:00:00.000Z'),
+          lastScoreSnapshot: { scoreLabel: '2-1' },
+          lastStateSnapshot: { statusLabel: 'Live' },
+          lastSyncedAtUtc: new Date('2026-03-20T15:58:00.000Z'),
+          finishedAtUtc: null,
+          deleteAfterUtc: null,
+          highlightsPosted: false,
+          createdAt: new Date('2026-03-20T15:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T15:58:00.000Z'),
+        },
+        {
+          id: 'tracked-finished-1',
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          sportName: 'Soccer',
+          eventId: 'evt-finished-1',
+          eventName: 'Hearts vs Hibs',
+          sportChannelId: 'sport-1',
+          eventChannelId: null,
+          status: 'finished',
+          kickoffAtUtc: new Date('2026-03-20T12:00:00.000Z'),
+          lastScoreSnapshot: { scoreLabel: '1-0' },
+          lastStateSnapshot: { statusLabel: 'FT' },
+          lastSyncedAtUtc: new Date('2026-03-20T13:00:00.000Z'),
+          finishedAtUtc: new Date('2026-03-20T14:45:00.000Z'),
+          deleteAfterUtc: new Date('2026-03-20T15:15:00.000Z'),
+          highlightsPosted: true,
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T14:45:00.000Z'),
+        },
+        {
+          id: 'tracked-failed-1',
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          sportName: 'Soccer',
+          eventId: 'evt-failed-1',
+          eventName: 'Aberdeen vs Dundee',
+          sportChannelId: 'sport-1',
+          eventChannelId: null,
+          status: 'failed',
+          kickoffAtUtc: new Date('2026-03-20T10:00:00.000Z'),
+          lastScoreSnapshot: null,
+          lastStateSnapshot: { statusLabel: 'Live' },
+          lastSyncedAtUtc: new Date('2026-03-20T10:05:00.000Z'),
+          finishedAtUtc: null,
+          deleteAfterUtc: null,
+          highlightsPosted: false,
+          createdAt: new Date('2026-03-20T10:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T10:05:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'live-status',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Tracked live events: 1'),
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Sync health: Degraded (1 stale tracked event)'),
+    });
+  });
+
+  it('runs manual live refresh for the configured profiles', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'live-refresh',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(refreshLiveEventsForGuild).toHaveBeenCalledWith({
+      guild: interaction.guild,
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Live results were refreshed.'),
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Profiles refreshed: 2'),
+    });
+  });
+
+  it('clears managed live event channels on demand', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'live-clear',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(clearLiveEventChannelsForGuild).toHaveBeenCalledWith({
+      guild: interaction.guild,
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Managed live result channels were cleared.'),
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Channels deleted: 2'),
+    });
+  });
+
   it('clears stale managed sport channels that have no listings today', async () => {
     vi.resetModules();
 
@@ -613,12 +775,16 @@ describe('sports command', () => {
     const profiles = topLevelOptions.find((option) => option.name === 'profiles');
     const profileUpdate = topLevelOptions.find((option) => option.name === 'profile-update');
     const profileRemove = topLevelOptions.find((option) => option.name === 'profile-remove');
+    const liveRefresh = topLevelOptions.find((option) => option.name === 'live-refresh');
+    const liveClear = topLevelOptions.find((option) => option.name === 'live-clear');
 
     expect((setup?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(true);
     expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(true);
     expect((setup?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'live_category_name')).toBe(true);
     expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'live_category_name')).toBe(true);
     expect(profiles).toBeDefined();
+    expect(liveRefresh).toBeDefined();
+    expect(liveClear).toBeDefined();
     expect((profileUpdate?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'profile')).toBe(true);
     expect((profileRemove?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'profile')).toBe(true);
   });

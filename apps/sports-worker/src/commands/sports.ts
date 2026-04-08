@@ -21,6 +21,7 @@ import {
   syncSportsGuildChannels,
   upsertSportsProfileChannels,
 } from '../sports-runtime.js';
+import { clearLiveEventChannelsForGuild, refreshLiveEventsForGuild } from '../live-event-runtime.js';
 
 const sportsAccessService = new SportsAccessService();
 const sportsLiveEventService = new SportsLiveEventService();
@@ -190,7 +191,9 @@ function buildSportsLiveStatusMessage(input: {
   now: Date;
   pollIntervalMs: number;
 }): string {
-  const trackedEvents = input.trackedEvents.filter((event) => event.status !== 'deleted');
+  const trackedEvents = input.trackedEvents.filter(
+    (event) => event.status !== 'deleted' && event.status !== 'failed' && event.status !== 'finished',
+  );
   const liveCount = trackedEvents.filter((event) => event.status === 'live').length;
   const pendingCleanupCount = trackedEvents.filter((event) => event.status === 'cleanup_due').length;
   const staleThresholdMs = Math.max(input.pollIntervalMs * 3, 5 * 60 * 1000);
@@ -395,6 +398,16 @@ export const sportsCommand = {
       subcommand
         .setName('live-status')
         .setDescription('Show tracked live events, cleanup counts, and sync health'),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('live-refresh')
+        .setDescription('Manually refresh live scores, finished states, and due cleanup'),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('live-clear')
+        .setDescription('Delete all managed live score channels for this server now'),
     )
     .addSubcommand((subcommand) =>
       subcommand
@@ -620,6 +633,41 @@ export const sportsCommand = {
             result,
             action: 'added',
           }),
+        );
+        return;
+      }
+
+      if (subcommand === 'live-refresh') {
+        const refreshResult = await refreshLiveEventsForGuild({
+          guild: interaction.guild,
+        });
+
+        await sendEphemeralReply(
+          interaction,
+          [
+            'Live results were refreshed.',
+            `Profiles refreshed: ${refreshResult.refreshedProfileCount}`,
+            `Channels created: ${refreshResult.createdChannelCount}`,
+            `Channels updated: ${refreshResult.updatedChannelCount}`,
+            `Events marked finished: ${refreshResult.markedFinishedCount}`,
+            `Channels deleted during cleanup: ${refreshResult.deletedChannelCount}`,
+          ].join('\n'),
+        );
+        return;
+      }
+
+      if (subcommand === 'live-clear') {
+        const clearResult = await clearLiveEventChannelsForGuild({
+          guild: interaction.guild,
+        });
+
+        await sendEphemeralReply(
+          interaction,
+          [
+            'Managed live result channels were cleared.',
+            `Channels deleted: ${clearResult.deletedChannelCount}`,
+            `Tracked events marked deleted: ${clearResult.markedDeletedCount}`,
+          ].join('\n'),
         );
         return;
       }

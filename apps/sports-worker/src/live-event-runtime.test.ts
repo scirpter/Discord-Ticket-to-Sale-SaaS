@@ -112,6 +112,7 @@ import {
 } from '@voodoo/core';
 
 import {
+  clearLiveEventChannelsForGuild,
   reconcileLiveEventsForGuild,
   resumeTrackedLiveEventsForGuild,
   runPendingLiveEventCleanup,
@@ -121,6 +122,7 @@ import {
 
 type MockTrackedEvent = {
   id: string;
+  profileId: string;
   guildId: string;
   sportName: string;
   eventId: string;
@@ -311,6 +313,7 @@ function makeLiveEvent(overrides: Partial<SportsLiveEvent> = {}): SportsLiveEven
 function makeTrackedEvent(overrides: Partial<MockTrackedEvent> = {}): MockTrackedEvent {
   return {
     id: 'tracked-1',
+    profileId: 'profile-default',
     guildId: 'guild-1',
     sportName: 'Soccer',
     eventId: 'evt-1',
@@ -1422,11 +1425,59 @@ describe('live event runtime', () => {
 
     expect(markFailed).toHaveBeenCalledWith({
       guildId: 'guild-1',
+      profileId: 'profile-default',
       eventId: 'evt-1',
       failedAtUtc: new Date('2026-03-20T16:05:00.000Z'),
     });
     expect(create).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('marks a cleanup-due tracked event deleted during recovery when its channel is already missing', async () => {
+    const { guild } = createGuildFixture();
+    const fetch = vi
+      .spyOn(guild.channels, 'fetch')
+      .mockImplementation(async () => null as never);
+    const markDeleted = vi
+      .spyOn(SportsLiveEventService.prototype, 'markDeleted')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            status: 'deleted',
+            eventChannelId: null,
+            finishedAtUtc: new Date('2026-03-20T15:00:00.000Z'),
+            deleteAfterUtc: new Date('2026-03-20T15:30:00.000Z'),
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['markDeleted']>>,
+      );
+    const markFailed = vi.spyOn(SportsLiveEventService.prototype, 'markFailed');
+
+    vi.spyOn(SportsLiveEventService.prototype, 'listRecoverableEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventChannelId: 'missing-finished-channel',
+          status: 'cleanup_due',
+          finishedAtUtc: new Date('2026-03-20T15:00:00.000Z'),
+          deleteAfterUtc: new Date('2026-03-20T15:30:00.000Z'),
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listRecoverableEvents']>>,
+    );
+
+    const result = await resumeTrackedLiveEventsForGuild({
+      guild,
+      now: new Date('2026-03-20T15:40:00.000Z'),
+    });
+
+    expect(fetch).toHaveBeenCalledWith('missing-finished-channel');
+    expect(markDeleted).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      profileId: 'profile-default',
+      eventId: 'evt-1',
+      deletedAtUtc: new Date('2026-03-20T15:40:00.000Z'),
+    });
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(result.deletedChannelCount).toBe(1);
+    expect(result.failedEventCount).toBe(0);
   });
 
   it('does not mark a tracked event failed when channel fetch errors during recovery', async () => {
@@ -1867,11 +1918,14 @@ describe('live event runtime', () => {
     await flushAsyncWork();
 
     expect(overdueChannel.delete).toHaveBeenCalled();
-    expect(markDeleted).toHaveBeenCalledWith({
-      guildId: 'guild-1',
-      eventId: 'evt-overdue',
-      deletedAtUtc: expect.any(Date),
-    });
+    expect(markDeleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: 'guild-1',
+        profileId: 'profile-default',
+        eventId: 'evt-overdue',
+        deletedAtUtc: expect.any(Date),
+      }),
+    );
   });
 
   it('runs tracked-event recovery only on scheduler startup and not on later poll ticks', async () => {
@@ -1930,7 +1984,7 @@ describe('live event runtime', () => {
     expect(listTrackedEvents).toHaveBeenCalledTimes(4);
   });
 
-  it('deletes finished event channels after the three-hour cleanup window', async () => {
+  it('deletes finished event channels after the cleanup window', async () => {
     const { guild, channels } = createGuildFixture();
     const eventChannel = createTextChannel({
       id: 'live-cleanup-1',
@@ -1971,8 +2025,123 @@ describe('live event runtime', () => {
     expect(eventChannel.delete).toHaveBeenCalled();
     expect(markDeleted).toHaveBeenCalledWith({
       guildId: 'guild-1',
+      profileId: 'profile-default',
       eventId: 'evt-1',
       deletedAtUtc: new Date('2026-03-20T18:05:00.000Z'),
+    });
+  });
+
+  it('clears managed live event channels on demand across live categories', async () => {
+    const { guild, channels, liveCategory } = createGuildFixture();
+    const disabledProfileLiveCategory = createCategoryChannel('live-category-2', 'Legacy Live Sports');
+    const managedTrackedChannel = createTextChannel({
+      id: 'live-clear-1',
+      name: 'live-rangers-vs-celtic',
+      parentId: liveCategory.id,
+      topic: 'Managed by the sports worker for live event evt-1.',
+    });
+    const managedOrphanChannel = createTextChannel({
+      id: 'live-clear-2',
+      name: 'live-hearts-vs-hibs',
+      parentId: liveCategory.id,
+      topic: 'Managed by the sports worker for live event evt-2.',
+    });
+    const manualChannel = createTextChannel({
+      id: 'manual-live-1',
+      name: 'general-chat',
+      parentId: liveCategory.id,
+      topic: 'Not managed by the sports worker.',
+    });
+    const disabledProfileChannel = createTextChannel({
+      id: 'live-clear-3',
+      name: 'live-aberdeen-vs-hearts',
+      parentId: disabledProfileLiveCategory.id,
+      topic: 'Managed by the sports worker for live event evt-3.',
+    });
+    channels.set(disabledProfileLiveCategory.id, disabledProfileLiveCategory);
+    channels.set(managedTrackedChannel.id, managedTrackedChannel);
+    channels.set(managedOrphanChannel.id, managedOrphanChannel);
+    channels.set(manualChannel.id, manualChannel);
+    channels.set(disabledProfileChannel.id, disabledProfileChannel);
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: 'live-category-1',
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listProfiles').mockResolvedValue(
+      createOkResult([
+        {
+          profileId: 'profile-uk',
+          guildId: 'guild-1',
+          slug: 'uk',
+          label: 'UK',
+          broadcastCountry: 'United Kingdom',
+          dailyCategoryChannelId: 'category-1',
+          liveCategoryChannelId: 'live-category-1',
+          enabled: true,
+        },
+        {
+          profileId: 'profile-legacy',
+          guildId: 'guild-1',
+          slug: 'legacy',
+          label: 'Legacy',
+          broadcastCountry: 'United Kingdom',
+          dailyCategoryChannelId: 'category-1',
+          liveCategoryChannelId: 'live-category-2',
+          enabled: false,
+        },
+      ]) as Awaited<ReturnType<SportsService['listProfiles']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          profileId: 'profile-uk',
+          eventId: 'evt-1',
+          eventChannelId: 'live-clear-1',
+          status: 'cleanup_due',
+          deleteAfterUtc: new Date('2026-03-20T18:00:00.000Z'),
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const markDeleted = vi
+      .spyOn(SportsLiveEventService.prototype, 'markDeleted')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            profileId: 'profile-uk',
+            eventId: 'evt-1',
+            eventChannelId: null,
+            status: 'deleted',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['markDeleted']>>,
+      );
+
+    const result = await clearLiveEventChannelsForGuild({ guild });
+
+    expect(result).toEqual({
+      deletedChannelCount: 3,
+      markedDeletedCount: 1,
+    });
+    expect(managedTrackedChannel.delete).toHaveBeenCalled();
+    expect(managedOrphanChannel.delete).toHaveBeenCalled();
+    expect(disabledProfileChannel.delete).toHaveBeenCalled();
+    expect(manualChannel.delete).not.toHaveBeenCalled();
+    expect(markDeleted).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      profileId: 'profile-uk',
+      eventId: 'evt-1',
+      deletedAtUtc: expect.any(Date),
     });
   });
 });

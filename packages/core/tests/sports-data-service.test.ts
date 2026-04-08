@@ -603,6 +603,76 @@ describe('pickBestSportsSearchResult', () => {
     });
   });
 
+  it('filters terminal statuses out of the live score feed before channel tracking', async () => {
+    process.env.SPORTS_API_KEY = 'premium-key';
+    process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';
+    process.env.SPORTS_API_V1_BASE_URL = 'https://example.com/api/v1/json';
+    resetEnvForTests();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          events: [
+            {
+              idEvent: 'evt-finished',
+              strEvent: 'Rangers vs Celtic',
+              strSport: 'Soccer',
+              strLeague: 'Scottish Premiership',
+              strStatus: 'Match Finished',
+              intHomeScore: '2',
+              intAwayScore: '1',
+            },
+            {
+              idEvent: 'evt-live',
+              strEvent: 'Hearts vs Hibs',
+              strSport: 'Soccer',
+              strLeague: 'Scottish Premiership',
+              strStatus: 'Live',
+              intHomeScore: '1',
+              intAwayScore: '0',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          tvshows: [
+            {
+              idChannel: 'chan-2',
+              strTvChannel: 'Sky Sports Football',
+              strCountry: 'United Kingdom',
+              strLogo: 'https://img.test/sky-football.png',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new SportsDataService();
+    const result = await service.listLiveEvents({
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://example.com/api/v1/json/premium-key/lookuptv.php?id=evt-live',
+    );
+    expect(result.value).toEqual([
+      expect.objectContaining({
+        eventId: 'evt-live',
+        eventName: 'Hearts vs Hibs',
+        statusLabel: 'Live',
+      }),
+    ]);
+  });
+
   it('returns highlight links for a finished event', async () => {
     process.env.SPORTS_API_KEY = 'premium-key';
     process.env.SPORTS_API_BASE_URL = 'https://example.com/api/v2/json';

@@ -32,6 +32,8 @@ export type SportsLiveEventHighlightClaimSummary = {
   trackedEvent: SportsLiveEventChannelSummary | null;
 };
 
+const LIVE_EVENT_CLEANUP_WINDOW_MS = 30 * 60 * 1000;
+
 function mapSportsLiveEventChannelSummary(
   record: SportsLiveEventChannelRecord,
 ): SportsLiveEventChannelSummary {
@@ -150,7 +152,7 @@ export class SportsLiveEventService {
     finishedAtUtc: Date;
     profileId?: string | null;
   }): Promise<Result<SportsLiveEventChannelSummary, AppError>> {
-    const deleteAfterUtc = new Date(input.finishedAtUtc.getTime() + 3 * 60 * 60 * 1000);
+    const deleteAfterUtc = new Date(input.finishedAtUtc.getTime() + LIVE_EVENT_CLEANUP_WINDOW_MS);
 
     try {
       const record = await this.repository.markFinished({

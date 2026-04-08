@@ -101,7 +101,7 @@ Copy `.env.example` to `.env` and fill values.
 - Runs from separate worker/token (`apps/sports-worker`).
 - Creates and manages persistent sport channels under one or more country-specific sports profiles, and only posts daily listings for sports that actually have televised events that day.
 - Default schedule is `00:01` in `Europe/London`, and the worker clears the previous day’s managed posts before sending the new listings.
-- Live event channels can be split into separate per-profile categories, update while the event is live even when broadcaster enrichment is temporarily missing, keep the final score/state visible until cleanup, and delete automatically 3 hours after finish.
+- Live event channels can be split into separate per-profile categories, update while the event is live even when broadcaster enrichment is temporarily missing, keep the final score/state visible until cleanup, and delete automatically 30 minutes after finish.
 - Highlights can post automatically inside managed live event channels when available, and the same highlight data can also be requested on demand.
 - Uses TheSportsDB for sport, event, broadcaster, and image data. A paid API key is required for full daily coverage because the public `123` key is heavily truncated.
 - Daily sport channels stay persistent. When a sport has no events that day, its channel is cleared and left empty instead of being deleted.
@@ -114,6 +114,8 @@ Copy `.env.example` to `.env` and fill values.
 - `/sports refresh` clears the managed sport channels and republishes today’s listings on demand.
 - `/sports status` shows activation state, managed category, live event category, channel count, and the next scheduled run.
 - `/sports live-status` shows tracked live events, pending cleanup counts, and current live-sync health.
+- `/sports live-refresh` manually reruns live-score reconciliation, marks finished events, and applies any due live-channel cleanup immediately.
+- `/sports live-clear` deletes the managed live score channels in the configured live categories and marks their tracked rows deleted so the runtime can start cleanly again.
 - Daily listings and live channels follow the configured sports profiles. Lookup commands use the server timezone and can optionally target a specific sports profile with `profile:<slug-or-label>`.
 - New live-event channels are only created when a dedicated live event category has been configured. Until then, live-event channel creation is intentionally disabled.
 - `/search query:"Rangers v Celtic" [profile]` or `/search query:"New York Rangers" [profile]` returns upcoming televised matches from today through the next 7 days, including configured-timezone kickoff times, channels, and artwork.

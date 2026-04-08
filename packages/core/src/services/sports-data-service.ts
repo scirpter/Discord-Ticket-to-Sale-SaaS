@@ -689,6 +689,24 @@ function buildScoreLabel(input: {
   return firstNonEmpty(input.score);
 }
 
+function isTerminalLiveStatus(status: string | null | undefined): boolean {
+  const normalized = firstNonEmpty(status)?.trim().toLowerCase() ?? '';
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === 'ft' ||
+    normalized === 'aet' ||
+    normalized.includes('finished') ||
+    normalized.includes('full time') ||
+    normalized.includes('after penalties') ||
+    normalized.includes('penalties') ||
+    normalized.includes('ended') ||
+    normalized.includes('final')
+  );
+}
+
 export function pickBestSportsSearchResult(
   query: string,
   results: SportsSearchResult[],
@@ -1307,7 +1325,9 @@ export class SportsDataService {
         path: '/livescore/all',
       });
 
-      const events = extractLiveScoreRows(payload);
+      const events = extractLiveScoreRows(payload).filter(
+        (event) => !isTerminalLiveStatus(event.strStatus),
+      );
       const results = await Promise.all(
         events.map(async (event) => {
           const eventId = firstNonEmpty(event.idEvent);
