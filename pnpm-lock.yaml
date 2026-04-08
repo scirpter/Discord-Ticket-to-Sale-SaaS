@@ -86,6 +86,9 @@ importers:
       discord.js:
         specifier: 14.25.1
         version: 14.25.1
+      p-queue:
+        specifier: 8.1.1
+        version: 8.1.1
 
   apps/telegram-worker:
     dependencies:
