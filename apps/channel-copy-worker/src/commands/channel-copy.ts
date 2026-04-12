@@ -16,8 +16,10 @@ import {
 import {
   AppError,
   ChannelCopyService,
+  type ChannelCopyMessageEmbed,
   type ChannelCopyRuntimeAdapter,
 } from '@voodoo/core';
+import type { APIEmbed } from 'discord.js';
 
 const channelCopyService = new ChannelCopyService();
 const CHANNEL_COPY_CONFIRM_BUTTON_PREFIX = 'channel-copy';
@@ -150,11 +152,6 @@ export async function handleChannelCopyConfirmationButton(
 
 function renderSourceMessageContent(message: {
   content: string;
-  embeds: Array<{
-    title: string | null;
-    description: string | null;
-    url: string | null;
-  }>;
   stickers: Array<{ name: string }>;
   components: Array<{
     components?: Array<{
@@ -168,18 +165,6 @@ function renderSourceMessageContent(message: {
   const trimmedContent = message.content.trim();
   if (trimmedContent.length > 0) {
     lines.push(trimmedContent);
-  }
-
-  for (const embed of message.embeds) {
-    if (embed.title) {
-      lines.push(`Embed title: ${embed.title}`);
-    }
-    if (embed.description) {
-      lines.push(`Embed description: ${embed.description}`);
-    }
-    if (embed.url) {
-      lines.push(`Embed URL: ${embed.url}`);
-    }
   }
 
   for (const sticker of message.stickers) {
@@ -242,6 +227,62 @@ function assertBotPermissions(input: {
   }
 }
 
+function normalizeSourceEmbed(embed: APIEmbed): ChannelCopyMessageEmbed | null {
+  const normalized: ChannelCopyMessageEmbed = {};
+
+  if (typeof embed.title === 'string' && embed.title.length > 0) {
+    normalized.title = embed.title;
+  }
+  if (typeof embed.description === 'string' && embed.description.length > 0) {
+    normalized.description = embed.description;
+  }
+  if (typeof embed.url === 'string' && embed.url.length > 0) {
+    normalized.url = embed.url;
+  }
+  if (typeof embed.timestamp === 'string' && embed.timestamp.length > 0) {
+    normalized.timestamp = embed.timestamp;
+  }
+  if (typeof embed.color === 'number') {
+    normalized.color = embed.color;
+  }
+  if (embed.footer?.text) {
+    normalized.footer = {
+      text: embed.footer.text,
+      ...(typeof embed.footer.icon_url === 'string' && embed.footer.icon_url.length > 0
+        ? { icon_url: embed.footer.icon_url }
+        : {}),
+    };
+  }
+  if (embed.image?.url) {
+    normalized.image = { url: embed.image.url };
+  }
+  if (embed.thumbnail?.url) {
+    normalized.thumbnail = { url: embed.thumbnail.url };
+  }
+  if (embed.author?.name) {
+    normalized.author = {
+      name: embed.author.name,
+      ...(typeof embed.author.url === 'string' && embed.author.url.length > 0
+        ? { url: embed.author.url }
+        : {}),
+      ...(typeof embed.author.icon_url === 'string' && embed.author.icon_url.length > 0
+        ? { icon_url: embed.author.icon_url }
+        : {}),
+    };
+  }
+  if (embed.fields && embed.fields.length > 0) {
+    normalized.fields = embed.fields
+      .filter((field) => field.name.length > 0 && field.value.length > 0)
+      .map((field) => ({
+        name: field.name,
+        value: field.value,
+        ...(field.inline ? { inline: true } : {}),
+      }));
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
 export function createDiscordRuntimeAdapter(client: Client): ChannelCopyRuntimeAdapter {
   return {
     async getChannel({ channelId }) {
@@ -271,10 +312,11 @@ export function createDiscordRuntimeAdapter(client: Client): ChannelCopyRuntimeA
         permissions: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.EmbedLinks,
           PermissionFlagsBits.AttachFiles,
         ],
         onMissing:
-          'The channel-copy worker is missing permission to post messages or upload files in the destination channel.',
+          'The channel-copy worker is missing permission to post messages, embeds, or upload files in the destination channel.',
       });
     },
     async countDestinationMessages({ channelId }) {
@@ -293,74 +335,77 @@ export function createDiscordRuntimeAdapter(client: Client): ChannelCopyRuntimeA
       );
 
       return Promise.all(
-        orderedMessages.map(async (message) => ({
-          id: message.id,
-          content: renderSourceMessageContent({
-            content: message.content,
-            embeds: message.embeds.map((embed) => ({
-              title: embed.title ?? null,
-              description: embed.description ?? null,
-              url: embed.url ?? null,
-            })),
-            stickers: [...message.stickers.values()].map((sticker) => ({
-              name: sticker.name,
-            })),
-            components: message.components
-              .filter((row): row is (typeof message.components)[number] & { components: unknown[] } =>
-                'components' in row,
-              )
-              .map((row) => ({
-                components: row.components.map((component) => ({
-                  label:
-                    typeof component === 'object' &&
-                    component !== null &&
-                    'label' in component &&
-                    typeof component.label === 'string'
-                      ? component.label
-                      : null,
-                  url:
-                    typeof component === 'object' &&
-                    component !== null &&
-                    'url' in component &&
-                    typeof component.url === 'string'
-                      ? component.url
-                      : null,
-                  customId:
-                    typeof component === 'object' &&
-                    component !== null &&
-                    'customId' in component &&
-                    typeof component.customId === 'string'
-                      ? component.customId
-                      : null,
-                })),
-              })),
-          }),
-          attachments: await Promise.all(
-            [...message.attachments.values()].map(async (attachment) => {
-              const response = await fetch(attachment.url);
-              if (!response.ok) {
-                throw new AppError(
-                  'CHANNEL_COPY_ATTACHMENT_FETCH_FAILED',
-                  `Failed to download attachment \`${attachment.name ?? attachment.id}\` from the source channel.`,
-                  502,
-                );
-              }
+        orderedMessages.map(async (message) => {
+          const embeds = message.embeds
+            .map((embed) => normalizeSourceEmbed(embed.toJSON()))
+            .filter((embed): embed is ChannelCopyMessageEmbed => embed !== null);
 
-              return {
-                name: attachment.name ?? `${attachment.id}.bin`,
-                contentType: attachment.contentType ?? null,
-                data: Buffer.from(await response.arrayBuffer()),
-              };
+          return {
+            id: message.id,
+            content: renderSourceMessageContent({
+              content: message.content,
+              stickers: [...message.stickers.values()].map((sticker) => ({
+                name: sticker.name,
+              })),
+              components: message.components
+                .filter((row): row is (typeof message.components)[number] & { components: unknown[] } =>
+                  'components' in row,
+                )
+                .map((row) => ({
+                  components: row.components.map((component) => ({
+                    label:
+                      typeof component === 'object' &&
+                      component !== null &&
+                      'label' in component &&
+                      typeof component.label === 'string'
+                        ? component.label
+                        : null,
+                    url:
+                      typeof component === 'object' &&
+                      component !== null &&
+                      'url' in component &&
+                      typeof component.url === 'string'
+                        ? component.url
+                        : null,
+                    customId:
+                      typeof component === 'object' &&
+                      component !== null &&
+                      'customId' in component &&
+                      typeof component.customId === 'string'
+                        ? component.customId
+                        : null,
+                  })),
+                })),
             }),
-          ),
-          isSystem: message.system,
-        })),
+            embeds,
+            attachments: await Promise.all(
+              [...message.attachments.values()].map(async (attachment) => {
+                const response = await fetch(attachment.url);
+                if (!response.ok) {
+                  throw new AppError(
+                    'CHANNEL_COPY_ATTACHMENT_FETCH_FAILED',
+                    `Failed to download attachment \`${attachment.name ?? attachment.id}\` from the source channel.`,
+                    502,
+                  );
+                }
+
+                return {
+                  name: attachment.name ?? `${attachment.id}.bin`,
+                  contentType: attachment.contentType ?? null,
+                  data: Buffer.from(await response.arrayBuffer()),
+                };
+              }),
+            ),
+            isSystem: message.system,
+          };
+        }),
       );
     },
-    async repostMessage({ channelId, content, attachments }) {
+    async repostMessage({ channelId, content, embeds, attachments }) {
       const channel = await fetchSupportedGuildTextChannel(client, channelId);
       const sent = await channel.send({
         content: content.length > 0 ? content : undefined,
+        embeds: embeds.length > 0 ? embeds : undefined,
         files: attachments.map(
           (attachment) =>
             new AttachmentBuilder(attachment.data, {
@@ -382,7 +427,7 @@ export const channelCopyCommand = {
     .addSubcommand((subcommand) =>
       subcommand
         .setName('run')
-        .setDescription('Copy all messages and attachments from a source channel into a destination channel')
+        .setDescription('Copy all messages, embeds, and attachments from a source channel into a destination channel')
         .addStringOption((option) =>
           option
             .setName('source_channel_id')

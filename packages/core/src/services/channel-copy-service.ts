@@ -23,6 +23,34 @@ export type ChannelCopyCommandAccessState = {
   authorizedUserCount: number;
 };
 
+export type ChannelCopyMessageEmbed = {
+  title?: string;
+  description?: string;
+  url?: string;
+  timestamp?: string;
+  color?: number;
+  footer?: {
+    text: string;
+    icon_url?: string;
+  };
+  image?: {
+    url: string;
+  };
+  thumbnail?: {
+    url: string;
+  };
+  author?: {
+    name: string;
+    url?: string;
+    icon_url?: string;
+  };
+  fields?: Array<{
+    name: string;
+    value: string;
+    inline?: boolean;
+  }>;
+};
+
 export type ChannelCopyRuntimeAdapter = {
   getChannel(input: { channelId: string }): Promise<{
     id: string;
@@ -40,6 +68,7 @@ export type ChannelCopyRuntimeAdapter = {
     Array<{
       id: string;
       content: string;
+      embeds: ChannelCopyMessageEmbed[];
       attachments: Array<{ name: string; contentType: string | null; data: Buffer }>;
       isSystem: boolean;
     }>
@@ -47,6 +76,7 @@ export type ChannelCopyRuntimeAdapter = {
   repostMessage(input: {
     channelId: string;
     content: string;
+    embeds: ChannelCopyMessageEmbed[];
     attachments: Array<{ name: string; contentType: string | null; data: Buffer }>;
   }): Promise<{ destinationMessageId: string }>;
 };
@@ -103,10 +133,16 @@ function buildConfirmToken(): string {
 
 function shouldSkipMessage(message: {
   content: string;
+  embeds: Array<unknown>;
   attachments: Array<unknown>;
   isSystem: boolean;
 }): boolean {
-  return message.isSystem || (message.content.trim().length === 0 && message.attachments.length === 0);
+  return (
+    message.isSystem ||
+    (message.content.trim().length === 0 &&
+      message.embeds.length === 0 &&
+      message.attachments.length === 0)
+  );
 }
 
 export class ChannelCopyService {
@@ -528,6 +564,7 @@ export class ChannelCopyService {
             await adapter.repostMessage({
               channelId: activeJob.destinationChannelId,
               content: message.content,
+              embeds: message.embeds,
               attachments: message.attachments,
             });
             copiedMessageCount += 1;

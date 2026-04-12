@@ -477,6 +477,7 @@ Make sure the channel-copy bot app is also invited anywhere you plan to copy fro
 - `View Channels`
 - `Read Message History`
 - `Send Messages`
+- `Embed Links`
 - `Attach Files`
 
 The bot must be able to read the source channel and post/upload in the destination channel. It can copy across different servers as long as it is present in both places.
@@ -679,6 +680,11 @@ Expected:
   - The destination channel already contains messages
   - Use the ephemeral `Confirm Copy` button on the bot reply to proceed, or `Cancel` to abort
   - Only the same Discord user who started the copy can press those confirmation buttons
+
+- Embed-only source messages are skipped:
+  - Make sure you pulled the latest code and restarted `voodoo-channel-copy`
+  - The destination channel also needs the `Embed Links` permission for the channel-copy bot
+  - The latest channel-copy worker copies message text, embeds, and attachments/media files
 
 - New members can still see the whole server before verification:
   - Your Discord channel permissions are too open

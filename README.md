@@ -18,7 +18,7 @@ Multi-tenant Discord + Telegram bot stack with a web dashboard for ticket-based 
 - `apps/join-gate-worker`: separate-token Discord worker for new-member verification, email matching, and private verification ticket creation.
 - `apps/nuke-worker`: separate-token Discord worker for `/nuke` scheduling and channel nukes.
 - `apps/sports-worker`: separate-token Discord worker for daily sports TV listings with configurable broadcaster-country filtering, managed sport + live event channels, `/sports live-status`, and public sports lookup commands.
-- `apps/channel-copy-worker`: separate-token Discord worker for one-time channel backfills, including text-only posts and attachment/media reposting across servers.
+- `apps/channel-copy-worker`: separate-token Discord worker for one-time channel backfills, including message text, embeds, and attachment/media reposting across servers.
 - `packages/core`: shared domain/config/security/services/repositories.
 - `drizzle/migrations`: SQL migrations.
 
@@ -138,7 +138,7 @@ Copy `.env.example` to `.env` and fill values.
 - Runs from separate worker/token (`apps/channel-copy-worker`).
 - `/channel-copy run source_channel_id:<id> destination_channel_id:<id> [confirm:<token>]` queues a one-time full source-channel backfill into the destination channel.
 - `/channel-copy status job_id:<id>` shows the current queued, running, completed, or failed state for a copy job.
-- Copy order is oldest-to-newest, and reposts include message text plus attachments/media files.
+- Copy order is oldest-to-newest, and reposts include message text, embeds, and attachments/media files.
 - The command must be run from the destination server, and activation is checked against the destination server only.
 - The worker processes queued jobs in the background, so large channel histories do not depend on the original slash-command interaction staying open.
 - If the destination channel already has messages, the bot replies with ephemeral `Confirm Copy` and `Cancel` buttons instead of appending immediately.
@@ -148,7 +148,7 @@ Copy `.env.example` to `.env` and fill values.
 - `/activation revoke guild_id:<server-id> user_id:<user-id>` remotely removes channel-copy access for another server.
 - `/activation list guild_id:<server-id>` lists the current channel-copy activation entries for a server.
 - Channel-copy activation is isolated from `/nuke`, `/sports`, `/join-gate`, and the sales bot.
-- The channel-copy bot needs `View Channels` and `Read Message History` on the source channel, plus `View Channels`, `Send Messages`, and `Attach Files` on the destination channel.
+- The channel-copy bot needs `View Channels` and `Read Message History` on the source channel, plus `View Channels`, `Send Messages`, `Embed Links`, and `Attach Files` on the destination channel.
 
 ## OAuth + Dashboard
 

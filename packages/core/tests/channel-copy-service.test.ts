@@ -276,6 +276,148 @@ describe('ChannelCopyService', () => {
     );
   });
 
+  it('copies embed-only source messages instead of skipping them as empty', async () => {
+    const repository = createMockRepository();
+    const service = new ChannelCopyService(repository);
+
+    repository.findNextRunnableJob.mockResolvedValue({
+      id: 'job-embed-1',
+      destinationGuildId: 'guild-dest',
+      sourceGuildId: 'guild-src',
+      sourceChannelId: 'src-1',
+      destinationChannelId: 'dest-1',
+      requestedByDiscordUserId: 'user-2',
+      confirmToken: null,
+      status: 'queued',
+      forceConfirmed: true,
+      startedAt: null,
+      finishedAt: null,
+      lastProcessedSourceMessageId: null,
+      scannedMessageCount: 0,
+      copiedMessageCount: 0,
+      skippedMessageCount: 0,
+      failureMessage: null,
+      createdAt: new Date('2026-04-12T12:00:00.000Z'),
+      updatedAt: new Date('2026-04-12T12:00:00.000Z'),
+    });
+
+    const adapter = {
+      getChannel: vi.fn(),
+      assertReadableSource: vi.fn().mockResolvedValue(undefined),
+      assertWritableDestination: vi.fn().mockResolvedValue(undefined),
+      countDestinationMessages: vi.fn().mockResolvedValue(0),
+      listSourceMessages: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            id: '1001',
+            content: '',
+            embeds: [
+              {
+                title: 'Launch',
+                description: 'Embed-only announcement',
+                url: 'https://example.com/post',
+              },
+            ],
+            attachments: [],
+            isSystem: false,
+          },
+        ])
+        .mockResolvedValueOnce([]),
+      repostMessage: vi.fn().mockResolvedValue({ destinationMessageId: '2001' }),
+    };
+
+    repository.updateJob
+      .mockResolvedValueOnce({
+        id: 'job-embed-1',
+        destinationGuildId: 'guild-dest',
+        sourceGuildId: 'guild-src',
+        sourceChannelId: 'src-1',
+        destinationChannelId: 'dest-1',
+        requestedByDiscordUserId: 'user-2',
+        confirmToken: null,
+        status: 'running',
+        forceConfirmed: true,
+        startedAt: new Date('2026-04-12T12:00:00.000Z'),
+        finishedAt: null,
+        lastProcessedSourceMessageId: null,
+        scannedMessageCount: 0,
+        copiedMessageCount: 0,
+        skippedMessageCount: 0,
+        failureMessage: null,
+        createdAt: new Date('2026-04-12T12:00:00.000Z'),
+        updatedAt: new Date('2026-04-12T12:00:01.000Z'),
+      })
+      .mockResolvedValueOnce({
+        id: 'job-embed-1',
+        destinationGuildId: 'guild-dest',
+        sourceGuildId: 'guild-src',
+        sourceChannelId: 'src-1',
+        destinationChannelId: 'dest-1',
+        requestedByDiscordUserId: 'user-2',
+        confirmToken: null,
+        status: 'running',
+        forceConfirmed: true,
+        startedAt: new Date('2026-04-12T12:00:00.000Z'),
+        finishedAt: null,
+        lastProcessedSourceMessageId: '1001',
+        scannedMessageCount: 1,
+        copiedMessageCount: 1,
+        skippedMessageCount: 0,
+        failureMessage: null,
+        createdAt: new Date('2026-04-12T12:00:00.000Z'),
+        updatedAt: new Date('2026-04-12T12:00:02.000Z'),
+      })
+      .mockResolvedValueOnce({
+        id: 'job-embed-1',
+        destinationGuildId: 'guild-dest',
+        sourceGuildId: 'guild-src',
+        sourceChannelId: 'src-1',
+        destinationChannelId: 'dest-1',
+        requestedByDiscordUserId: 'user-2',
+        confirmToken: null,
+        status: 'completed',
+        forceConfirmed: true,
+        startedAt: new Date('2026-04-12T12:00:00.000Z'),
+        finishedAt: new Date('2026-04-12T12:00:03.000Z'),
+        lastProcessedSourceMessageId: '1001',
+        scannedMessageCount: 1,
+        copiedMessageCount: 1,
+        skippedMessageCount: 0,
+        failureMessage: null,
+        createdAt: new Date('2026-04-12T12:00:00.000Z'),
+        updatedAt: new Date('2026-04-12T12:00:03.000Z'),
+      });
+
+    const result = await service.processNextCopyJob({ adapter });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+
+    expect(adapter.repostMessage).toHaveBeenCalledWith({
+      channelId: 'dest-1',
+      content: '',
+      embeds: [
+        {
+          title: 'Launch',
+          description: 'Embed-only announcement',
+          url: 'https://example.com/post',
+        },
+      ],
+      attachments: [],
+    });
+    expect(result.value).toEqual({
+      jobId: 'job-embed-1',
+      status: 'completed',
+      copiedMessageCount: 1,
+      skippedMessageCount: 0,
+      scannedMessageCount: 1,
+      failureMessage: null,
+    });
+  });
+
   it('returns the current job status summary for operators', async () => {
     const repository = createMockRepository();
     const service = new ChannelCopyService(repository);
