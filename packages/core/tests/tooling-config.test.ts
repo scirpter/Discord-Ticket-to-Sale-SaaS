@@ -18,4 +18,13 @@ describe('tooling config', () => {
   it('passes the targeted DEP0040 suppression flag to vitest workers', () => {
     expect(vitestConfig.test?.execArgv).toContain('--disable-warning=DEP0040');
   });
+
+  it('includes the channel-copy worker in root scripts', () => {
+    expect(rootPackageJson.scripts.dev).toContain('@voodoo/channel-copy-worker');
+    expect(rootPackageJson.scripts.build).toContain('@voodoo/channel-copy-worker');
+    expect(rootPackageJson.scripts['deploy:commands']).toContain('deploy:commands:channel-copy');
+    expect(rootPackageJson.scripts['deploy:commands:channel-copy']).toBe(
+      'pnpm --filter @voodoo/channel-copy-worker deploy:commands',
+    );
+  });
 });

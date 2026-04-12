@@ -57,6 +57,15 @@ importers:
         specifier: 14.25.1
         version: 14.25.1
 
+  apps/channel-copy-worker:
+    dependencies:
+      '@voodoo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      discord.js:
+        specifier: 14.25.1
+        version: 14.25.1
+
   apps/join-gate-worker:
     dependencies:
       '@voodoo/core':
@@ -86,6 +95,9 @@ importers:
       discord.js:
         specifier: 14.25.1
         version: 14.25.1
+      p-queue:
+        specifier: 8.1.1
+        version: 8.1.1
 
   apps/telegram-worker:
     dependencies:
