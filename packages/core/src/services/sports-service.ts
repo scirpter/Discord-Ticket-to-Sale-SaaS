@@ -6,6 +6,7 @@ import {
   SportsRepository,
   type SportsChannelBindingRecord,
   type SportsGuildConfigRecord,
+  type SportsProfileRecord,
 } from '../repositories/sports-repository.js';
 import { SportsAccessService } from './sports-access-service.js';
 import {
@@ -45,6 +46,17 @@ export type SportsGuildStatus = {
   authorizedUserCount: number;
 };
 
+export type SportsProfileSummary = {
+  profileId: string;
+  guildId: string;
+  slug: string;
+  label: string;
+  broadcastCountry: string;
+  dailyCategoryChannelId: string | null;
+  liveCategoryChannelId: string | null;
+  enabled: boolean;
+};
+
 function mapGuildConfigSummary(config: SportsGuildConfigRecord): SportsGuildConfigSummary {
   return {
     configId: config.id,
@@ -58,6 +70,19 @@ function mapGuildConfigSummary(config: SportsGuildConfigRecord): SportsGuildConf
     nextRunAtUtc: config.nextRunAtUtc.toISOString(),
     lastRunAtUtc: config.lastRunAtUtc?.toISOString() ?? null,
     lastLocalRunDate: config.lastLocalRunDate ?? null,
+  };
+}
+
+function mapProfileSummary(profile: SportsProfileRecord): SportsProfileSummary {
+  return {
+    profileId: profile.profileId,
+    guildId: profile.guildId,
+    slug: profile.slug,
+    label: profile.label,
+    broadcastCountry: profile.broadcastCountry,
+    dailyCategoryChannelId: profile.dailyCategoryChannelId,
+    liveCategoryChannelId: profile.liveCategoryChannelId,
+    enabled: profile.enabled,
   };
 }
 
@@ -114,6 +139,21 @@ export class SportsService {
     try {
       const config = await this.sportsRepository.getGuildConfig(input.guildId);
       return ok(config ? mapGuildConfigSummary(config) : null);
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('SPORTS_CONFIG_READ_FAILED', 'Sports configuration read failed.', 500),
+      );
+    }
+  }
+
+  public async listProfiles(input: {
+    guildId: string;
+  }): Promise<Result<SportsProfileSummary[], AppError>> {
+    try {
+      const profiles = await this.sportsRepository.listProfiles({ guildId: input.guildId });
+      return ok(profiles.map(mapProfileSummary));
     } catch (error) {
       return err(
         error instanceof AppError

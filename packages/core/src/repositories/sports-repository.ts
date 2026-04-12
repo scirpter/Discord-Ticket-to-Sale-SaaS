@@ -32,6 +32,27 @@ export type SportsChannelBindingRecord = {
   updatedAt: Date;
 };
 
+export type SportsProfileRecord = {
+  profileId: string;
+  guildId: string;
+  slug: string;
+  label: string;
+  broadcastCountry: string;
+  dailyCategoryChannelId: string | null;
+  liveCategoryChannelId: string | null;
+  enabled: boolean;
+};
+
+function slugifyProfileLabel(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug || 'default';
+}
+
 function mapGuildConfigRow(
   row: typeof sportsGuildConfigs.$inferSelect,
 ): SportsGuildConfigRecord {
@@ -68,6 +89,19 @@ function mapChannelBindingRow(
   };
 }
 
+function mapProfileRecord(config: SportsGuildConfigRecord): SportsProfileRecord {
+  return {
+    profileId: config.id,
+    guildId: config.guildId,
+    slug: slugifyProfileLabel(config.broadcastCountry),
+    label: config.broadcastCountry,
+    broadcastCountry: config.broadcastCountry,
+    dailyCategoryChannelId: config.managedCategoryChannelId,
+    liveCategoryChannelId: config.liveCategoryChannelId ?? null,
+    enabled: config.enabled,
+  };
+}
+
 export class SportsRepository {
   private readonly db = getDb();
 
@@ -77,6 +111,11 @@ export class SportsRepository {
     });
 
     return row ? mapGuildConfigRow(row) : null;
+  }
+
+  public async listProfiles(input: { guildId: string }): Promise<SportsProfileRecord[]> {
+    const config = await this.getGuildConfig(input.guildId);
+    return config ? [mapProfileRecord(config)] : [];
   }
 
   public async upsertGuildConfig(input: {
