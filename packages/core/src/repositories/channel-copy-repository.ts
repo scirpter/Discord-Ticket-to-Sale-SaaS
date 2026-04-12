@@ -122,6 +122,25 @@ export class ChannelCopyRepository {
     return row ? mapAuthorizedUserRow(row) : null;
   }
 
+  private async getJobById(jobId: string): Promise<ChannelCopyJobRecord | null> {
+    const row = await this.db.query.channelCopyJobs.findFirst({
+      where: eq(channelCopyJobs.id, jobId),
+    });
+
+    return row ? mapJobRow(row) : null;
+  }
+
+  public async listAuthorizedUsers(input: {
+    guildId: string;
+  }): Promise<ChannelCopyAuthorizedUserRecord[]> {
+    const rows = await this.db.query.channelCopyAuthorizedUsers.findMany({
+      where: eq(channelCopyAuthorizedUsers.guildId, input.guildId),
+      orderBy: (table, { desc: orderDesc }) => [orderDesc(table.updatedAt), orderDesc(table.createdAt)],
+    });
+
+    return rows.map(mapAuthorizedUserRow);
+  }
+
   public async upsertAuthorizedUser(input: {
     guildId: string;
     discordUserId: string;
@@ -180,6 +199,30 @@ export class ChannelCopyRepository {
     };
   }
 
+  public async revokeAuthorizedUser(input: {
+    guildId: string;
+    discordUserId: string;
+  }): Promise<boolean> {
+    const existing = await this.getAuthorizedUserByDiscordId({
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+    });
+    if (!existing) {
+      return false;
+    }
+
+    await this.db
+      .delete(channelCopyAuthorizedUsers)
+      .where(
+        and(
+          eq(channelCopyAuthorizedUsers.guildId, input.guildId),
+          eq(channelCopyAuthorizedUsers.discordUserId, input.discordUserId),
+        ),
+      );
+
+    return true;
+  }
+
   public async findLatestIncompleteJob(input: {
     sourceChannelId: string;
     destinationChannelId: string;
@@ -196,5 +239,92 @@ export class ChannelCopyRepository {
     });
 
     return row ? mapJobRow(row) : null;
+  }
+
+  public async createJob(input: {
+    destinationGuildId: string;
+    sourceGuildId: string;
+    sourceChannelId: string;
+    destinationChannelId: string;
+    requestedByDiscordUserId: string;
+    confirmToken: string | null;
+    status: ChannelCopyJobStatus;
+    forceConfirmed: boolean;
+    startedAt?: Date | null;
+    finishedAt?: Date | null;
+    lastProcessedSourceMessageId?: string | null;
+    scannedMessageCount?: number;
+    copiedMessageCount?: number;
+    skippedMessageCount?: number;
+    failureMessage?: string | null;
+  }): Promise<ChannelCopyJobRecord> {
+    const now = new Date();
+    const jobId = ulid();
+
+    await this.db.insert(channelCopyJobs).values({
+      id: jobId,
+      destinationGuildId: input.destinationGuildId,
+      sourceGuildId: input.sourceGuildId,
+      sourceChannelId: input.sourceChannelId,
+      destinationChannelId: input.destinationChannelId,
+      requestedByDiscordUserId: input.requestedByDiscordUserId,
+      confirmToken: input.confirmToken,
+      status: input.status,
+      forceConfirmed: input.forceConfirmed,
+      startedAt: input.startedAt ?? null,
+      finishedAt: input.finishedAt ?? null,
+      lastProcessedSourceMessageId: input.lastProcessedSourceMessageId ?? null,
+      scannedMessageCount: input.scannedMessageCount ?? 0,
+      copiedMessageCount: input.copiedMessageCount ?? 0,
+      skippedMessageCount: input.skippedMessageCount ?? 0,
+      failureMessage: input.failureMessage ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const record = await this.getJobById(jobId);
+    if (!record) {
+      throw new Error('Failed to create channel copy job');
+    }
+
+    return record;
+  }
+
+  public async updateJob(input: {
+    jobId: string;
+    confirmToken?: string | null;
+    status?: ChannelCopyJobStatus;
+    forceConfirmed?: boolean;
+    startedAt?: Date | null;
+    finishedAt?: Date | null;
+    lastProcessedSourceMessageId?: string | null;
+    scannedMessageCount?: number;
+    copiedMessageCount?: number;
+    skippedMessageCount?: number;
+    failureMessage?: string | null;
+  }): Promise<ChannelCopyJobRecord> {
+    await this.db
+      .update(channelCopyJobs)
+      .set({
+        confirmToken: input.confirmToken,
+        status: input.status,
+        forceConfirmed: input.forceConfirmed,
+        startedAt: input.startedAt,
+        finishedAt: input.finishedAt,
+        lastProcessedSourceMessageId: input.lastProcessedSourceMessageId,
+        scannedMessageCount: input.scannedMessageCount,
+        copiedMessageCount: input.copiedMessageCount,
+        skippedMessageCount: input.skippedMessageCount,
+        failureMessage: input.failureMessage,
+        updatedAt: new Date(),
+      })
+      .where(eq(channelCopyJobs.id, input.jobId));
+
+    const record = await this.getJobById(input.jobId);
+    if (!record) {
+      throw new Error('Failed to update channel copy job');
+    }
+
+    return record;
   }
 }
