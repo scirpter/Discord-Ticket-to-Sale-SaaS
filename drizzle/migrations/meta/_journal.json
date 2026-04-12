@@ -169,6 +169,13 @@
       "when": 1775079000000,
       "tag": "0023_sports_live_category",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1776024090380,
+      "tag": "0024_channel_copy_worker",
+      "breakpoints": true
     }
   ]
 }

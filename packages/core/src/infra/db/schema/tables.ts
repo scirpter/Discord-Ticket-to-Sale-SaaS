@@ -806,6 +806,58 @@ export const channelNukeAuthorizedUsers = mysqlTable(
   }),
 );
 
+export const channelCopyAuthorizedUsers = mysqlTable(
+  'channel_copy_authorized_users',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    discordUserId: varchar('discord_user_id', { length: 32 }).notNull(),
+    grantedByDiscordUserId: varchar('granted_by_discord_user_id', { length: 32 }).notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    guildUserUnique: uniqueIndex('channel_copy_authorized_users_guild_user_uq').on(
+      table.guildId,
+      table.discordUserId,
+    ),
+    guildIdx: index('channel_copy_authorized_users_guild_idx').on(table.guildId),
+  }),
+);
+
+export const channelCopyJobs = mysqlTable(
+  'channel_copy_jobs',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    destinationGuildId: varchar('destination_guild_id', { length: 32 }).notNull(),
+    sourceGuildId: varchar('source_guild_id', { length: 32 }).notNull(),
+    sourceChannelId: varchar('source_channel_id', { length: 32 }).notNull(),
+    destinationChannelId: varchar('destination_channel_id', { length: 32 }).notNull(),
+    requestedByDiscordUserId: varchar('requested_by_discord_user_id', { length: 32 }).notNull(),
+    confirmToken: varchar('confirm_token', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['awaiting_confirmation', 'queued', 'running', 'completed', 'failed'])
+      .notNull()
+      .default('awaiting_confirmation'),
+    forceConfirmed: boolean('force_confirmed').notNull().default(false),
+    startedAt: timestamp('started_at', { mode: 'date' }),
+    finishedAt: timestamp('finished_at', { mode: 'date' }),
+    lastProcessedSourceMessageId: varchar('last_processed_source_message_id', { length: 32 }),
+    scannedMessageCount: int('scanned_message_count').notNull().default(0),
+    copiedMessageCount: int('copied_message_count').notNull().default(0),
+    skippedMessageCount: int('skipped_message_count').notNull().default(0),
+    failureMessage: text('failure_message'),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    destinationGuildCreatedIdx: index('channel_copy_jobs_destination_guild_created_idx').on(
+      table.destinationGuildId,
+      table.createdAt,
+    ),
+    statusUpdatedIdx: index('channel_copy_jobs_status_updated_idx').on(table.status, table.updatedAt),
+  }),
+);
+
 export const sportsGuildConfigs = mysqlTable(
   'sports_guild_configs',
   {

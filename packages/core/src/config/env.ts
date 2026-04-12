@@ -9,6 +9,8 @@ const envSchema = z.object({
   JOIN_GATE_DISCORD_CLIENT_ID: z.string().default(''),
   SPORTS_DISCORD_TOKEN: z.string().default(''),
   SPORTS_DISCORD_CLIENT_ID: z.string().default(''),
+  CHANNEL_COPY_DISCORD_TOKEN: z.string().default(''),
+  CHANNEL_COPY_DISCORD_CLIENT_ID: z.string().default(''),
   SPORTS_POLL_INTERVAL_MS: z.coerce.number().int().min(5_000).default(30_000),
   SALES_HISTORY_POLL_INTERVAL_MS: z.coerce.number().int().min(5_000).default(30_000),
   SPORTS_API_KEY: z.string().default(''),
