@@ -253,7 +253,11 @@ export class ChannelCopyService {
         skippedMessageCount: jobToRun.skippedMessageCount,
       });
     } catch (error) {
-      return err(new AppError('CHANNEL_COPY_RUN_FAILED', fromUnknownError(error).message, 500));
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('CHANNEL_COPY_RUN_FAILED', fromUnknownError(error).message, 500),
+      );
     }
   }
 

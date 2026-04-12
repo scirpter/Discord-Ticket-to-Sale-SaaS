@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AppError } from '../src/domain/errors.js';
 import { ChannelCopyService } from '../src/services/channel-copy-service.js';
 
 function createMockRepository() {
@@ -315,5 +316,46 @@ describe('ChannelCopyService', () => {
       scannedMessageCount: 3,
       failureMessage: null,
     });
+  });
+
+  it('preserves specific channel copy errors instead of collapsing them into a generic run failure', async () => {
+    const repository = createMockRepository();
+    const service = new ChannelCopyService(repository);
+
+    const adapter = {
+      getChannel: vi
+        .fn()
+        .mockRejectedValue(
+          new AppError(
+            'CHANNEL_COPY_INVALID_CHANNEL',
+            'Only guild text and announcement channels are supported for channel copy.',
+            422,
+          ),
+        ),
+      assertReadableSource: vi.fn(),
+      assertWritableDestination: vi.fn(),
+      countDestinationMessages: vi.fn(),
+      listSourceMessages: vi.fn(),
+      repostMessage: vi.fn(),
+    };
+
+    const result = await service.startCopyRun({
+      sourceChannelId: 'src-1',
+      destinationChannelId: 'dest-1',
+      requestedByDiscordUserId: 'user-2',
+      destinationGuildId: 'guild-dest',
+      confirmToken: null,
+      adapter,
+    });
+
+    expect(result.isErr()).toBe(true);
+    if (result.isOk()) {
+      return;
+    }
+
+    expect(result.error.code).toBe('CHANNEL_COPY_INVALID_CHANNEL');
+    expect(result.error.message).toBe(
+      'Only guild text and announcement channels are supported for channel copy.',
+    );
   });
 });

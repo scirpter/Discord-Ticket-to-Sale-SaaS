@@ -50,6 +50,14 @@ function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; va
   };
 }
 
+function createErrResult<E>(error: E): { isErr: () => true; isOk: () => false; error: E } {
+  return {
+    isErr: () => true,
+    isOk: () => false,
+    error,
+  };
+}
+
 function createInteractionMock(input?: {
   userId?: string;
   subcommand?: 'run' | 'status';
@@ -240,6 +248,30 @@ describe('channel-copy command', () => {
     expect(editReply).toHaveBeenCalledWith({
       content:
         'Job `job-2` is `running`. Scanned 14 source message(s), copied 12, skipped 2.',
+    });
+  });
+
+  it('shows the specific run failure message returned by the service', async () => {
+    vi.spyOn(ChannelCopyService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: true,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<ChannelCopyService['getCommandAccessState']>>,
+    );
+    vi.spyOn(ChannelCopyService.prototype, 'startCopyRun').mockResolvedValue(
+      createErrResult(
+        new Error('Only guild text and announcement channels are supported for channel copy.'),
+      ) as Awaited<ReturnType<ChannelCopyService['startCopyRun']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock();
+
+    await channelCopyCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: 'Only guild text and announcement channels are supported for channel copy.',
     });
   });
 });
