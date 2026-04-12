@@ -192,11 +192,12 @@ describe('ChannelCopyRepository', () => {
     );
   });
 
-  it('re-reads the authorized user when an insert loses a duplicate-key race', async () => {
+  it('applies the caller grant intent when an insert loses a duplicate-key race', async () => {
     const duplicateKeyError = Object.assign(new Error('Duplicate entry'), {
       code: 'ER_DUP_ENTRY',
     });
     const { insert } = createInsertChain();
+    const { update, set, where } = createUpdateChain();
     insert.mockImplementationOnce(() => ({
       values: vi.fn().mockRejectedValueOnce(duplicateKeyError),
     }));
@@ -207,9 +208,9 @@ describe('ChannelCopyRepository', () => {
         id: 'auth-1',
         guildId: 'guild-1',
         discordUserId: 'user-1',
-        grantedByDiscordUserId: null,
+        grantedByDiscordUserId: 'admin-2',
         createdAt: new Date('2026-04-12T09:00:00.000Z'),
-        updatedAt: new Date('2026-04-12T09:00:01.000Z'),
+        updatedAt: new Date('2026-04-12T09:00:02.000Z'),
       });
 
     const repository = createRepositoryWithMockDb({
@@ -222,14 +223,14 @@ describe('ChannelCopyRepository', () => {
         },
       },
       insert,
-      update: vi.fn(),
+      update,
     });
 
     await expect(
       repository.upsertAuthorizedUser({
         guildId: 'guild-1',
         discordUserId: 'user-1',
-        grantedByDiscordUserId: null,
+        grantedByDiscordUserId: 'admin-2',
       }),
     ).resolves.toEqual({
       created: false,
@@ -237,9 +238,18 @@ describe('ChannelCopyRepository', () => {
         id: 'auth-1',
         guildId: 'guild-1',
         discordUserId: 'user-1',
-        grantedByDiscordUserId: null,
+        grantedByDiscordUserId: 'admin-2',
       }),
     });
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grantedByDiscordUserId: 'admin-2',
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(where).toHaveBeenCalledTimes(1);
   });
 
   it('finds the latest incomplete job for the same requester and channel pair', async () => {

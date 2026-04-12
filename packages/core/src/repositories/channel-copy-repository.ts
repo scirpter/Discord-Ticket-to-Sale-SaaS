@@ -87,6 +87,26 @@ function mapJobRow(row: typeof channelCopyJobs.$inferSelect): ChannelCopyJobReco
 export class ChannelCopyRepository {
   private readonly db = getDb();
 
+  private async updateAuthorizedUserByGuildAndDiscordId(input: {
+    guildId: string;
+    discordUserId: string;
+    grantedByDiscordUserId: string | null;
+    updatedAt: Date;
+  }): Promise<void> {
+    await this.db
+      .update(channelCopyAuthorizedUsers)
+      .set({
+        grantedByDiscordUserId: input.grantedByDiscordUserId,
+        updatedAt: input.updatedAt,
+      })
+      .where(
+        and(
+          eq(channelCopyAuthorizedUsers.guildId, input.guildId),
+          eq(channelCopyAuthorizedUsers.discordUserId, input.discordUserId),
+        ),
+      );
+  }
+
   private async getAuthorizedUserByDiscordId(input: {
     guildId: string;
     discordUserId: string;
@@ -115,13 +135,12 @@ export class ChannelCopyRepository {
     let created = false;
 
     if (existing) {
-      await this.db
-        .update(channelCopyAuthorizedUsers)
-        .set({
-          grantedByDiscordUserId: input.grantedByDiscordUserId,
-          updatedAt: now,
-        })
-        .where(eq(channelCopyAuthorizedUsers.id, existing.id));
+      await this.updateAuthorizedUserByGuildAndDiscordId({
+        guildId: input.guildId,
+        discordUserId: input.discordUserId,
+        grantedByDiscordUserId: input.grantedByDiscordUserId,
+        updatedAt: now,
+      });
     } else {
       try {
         await this.db.insert(channelCopyAuthorizedUsers).values({
@@ -137,6 +156,13 @@ export class ChannelCopyRepository {
         if (!isMysqlDuplicateEntryError(error)) {
           throw error;
         }
+
+        await this.updateAuthorizedUserByGuildAndDiscordId({
+          guildId: input.guildId,
+          discordUserId: input.discordUserId,
+          grantedByDiscordUserId: input.grantedByDiscordUserId,
+          updatedAt: now,
+        });
       }
     }
 
