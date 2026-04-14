@@ -108,6 +108,67 @@ function buildLiveEventSnapshots(event: SportsLiveEvent): {
   };
 }
 
+function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function mergeLiveEventBroadcasters(event: SportsLiveEvent): SportsLiveEvent['broadcasters'] {
+  const broadcasters = new Map<string, SportsLiveEvent['broadcasters'][number]>();
+
+  for (const broadcaster of event.broadcasters) {
+    const dedupeKey = [broadcaster.channelId ?? '', broadcaster.country, broadcaster.channelName]
+      .join('::')
+      .toLowerCase();
+
+    if (!broadcasters.has(dedupeKey)) {
+      broadcasters.set(dedupeKey, broadcaster);
+    }
+  }
+
+  return [...broadcasters.values()];
+}
+
+function mergeDuplicateLiveEvents(events: SportsLiveEvent[]): SportsLiveEvent[] {
+  const mergedEvents = new Map<string, SportsLiveEvent>();
+
+  for (const event of events) {
+    const existingEvent = mergedEvents.get(event.eventId);
+    if (!existingEvent) {
+      mergedEvents.set(event.eventId, {
+        ...event,
+        broadcasters: mergeLiveEventBroadcasters(event),
+      });
+      continue;
+    }
+
+    mergedEvents.set(event.eventId, {
+      ...existingEvent,
+      eventName:
+        firstNonEmptyString(existingEvent.eventName, event.eventName) ?? existingEvent.eventName,
+      sportName: firstNonEmptyString(existingEvent.sportName, event.sportName),
+      leagueName: firstNonEmptyString(existingEvent.leagueName, event.leagueName),
+      statusLabel:
+        firstNonEmptyString(existingEvent.statusLabel, event.statusLabel) ?? existingEvent.statusLabel,
+      scoreLabel: firstNonEmptyString(existingEvent.scoreLabel, event.scoreLabel),
+      startTimeUtc: firstNonEmptyString(existingEvent.startTimeUtc, event.startTimeUtc),
+      startTimeUkLabel: firstNonEmptyString(existingEvent.startTimeUkLabel, event.startTimeUkLabel),
+      imageUrl: firstNonEmptyString(existingEvent.imageUrl, event.imageUrl),
+      broadcasters: mergeLiveEventBroadcasters({
+        ...existingEvent,
+        broadcasters: [...existingEvent.broadcasters, ...event.broadcasters],
+      }),
+    });
+  }
+
+  return [...mergedEvents.values()];
+}
+
 function areSnapshotsEqual(
   left: Record<string, unknown> | null,
   right: Record<string, unknown> | null,
@@ -636,8 +697,13 @@ export async function reconcileLiveEventsForGuild(input: {
     throw trackedEventsResult.error;
   }
 
-  const televisedLiveEvents = liveEventsResult.value.data.filter(
-    (event) => event.broadcasters.length > 0 && typeof event.sportName === 'string' && event.sportName.trim().length > 0,
+  const televisedLiveEvents = mergeDuplicateLiveEvents(
+    liveEventsResult.value.data.filter(
+      (event) =>
+        event.broadcasters.length > 0 &&
+        typeof event.sportName === 'string' &&
+        event.sportName.trim().length > 0,
+    ),
   );
   if (liveEventsResult.value.degraded) {
     logger.warn(

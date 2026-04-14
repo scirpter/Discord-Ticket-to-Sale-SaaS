@@ -717,6 +717,16 @@ describe('live event runtime', () => {
 
   it('de-duplicates the same live event when the merged UK and USA feeds both contain it', async () => {
     const { guild, create, liveCategory } = createGuildFixture();
+    const duplicateLiveEvent = makeLiveEvent({
+      broadcasters: [
+        {
+          channelId: 'uk-1',
+          channelName: 'Sky Sports Main Event',
+          country: 'United Kingdom',
+          logoUrl: null,
+        },
+      ],
+    });
 
     vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
       createOkResult({
@@ -753,14 +763,10 @@ describe('live event runtime', () => {
       .mockResolvedValue(
         createOkResult({
           data: [
-            makeLiveEvent({
+            duplicateLiveEvent,
+            {
+              ...duplicateLiveEvent,
               broadcasters: [
-                {
-                  channelId: 'uk-1',
-                  channelName: 'Sky Sports Main Event',
-                  country: 'United Kingdom',
-                  logoUrl: null,
-                },
                 {
                   channelId: 'us-1',
                   channelName: 'ESPN',
@@ -768,7 +774,7 @@ describe('live event runtime', () => {
                   logoUrl: null,
                 },
               ],
-            }),
+            },
           ],
           degraded: false,
           failedCountries: [],
@@ -809,6 +815,7 @@ describe('live event runtime', () => {
         eventChannelId: 'live-1',
       }),
     );
+    expect(create.mock.calls.map(([input]) => input.name)).toEqual(['live-rangers-vs-celtic']);
   });
 
   it('edits the persisted score message instead of clearing and reposting the live channel', async () => {

@@ -218,7 +218,7 @@ describe('SportsLiveEventService', () => {
     vi.useRealTimers();
   });
 
-  it('creates one tracked row per guild and event', async () => {
+  it('creates one tracked row per guild and event while persisting the score message id across duplicate upserts', async () => {
     const rows: SportsLiveEventRow[] = [
       makeRow({
         id: '01J0SPORTSLIVE000000000099',
@@ -236,7 +236,15 @@ describe('SportsLiveEventService', () => {
       eventId: 'evt-1',
       eventName: 'Rangers vs Celtic',
       sportChannelId: 'sport-1',
+      eventChannelId: 'event-channel-1',
+      scoreMessageId: 'msg-score-1',
+      status: 'live',
       kickoffAtUtc: new Date('2026-03-20T12:30:00.000Z'),
+      lastScoreSnapshot: { home: 1, away: 0 },
+      lastStateSnapshot: { phase: '1H' },
+      lastSyncedAtUtc: new Date('2026-03-20T12:35:00.000Z'),
+      finishedAtUtc: null,
+      deleteAfterUtc: null,
     });
     const second = await repository.upsertTrackedEvent({
       guildId: 'guild-1',
@@ -244,7 +252,15 @@ describe('SportsLiveEventService', () => {
       eventId: 'evt-1',
       eventName: 'Rangers vs Celtic',
       sportChannelId: 'sport-1',
+      eventChannelId: 'event-channel-1',
+      scoreMessageId: 'msg-score-1',
+      status: 'live',
       kickoffAtUtc: new Date('2026-03-20T12:30:00.000Z'),
+      lastScoreSnapshot: { home: 2, away: 0 },
+      lastStateSnapshot: { phase: '2H' },
+      lastSyncedAtUtc: new Date('2026-03-20T12:50:00.000Z'),
+      finishedAtUtc: null,
+      deleteAfterUtc: null,
     });
 
     expect(rows).toHaveLength(2);
@@ -253,6 +269,11 @@ describe('SportsLiveEventService', () => {
     expect(mockDb.findFirstCalls).toBeGreaterThanOrEqual(2);
     expect(rows.filter((row) => row.guildId === 'guild-1' && row.eventId === 'evt-1')).toHaveLength(1);
     expect(first.id).toBe(second.id);
+    expect(first.scoreMessageId).toBe('msg-score-1');
+    expect(second.scoreMessageId).toBe('msg-score-1');
+    expect(rows.find((row) => row.guildId === 'guild-1' && row.eventId === 'evt-1')?.scoreMessageId).toBe(
+      'msg-score-1',
+    );
   });
 
   it('reads the tracked event for the requested guild and event', async () => {
