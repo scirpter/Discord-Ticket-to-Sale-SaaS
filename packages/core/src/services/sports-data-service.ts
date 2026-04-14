@@ -4,6 +4,7 @@ import { err, ok, type Result } from 'neverthrow';
 import { getEnv } from '../config/env.js';
 import { AppError } from '../domain/errors.js';
 import { logger } from '../infra/logger.js';
+import { normalizeBroadcastCountries } from './sports-broadcast-countries.js';
 import { resolveLocalDate } from './sports-schedule.js';
 
 type SportsApiV1TvEvent = {
@@ -689,6 +690,183 @@ function buildScoreLabel(input: {
   return firstNonEmpty(input.score);
 }
 
+function sortSportsBroadcasts(left: SportsBroadcast, right: SportsBroadcast): number {
+  const channelNameCompare = left.channelName.localeCompare(right.channelName, UK_LOCALE);
+  if (channelNameCompare !== 0) {
+    return channelNameCompare;
+  }
+
+  const countryCompare = (left.country ?? '').localeCompare(right.country ?? '', UK_LOCALE);
+  if (countryCompare !== 0) {
+    return countryCompare;
+  }
+
+  return (left.channelId ?? '').localeCompare(right.channelId ?? '', UK_LOCALE);
+}
+
+function buildSportsBroadcastKey(broadcaster: SportsBroadcast): string {
+  return broadcaster.channelId ?? broadcaster.channelName.toLowerCase();
+}
+
+function mergeSportsBroadcast(
+  left: SportsBroadcast,
+  right: SportsBroadcast,
+): SportsBroadcast {
+  return {
+    channelId: firstNonEmpty(left.channelId, right.channelId),
+    channelName: firstNonEmpty(left.channelName, right.channelName) ?? left.channelName,
+    country: firstNonEmpty(left.country, right.country),
+    logoUrl: firstNonEmpty(left.logoUrl, right.logoUrl),
+  };
+}
+
+function mergeSportsBroadcasts(broadcasters: readonly SportsBroadcast[]): SportsBroadcast[] {
+  const merged = new Map<string, SportsBroadcast>();
+  for (const broadcaster of broadcasters) {
+    const key = buildSportsBroadcastKey(broadcaster);
+    const existing = merged.get(key);
+    merged.set(
+      key,
+      existing ? mergeSportsBroadcast(existing, broadcaster) : { ...broadcaster },
+    );
+  }
+
+  return [...merged.values()].sort(sortSportsBroadcasts);
+}
+
+function buildSportsListingKey(listing: Pick<SportsListing, 'eventId' | 'sportName'>): string {
+  return `${listing.eventId}:${listing.sportName.toLowerCase()}`;
+}
+
+function pickDeterministicPair<T>(
+  left: T,
+  right: T,
+  compare: (leftValue: T, rightValue: T) => number,
+): [T, T] {
+  return compare(left, right) <= 0 ? [left, right] : [right, left];
+}
+
+function mergeSportsListing(
+  left: SportsListing,
+  right: SportsListing,
+): SportsListing {
+  const [primary, secondary] = pickDeterministicPair(
+    left,
+    right,
+    (leftListing, rightListing) => {
+      const startTimeCompare = leftListing.startTimeUtc.localeCompare(rightListing.startTimeUtc);
+      if (startTimeCompare !== 0) {
+        return startTimeCompare;
+      }
+
+      return buildSportsListingKey(leftListing).localeCompare(
+        buildSportsListingKey(rightListing),
+        UK_LOCALE,
+      );
+    },
+  );
+
+  return {
+    eventId: primary.eventId,
+    sportName: primary.sportName,
+    eventName: firstNonEmpty(primary.eventName, secondary.eventName) ?? primary.eventName,
+    season: firstNonEmpty(primary.season, secondary.season),
+    eventCountry: firstNonEmpty(primary.eventCountry, secondary.eventCountry),
+    startTimeUtc: primary.startTimeUtc,
+    startTimeUkLabel: primary.startTimeUkLabel,
+    imageUrl: firstNonEmpty(primary.imageUrl, secondary.imageUrl),
+    broadcasters: mergeSportsBroadcasts([...primary.broadcasters, ...secondary.broadcasters]),
+  };
+}
+
+function mergeSportsListingsBySport(
+  listingsBySport: readonly SportsListingsBySport[][],
+): SportsListingsBySport[] {
+  const mergedListings = new Map<string, SportsListing>();
+
+  for (const countryListings of listingsBySport) {
+    for (const sportListings of countryListings) {
+      for (const listing of sportListings.listings) {
+        const key = buildSportsListingKey(listing);
+        const existing = mergedListings.get(key);
+        mergedListings.set(
+          key,
+          existing
+            ? mergeSportsListing(existing, listing)
+            : {
+                ...listing,
+                broadcasters: mergeSportsBroadcasts(listing.broadcasters),
+              },
+        );
+      }
+    }
+  }
+
+  const grouped = new Map<string, SportsListing[]>();
+  for (const listing of mergedListings.values()) {
+    const current = grouped.get(listing.sportName) ?? [];
+    current.push(listing);
+    grouped.set(listing.sportName, current);
+  }
+
+  return [...grouped.entries()]
+    .map(([sportName, listings]) => ({
+      sportName,
+      listings: listings.sort((leftListing, rightListing) =>
+        leftListing.startTimeUtc.localeCompare(rightListing.startTimeUtc),
+      ),
+    }))
+    .sort((leftSport, rightSport) =>
+      leftSport.sportName.localeCompare(rightSport.sportName, UK_LOCALE),
+    );
+}
+
+function mergeSportsLiveEvent(
+  left: SportsLiveEvent,
+  right: SportsLiveEvent,
+): SportsLiveEvent {
+  const [primary, secondary] = pickDeterministicPair(
+    left,
+    right,
+    (leftEvent, rightEvent) => leftEvent.eventId.localeCompare(rightEvent.eventId, UK_LOCALE),
+  );
+
+  return {
+    eventId: primary.eventId,
+    eventName: firstNonEmpty(primary.eventName, secondary.eventName) ?? primary.eventName,
+    sportName: firstNonEmpty(primary.sportName, secondary.sportName),
+    leagueName: firstNonEmpty(primary.leagueName, secondary.leagueName),
+    statusLabel: firstNonEmpty(primary.statusLabel, secondary.statusLabel) ?? primary.statusLabel,
+    scoreLabel: firstNonEmpty(primary.scoreLabel, secondary.scoreLabel),
+    startTimeUkLabel: firstNonEmpty(primary.startTimeUkLabel, secondary.startTimeUkLabel),
+    imageUrl: firstNonEmpty(primary.imageUrl, secondary.imageUrl),
+    broadcasters: mergeSportsBroadcasts([...primary.broadcasters, ...secondary.broadcasters]),
+  };
+}
+
+function mergeSportsLiveEvents(eventsByCountry: readonly SportsLiveEvent[][]): SportsLiveEvent[] {
+  const mergedEvents = new Map<string, SportsLiveEvent>();
+
+  for (const countryEvents of eventsByCountry) {
+    for (const event of countryEvents) {
+      const existing = mergedEvents.get(event.eventId);
+      mergedEvents.set(
+        event.eventId,
+        existing
+          ? mergeSportsLiveEvent(existing, event)
+          : {
+              ...event,
+              broadcasters: mergeSportsBroadcasts(event.broadcasters),
+            },
+      );
+    }
+  }
+
+  return [...mergedEvents.values()].sort((left, right) =>
+    left.eventName.localeCompare(right.eventName, UK_LOCALE),
+  );
+}
+
 export function pickBestSportsSearchResult(
   query: string,
   results: SportsSearchResult[],
@@ -874,6 +1052,39 @@ export class SportsDataService {
     return (countryMatches.length > 0 ? countryMatches : input.broadcasters).sort((left, right) =>
       left.channelName.localeCompare(right.channelName, UK_LOCALE),
     );
+  }
+
+  private async collectCountryResults<T>(input: {
+    broadcastCountries: readonly string[];
+    fetchCountry: (broadcastCountry: string) => Promise<Result<T, AppError>>;
+    merge: (values: readonly T[]) => T;
+  }): Promise<Result<T, AppError>> {
+    const broadcastCountries = normalizeBroadcastCountries(input.broadcastCountries);
+    const successful: T[] = [];
+    let firstError: AppError | null = null;
+
+    for (const broadcastCountry of broadcastCountries) {
+      const result = await input.fetchCountry(broadcastCountry);
+      if (result.isOk()) {
+        successful.push(result.value);
+        continue;
+      }
+
+      firstError ??= result.error;
+    }
+
+    if (successful.length === 0) {
+      return err(
+        firstError ??
+          new AppError(
+            'SPORTS_API_REQUEST_FAILED',
+            'Sports data could not be loaded from TheSportsDB. Check the API key and try again.',
+            502,
+          ),
+      );
+    }
+
+    return ok(input.merge(successful));
   }
 
   private async lookupTeam(query: string): Promise<SportsApiV2TeamSearch | null> {
@@ -1163,6 +1374,23 @@ export class SportsDataService {
     }
   }
 
+  public async listDailyListingsForLocalDateAcrossCountries(input: {
+    localDate: string;
+    timezone: string;
+    broadcastCountries: string[];
+  }): Promise<Result<SportsListingsBySport[], AppError>> {
+    return this.collectCountryResults({
+      broadcastCountries: input.broadcastCountries,
+      fetchCountry: async (broadcastCountry) =>
+        this.listDailyListingsForLocalDate({
+          localDate: input.localDate,
+          timezone: input.timezone,
+          broadcastCountry,
+        }),
+      merge: (values) => mergeSportsListingsBySport(values),
+    });
+  }
+
   public async searchEvents(query: string): Promise<Result<SportsSearchResult[], AppError>> {
     const normalizedQuery = normalizeWhitespace(query);
     if (normalizedQuery.length < 2) {
@@ -1376,6 +1604,21 @@ export class SportsDataService {
     } catch (error) {
       return err(this.toSportsApiError(error));
     }
+  }
+
+  public async listLiveEventsAcrossCountries(input: {
+    timezone: string;
+    broadcastCountries: string[];
+  }): Promise<Result<SportsLiveEvent[], AppError>> {
+    return this.collectCountryResults({
+      broadcastCountries: input.broadcastCountries,
+      fetchCountry: async (broadcastCountry) =>
+        this.listLiveEvents({
+          timezone: input.timezone,
+          broadcastCountry,
+        }),
+      merge: (values) => mergeSportsLiveEvents(values),
+    });
   }
 
   public async getEventHighlights(input: {
