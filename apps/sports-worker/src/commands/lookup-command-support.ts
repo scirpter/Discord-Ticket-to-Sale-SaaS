@@ -5,7 +5,9 @@ import {
 } from 'discord.js';
 import {
   SportsAccessService,
+  type SportsBroadcast,
   SportsDataService,
+  type SportsEventDetails,
   SportsService,
   getEnv,
   pickBestSportsSearchResult,
@@ -23,6 +25,12 @@ export type MatchingEventSource = 'recent-result' | 'upcoming-fixture';
 export type MatchingEvent = {
   event: SportsSearchResult;
   source: MatchingEventSource;
+};
+export type LookupContext = {
+  guildId: string;
+  timezone: string;
+  broadcastCountries: string[];
+  primaryBroadcastCountry: string;
 };
 
 function isSuperAdminUser(discordUserId: string): boolean {
@@ -98,12 +106,7 @@ export async function resolveLookupContext(input: {
   interaction: ChatInputCommandInteraction;
   commandName: string;
 }): Promise<
-  | {
-      guildId: string;
-      timezone: string;
-      broadcastCountries: string[];
-      primaryBroadcastCountry: string;
-    }
+  | LookupContext
   | { error: string }
 > {
   const { interaction, commandName } = input;
@@ -142,6 +145,88 @@ export async function resolveLookupContext(input: {
     broadcastCountries,
     primaryBroadcastCountry: broadcastCountries[0] ?? env.SPORTS_BROADCAST_COUNTRY,
   };
+}
+
+function mergeBroadcasters(input: Array<readonly SportsBroadcast[]>): SportsBroadcast[] {
+  const merged = new Map<string, SportsBroadcast>();
+
+  for (const broadcasters of input) {
+    for (const broadcaster of broadcasters) {
+      const key = [
+        broadcaster.channelId ?? '',
+        broadcaster.channelName.trim().toLowerCase(),
+        broadcaster.country?.trim().toLowerCase() ?? '',
+      ].join('::');
+
+      if (!merged.has(key)) {
+        merged.set(key, broadcaster);
+      }
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function mergeEventDetails(details: SportsEventDetails[]): SportsEventDetails {
+  const [firstDetail, ...remainingDetails] = details;
+  if (!firstDetail) {
+    throw new Error('Cannot merge empty sports event details.');
+  }
+
+  return remainingDetails.reduce<SportsEventDetails>(
+    (merged, current) => ({
+      ...merged,
+      sportName: merged.sportName ?? current.sportName,
+      leagueName: merged.leagueName ?? current.leagueName,
+      venueName: merged.venueName ?? current.venueName,
+      country: merged.country ?? current.country,
+      city: merged.city ?? current.city,
+      dateUkLabel: merged.dateUkLabel ?? current.dateUkLabel,
+      startTimeUkLabel: merged.startTimeUkLabel ?? current.startTimeUkLabel,
+      imageUrl: merged.imageUrl ?? current.imageUrl,
+      description: merged.description ?? current.description,
+      broadcasters: mergeBroadcasters([merged.broadcasters, current.broadcasters]),
+    }),
+    {
+      ...firstDetail,
+      broadcasters: mergeBroadcasters([firstDetail.broadcasters]),
+    },
+  );
+}
+
+export async function lookupEventDetailsAcrossCountries(input: {
+  eventId: string;
+  context: LookupContext;
+}): Promise<{ details: SportsEventDetails | null } | { error: string }> {
+  const successfulDetails: SportsEventDetails[] = [];
+  let firstError: string | null = null;
+
+  for (const broadcastCountry of input.context.broadcastCountries) {
+    const result = await sportsDataService.getEventDetails({
+      eventId: input.eventId,
+      timezone: input.context.timezone,
+      broadcastCountry,
+    });
+
+    if (result.isErr()) {
+      firstError ??= mapSportsError(result.error);
+      continue;
+    }
+
+    if (result.value) {
+      successfulDetails.push(result.value);
+    }
+  }
+
+  if (successfulDetails.length > 0) {
+    return { details: mergeEventDetails(successfulDetails) };
+  }
+
+  if (firstError) {
+    return { error: firstError };
+  }
+
+  return { details: null };
 }
 
 export async function findBestMatchingEvent(input: {

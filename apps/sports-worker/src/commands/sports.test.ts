@@ -534,14 +534,14 @@ describe('sports command', () => {
     expect(soccerChannel.send).toHaveBeenCalled();
   });
 
-  it('does not expose broadcaster-country on setup and keeps live category controls', () => {
+  it('does not expose broadcaster-country on setup or sync and keeps live category controls', () => {
     const commandJson = sportsCommand.data.toJSON();
     const topLevelOptions = (commandJson.options ?? []) as APIApplicationCommandSubcommandOption[];
     const setup = topLevelOptions.find((option) => option.name === 'setup');
     const sync = topLevelOptions.find((option) => option.name === 'sync');
 
     expect((setup?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(false);
-    expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(true);
+    expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'broadcast_country')).toBe(false);
     expect((setup?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'live_category_name')).toBe(true);
     expect((sync?.options ?? []).some((option: APIApplicationCommandBasicOption) => option.name === 'live_category_name')).toBe(true);
   });
@@ -573,6 +573,45 @@ describe('sports command', () => {
         actorDiscordUserId: 'owner-1',
         categoryName: 'Sports Listings',
         liveCategoryName: 'Live Sports',
+      }),
+    );
+  });
+
+  it('does not pass a broadcaster-country override through sync', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+
+    const sportsRuntime = await import('../sports-runtime.js');
+    const { interaction } = createInteractionMock({
+      userId: 'owner-1',
+      subcommand: 'sync',
+      categoryName: 'Sports Listings',
+      broadcastCountry: 'United States',
+      liveCategoryName: 'Live Sports',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(sportsRuntime.syncSportsGuildChannels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guild: interaction.guild,
+        actorDiscordUserId: 'owner-1',
+        categoryName: 'Sports Listings',
+        liveCategoryName: 'Live Sports',
+      }),
+    );
+    expect(sportsRuntime.syncSportsGuildChannels).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        broadcastCountry: expect.anything(),
       }),
     );
   });

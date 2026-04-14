@@ -258,12 +258,6 @@ export const sportsCommand = {
         )
         .addStringOption((option) =>
           option
-            .setName('broadcast_country')
-            .setDescription('Optional broadcaster country filter, for example United States')
-            .setMaxLength(120),
-        )
-        .addStringOption((option) =>
-          option
             .setName('live_category_name')
             .setDescription('Optional category name for live scores and highlights channels')
             .setMaxLength(90),
@@ -364,13 +358,11 @@ export const sportsCommand = {
 
       if (subcommand === 'sync') {
         const categoryName = interaction.options.getString('category_name');
-        const broadcastCountry = interaction.options.getString('broadcast_country');
         const liveCategoryName = interaction.options.getString('live_category_name');
         const syncResult = await syncSportsGuildChannels({
           guild: interaction.guild,
           actorDiscordUserId: interaction.user.id,
           categoryName,
-          broadcastCountry,
           liveCategoryName,
         });
 

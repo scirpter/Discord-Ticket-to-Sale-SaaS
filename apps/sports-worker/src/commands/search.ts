@@ -1,16 +1,16 @@
 import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
-import { SportsDataService } from '@voodoo/core';
 
 import { buildSearchFallbackEmbed, buildSearchResultEmbed } from '../ui/sports-embeds.js';
 import { mapSportsError } from '../sports-runtime.js';
 import {
   deferEphemeralReply,
   getLookupPermissionError,
+  lookupEventDetailsAcrossCountries,
   resolveLookupContext,
   sendEphemeralReply,
+  sportsDataService,
 } from './lookup-command-support.js';
 
-const sportsDataService = new SportsDataService();
 const MAX_SEARCH_RESULT_EMBEDS = 10;
 
 export const searchCommand = {
@@ -62,17 +62,16 @@ export const searchCommand = {
       const visibleResults = searchResult.value.slice(0, MAX_SEARCH_RESULT_EMBEDS);
       const embeds = await Promise.all(
         visibleResults.map(async (result) => {
-          const detailsResult = await sportsDataService.getEventDetails({
+          const detailsResult = await lookupEventDetailsAcrossCountries({
             eventId: result.eventId,
-            timezone: context.timezone,
-            broadcastCountry: context.primaryBroadcastCountry,
+            context,
           });
 
-          if (detailsResult.isErr() || !detailsResult.value) {
+          if ('error' in detailsResult || !detailsResult.details) {
             return buildSearchFallbackEmbed(result);
           }
 
-          return buildSearchResultEmbed(detailsResult.value, context.timezone);
+          return buildSearchResultEmbed(detailsResult.details, context.timezone);
         }),
       );
 

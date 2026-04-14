@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 
 import { mapSportsError } from '../sports-runtime.js';
-import { buildLiveEventEmbed } from '../ui/sports-embeds.js';
+import { buildLiveEventEmbed, formatBroadcastCountriesLabel } from '../ui/sports-embeds.js';
 import {
   MAX_LOOKUP_EMBEDS,
   deferEphemeralReply,
@@ -52,6 +52,13 @@ export const liveCommand = {
         return;
       }
 
+      const degradedCoverageMessage =
+        liveResult.value.degraded && liveResult.value.failedCountries.length > 0
+          ? `Coverage is currently partial. Missing broadcaster countries: ${formatBroadcastCountriesLabel(liveResult.value.failedCountries)}.`
+          : liveResult.value.degraded
+            ? 'Coverage is currently partial.'
+            : null;
+
       const visibleEvents = liveResult.value.data
         .filter((event) => event.broadcasters.length > 0)
         .filter(
@@ -63,7 +70,12 @@ export const liveCommand = {
       if (visibleEvents.length === 0) {
         await sendEphemeralReply(
           interaction,
-          `No live televised events were found right now${sportFilter || leagueFilter ? ' for the selected filters' : ''}.`,
+          [
+            `No live televised events were found right now${sportFilter || leagueFilter ? ' for the selected filters' : ''}.`,
+            degradedCoverageMessage,
+          ]
+            .filter(Boolean)
+            .join(' '),
         );
         return;
       }
@@ -77,6 +89,7 @@ export const liveCommand = {
         content: [
           `Found ${visibleEvents.length} live televised event${visibleEvents.length === 1 ? '' : 's'}.`,
           hiddenCount > 0 ? `Showing the first ${embeds.length}.` : null,
+          degradedCoverageMessage,
         ]
           .filter(Boolean)
           .join(' '),

@@ -112,14 +112,14 @@ Copy `.env.example` to `.env` and fill values.
 - Uses TheSportsDB for sport, event, broadcaster, and image data. A paid API key is required for full daily coverage because the public `123` key is heavily truncated.
 - Daily sport channels stay persistent. When a sport has no events that day, its channel is cleared and left empty instead of being deleted.
 - `/sports setup [category_name] [live_category_name]` creates or refreshes the shared managed sports category, keeps the default shared UK+USA broadcaster coverage, optionally configures the dedicated live-event category, and publishes the current day’s listings immediately.
-- `/sports sync [category_name] [broadcast_country] [live_category_name]` creates missing sport channels, optionally updates the broadcaster-country filter, optionally configures the dedicated live-event category, and refreshes the saved channel bindings without republishing.
+- `/sports sync [category_name] [live_category_name]` creates missing sport channels inside the shared UK+USA setup, optionally configures the dedicated live-event category, and refreshes the saved channel bindings without republishing.
 - `/sports refresh` clears the managed sport channels and republishes today’s listings on demand.
 - `/sports status` shows activation state, managed category, live event category, channel count, and the next scheduled run.
 - `/sports live-status` shows tracked live events, pending cleanup counts, and current live-sync health.
-- Listings and lookup commands use the server’s configured timezone plus its shared broadcaster-country list. By default the worker tracks both United Kingdom and United States coverage together; if a server never overrides it, the worker falls back to the environment default primary country.
+- Listings and lookup commands use the server’s configured timezone plus its shared broadcaster-country list. By default the worker tracks both United Kingdom and United States coverage together, and `/search` plus `/match` merge event-detail broadcasters across that shared list instead of collapsing back to one country.
 - New live-event channels are only created when a dedicated live event category has been configured. Until then, live-event channel creation is intentionally disabled.
 - `/search query:"Rangers v Celtic"` or `/search query:"New York Rangers"` returns upcoming televised matches from today through the next 7 days, including configured-timezone kickoff times, channels, and artwork from the shared broadcaster coverage.
-- `/live [sport] [league]` returns current live televised events aggregated across the server’s shared broadcaster countries, with optional sport/league filters.
+- `/live [sport] [league]` returns current live televised events aggregated across the server’s shared broadcaster countries, with optional sport/league filters, and explicitly flags partial coverage when one or more configured countries fail.
 - `/highlights query:"Rangers v Celtic"` returns on-demand highlights for a finished or matching event when a video is available.
 - `/match query:"Rangers v Celtic"` returns a richer match-centre view for a team or event, including highlights when available, while using the same shared setup context as the other lookup commands.
 - `/standings league:"Scottish Premiership"` returns current league standings.

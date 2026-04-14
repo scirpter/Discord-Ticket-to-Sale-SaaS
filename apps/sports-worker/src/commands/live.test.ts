@@ -209,4 +209,51 @@ describe('live command', () => {
       embeds: [expect.any(Object)],
     });
   });
+
+  it('surfaces degraded shared-country live coverage in the reply', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue(
+      createOkResult({
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getGuildActivationState']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        timezone: 'America/New_York',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listLiveEventsAcrossCountries').mockResolvedValue(
+      createOkResult({
+        data: [
+          {
+            eventId: 'evt-1',
+            eventName: 'Rangers vs Celtic',
+            sportName: 'Soccer',
+            leagueName: 'Scottish Premiership',
+            statusLabel: 'Live',
+            scoreLabel: '2-1',
+            startTimeUkLabel: '12:30',
+            imageUrl: null,
+            broadcasters: [{ channelId: 'chan-1', channelName: 'Sky Sports', country: 'United Kingdom', logoUrl: null }],
+          },
+        ],
+        degraded: true,
+        failedCountries: ['United States'],
+        successfulCountries: ['United Kingdom'],
+      }) as Awaited<ReturnType<SportsDataService['listLiveEventsAcrossCountries']>>,
+    );
+
+    const { interaction, editReply } = createInteractionMock({
+      sport: 'Soccer',
+    });
+
+    await liveCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Coverage is currently partial. Missing broadcaster countries: United States.'),
+      embeds: [expect.any(Object)],
+    });
+  });
 });

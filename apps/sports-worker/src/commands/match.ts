@@ -6,6 +6,7 @@ import {
   deferEphemeralReply,
   findBestMatchingEvent,
   getLookupPermissionError,
+  lookupEventDetailsAcrossCountries,
   resolveLookupContext,
   sendEphemeralReply,
   sportsDataService,
@@ -61,17 +62,16 @@ export const matchCommand = {
       }
 
       const [detailsResult, highlightsResult] = await Promise.all([
-        sportsDataService.getEventDetails({
+        lookupEventDetailsAcrossCountries({
           eventId: eventMatch.match.event.eventId,
-          timezone: context.timezone,
-          broadcastCountry: context.primaryBroadcastCountry,
+          context,
         }),
         sportsDataService.getEventHighlights({
           eventId: eventMatch.match.event.eventId,
         }),
       ]);
-      if (detailsResult.isErr()) {
-        await sendEphemeralReply(interaction, mapSportsError(detailsResult.error));
+      if ('error' in detailsResult) {
+        await sendEphemeralReply(interaction, detailsResult.error);
         return;
       }
       if (highlightsResult.isErr()) {
@@ -85,7 +85,7 @@ export const matchCommand = {
           : 'Upcoming fixture match centre';
 
       await interaction.editReply({
-        content: detailsResult.value
+        content: detailsResult.details
           ? `Match centre for \`${eventMatch.match.event.eventName}\`.`
           : [
               `${fallbackLabel} for \`${eventMatch.match.event.eventName}\`.`,
@@ -93,10 +93,10 @@ export const matchCommand = {
             ]
               .filter(Boolean)
               .join('\n'),
-        embeds: detailsResult.value
+        embeds: detailsResult.details
           ? [
               buildMatchCenterEmbed({
-                details: detailsResult.value,
+                details: detailsResult.details,
                 highlightUrl: highlightsResult.value?.videoUrl ?? null,
               }),
             ]

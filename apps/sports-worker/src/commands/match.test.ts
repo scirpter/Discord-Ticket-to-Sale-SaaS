@@ -118,7 +118,7 @@ describe('match command', () => {
     }
   });
 
-  it('returns a match-centre style response for the best matching event', async () => {
+  it('returns a match-centre response with broadcasters merged across shared countries', async () => {
     vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue(
       createOkResult({
         activated: true,
@@ -147,22 +147,40 @@ describe('match command', () => {
     vi.spyOn(SportsDataService.prototype, 'getResults').mockResolvedValue(
       createOkResult([]) as Awaited<ReturnType<SportsDataService['getResults']>>,
     );
-    const getEventDetails = vi.spyOn(SportsDataService.prototype, 'getEventDetails').mockResolvedValue(
-      createOkResult({
-        eventId: 'evt-1',
-        eventName: 'Rangers vs Celtic',
-        sportName: 'Soccer',
-        leagueName: 'Scottish Premiership',
-        venueName: 'Ibrox',
-        country: 'United Kingdom',
-        city: 'Glasgow',
-        dateUkLabel: 'Saturday, 21 March 2026',
-        startTimeUkLabel: '12:30',
-        imageUrl: null,
-        description: 'A title-deciding derby.',
-        broadcasters: [{ channelId: 'chan-1', channelName: 'Sky Sports', country: 'United Kingdom', logoUrl: null }],
-      }) as Awaited<ReturnType<SportsDataService['getEventDetails']>>,
-    );
+    const getEventDetails = vi
+      .spyOn(SportsDataService.prototype, 'getEventDetails')
+      .mockResolvedValueOnce(
+        createOkResult({
+          eventId: 'evt-1',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          venueName: 'Ibrox',
+          country: 'United Kingdom',
+          city: 'Glasgow',
+          dateUkLabel: 'Saturday, 21 March 2026',
+          startTimeUkLabel: '12:30',
+          imageUrl: null,
+          description: 'A title-deciding derby.',
+          broadcasters: [{ channelId: 'chan-1', channelName: 'Sky Sports', country: 'United Kingdom', logoUrl: null }],
+        }) as Awaited<ReturnType<SportsDataService['getEventDetails']>>,
+      )
+      .mockResolvedValueOnce(
+        createOkResult({
+          eventId: 'evt-1',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          venueName: 'Ibrox',
+          country: 'United Kingdom',
+          city: 'Glasgow',
+          dateUkLabel: 'Saturday, 21 March 2026',
+          startTimeUkLabel: '12:30',
+          imageUrl: null,
+          description: 'A title-deciding derby.',
+          broadcasters: [{ channelId: 'chan-2', channelName: 'ESPN', country: 'United States', logoUrl: null }],
+        }) as Awaited<ReturnType<SportsDataService['getEventDetails']>>,
+      );
     vi.spyOn(SportsDataService.prototype, 'getEventHighlights').mockResolvedValue(
       createOkResult({
         eventId: 'evt-1',
@@ -179,12 +197,23 @@ describe('match command', () => {
 
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining('Match centre for'),
-      embeds: [expect.any(Object)],
+      embeds: [
+        expect.objectContaining({
+          data: expect.objectContaining({
+            description: expect.stringContaining('ESPN (United States)'),
+          }),
+        }),
+      ],
     });
-    expect(getEventDetails).toHaveBeenCalledWith({
+    expect(getEventDetails).toHaveBeenNthCalledWith(1, {
       eventId: 'evt-1',
       timezone: 'Europe/London',
       broadcastCountry: 'United Kingdom',
+    });
+    expect(getEventDetails).toHaveBeenNthCalledWith(2, {
+      eventId: 'evt-1',
+      timezone: 'Europe/London',
+      broadcastCountry: 'United States',
     });
   });
 
