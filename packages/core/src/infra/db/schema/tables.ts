@@ -877,6 +877,7 @@ export const sportsGuildConfigs = mysqlTable(
     localTimeHhmm: varchar('local_time_hhmm', { length: 5 }).notNull(),
     timezone: varchar('timezone', { length: 64 }).notNull(),
     broadcastCountry: varchar('broadcast_country', { length: 120 }).notNull(),
+    broadcastCountries: json('broadcast_countries').$type<string[]>().notNull().default([]),
     nextRunAtUtc: timestamp('next_run_at_utc', { mode: 'date' }).notNull(),
     lastRunAtUtc: timestamp('last_run_at_utc', { mode: 'date' }),
     lastLocalRunDate: varchar('last_local_run_date', { length: 10 }),
@@ -928,6 +929,7 @@ export const sportsLiveEventChannels = mysqlTable(
     eventName: varchar('event_name', { length: 160 }).notNull(),
     sportChannelId: varchar('sport_channel_id', { length: 32 }).notNull(),
     eventChannelId: varchar('event_channel_id', { length: 32 }),
+    scoreMessageId: varchar('score_message_id', { length: 32 }),
     status: mysqlEnum('status', ['scheduled', 'live', 'finished', 'cleanup_due', 'deleted', 'failed'])
       .notNull()
       .default('scheduled'),

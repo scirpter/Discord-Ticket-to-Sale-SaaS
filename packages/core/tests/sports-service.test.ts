@@ -14,7 +14,8 @@ type SportsProfileRecord = {
 };
 
 type SportsRepositoryLike = {
-  listProfiles: ReturnType<typeof vi.fn>;
+  getGuildConfig?: ReturnType<typeof vi.fn>;
+  listProfiles?: ReturnType<typeof vi.fn>;
 };
 
 function createServiceWithMockRepository(repository: SportsRepositoryLike): SportsService {
@@ -66,5 +67,41 @@ describe('SportsService', () => {
         liveCategoryChannelId: 'live-uk',
       }),
     ]);
+  });
+
+  it('exposes broadcast countries on the guild config summary', async () => {
+    const repository: SportsRepositoryLike = {
+      getGuildConfig: vi.fn().mockResolvedValue({
+        id: 'config-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: 'live-category-1',
+        localTimeHhmm: '09:30',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: new Date('2026-04-14T08:30:00.000Z'),
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+        updatedByDiscordUserId: 'user-1',
+        createdAt: new Date('2026-04-14T08:00:00.000Z'),
+        updatedAt: new Date('2026-04-14T08:00:00.000Z'),
+      }),
+    };
+    const service = createServiceWithMockRepository(repository);
+
+    const result = await service.getGuildConfig({ guildId: 'guild-1' });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    expect(repository.getGuildConfig).toHaveBeenCalledWith('guild-1');
+    expect(result.value).toMatchObject({
+      guildId: 'guild-1',
+      broadcastCountries: ['United Kingdom', 'United States'],
+    });
   });
 });

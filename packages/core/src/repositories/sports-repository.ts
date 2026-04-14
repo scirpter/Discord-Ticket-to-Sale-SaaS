@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
 import { sportsChannelBindings, sportsGuildConfigs } from '../infra/db/schema/index.js';
+import { normalizeBroadcastCountries } from '../services/sports-broadcast-countries.js';
 
 export type SportsGuildConfigRecord = {
   id: string;
@@ -13,6 +14,7 @@ export type SportsGuildConfigRecord = {
   localTimeHhmm: string;
   timezone: string;
   broadcastCountry: string;
+  broadcastCountries: string[];
   nextRunAtUtc: Date;
   lastRunAtUtc: Date | null;
   lastLocalRunDate: string | null;
@@ -56,6 +58,8 @@ function slugifyProfileLabel(value: string): string {
 function mapGuildConfigRow(
   row: typeof sportsGuildConfigs.$inferSelect,
 ): SportsGuildConfigRecord {
+  const broadcastCountries = normalizeBroadcastCountries(row.broadcastCountries ?? [row.broadcastCountry]);
+
   return {
     id: row.id,
     guildId: row.guildId,
@@ -64,7 +68,8 @@ function mapGuildConfigRow(
     liveCategoryChannelId: row.liveCategoryChannelId ?? null,
     localTimeHhmm: row.localTimeHhmm,
     timezone: row.timezone,
-    broadcastCountry: row.broadcastCountry,
+    broadcastCountry: broadcastCountries[0] ?? row.broadcastCountry,
+    broadcastCountries,
     nextRunAtUtc: row.nextRunAtUtc,
     lastRunAtUtc: row.lastRunAtUtc ?? null,
     lastLocalRunDate: row.lastLocalRunDate ?? null,
@@ -124,12 +129,14 @@ export class SportsRepository {
     liveCategoryChannelId: string | null;
     localTimeHhmm: string;
     timezone: string;
-    broadcastCountry: string;
+    broadcastCountries: string[];
     nextRunAtUtc: Date;
     updatedByDiscordUserId: string;
   }): Promise<SportsGuildConfigRecord> {
     const existing = await this.getGuildConfig(input.guildId);
     const now = new Date();
+    const broadcastCountries = normalizeBroadcastCountries(input.broadcastCountries);
+    const legacyBroadcastCountry = broadcastCountries[0] ?? 'United Kingdom';
 
     if (existing) {
       await this.db
@@ -140,7 +147,8 @@ export class SportsRepository {
           liveCategoryChannelId: input.liveCategoryChannelId,
           localTimeHhmm: input.localTimeHhmm,
           timezone: input.timezone,
-          broadcastCountry: input.broadcastCountry,
+          broadcastCountry: legacyBroadcastCountry,
+          broadcastCountries,
           nextRunAtUtc: input.nextRunAtUtc,
           updatedByDiscordUserId: input.updatedByDiscordUserId,
           updatedAt: now,
@@ -155,7 +163,8 @@ export class SportsRepository {
         liveCategoryChannelId: input.liveCategoryChannelId,
         localTimeHhmm: input.localTimeHhmm,
         timezone: input.timezone,
-        broadcastCountry: input.broadcastCountry,
+        broadcastCountry: legacyBroadcastCountry,
+        broadcastCountries,
         nextRunAtUtc: input.nextRunAtUtc,
         updatedByDiscordUserId: input.updatedByDiscordUserId,
         createdAt: now,

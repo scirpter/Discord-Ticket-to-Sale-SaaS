@@ -12,6 +12,7 @@ export type SportsLiveEventChannelRecord = {
   eventName: string;
   sportChannelId: string;
   eventChannelId: string | null;
+  scoreMessageId: string | null;
   status: 'scheduled' | 'live' | 'finished' | 'cleanup_due' | 'deleted' | 'failed';
   kickoffAtUtc: Date;
   lastScoreSnapshot: Record<string, unknown> | null;
@@ -40,6 +41,7 @@ function mapSportsLiveEventChannelRow(
     eventName: row.eventName,
     sportChannelId: row.sportChannelId,
     eventChannelId: row.eventChannelId ?? null,
+    scoreMessageId: row.scoreMessageId ?? null,
     status: row.status,
     kickoffAtUtc: row.kickoffAtUtc,
     lastScoreSnapshot: row.lastScoreSnapshot ?? null,
@@ -194,6 +196,7 @@ export class SportsLiveEventRepository {
     sportChannelId: string;
     kickoffAtUtc: Date;
     eventChannelId: string | null;
+    scoreMessageId?: string | null;
     status: SportsLiveEventChannelRecord['status'];
     lastScoreSnapshot: Record<string, unknown> | null;
     lastStateSnapshot: Record<string, unknown> | null;
@@ -214,6 +217,7 @@ export class SportsLiveEventRepository {
         eventName: input.eventName,
         sportChannelId: input.sportChannelId,
         eventChannelId: input.eventChannelId,
+        scoreMessageId: input.scoreMessageId ?? null,
         status: input.status,
         kickoffAtUtc: input.kickoffAtUtc,
         lastScoreSnapshot: input.lastScoreSnapshot,
@@ -231,6 +235,7 @@ export class SportsLiveEventRepository {
           eventName: input.eventName,
           sportChannelId: input.sportChannelId,
           eventChannelId: input.eventChannelId,
+          scoreMessageId: input.scoreMessageId ?? null,
           status: input.status,
           kickoffAtUtc: input.kickoffAtUtc,
           lastScoreSnapshot: input.lastScoreSnapshot,
@@ -291,6 +296,7 @@ export class SportsLiveEventRepository {
       .set({
         status: 'deleted',
         eventChannelId: null,
+        scoreMessageId: null,
         lastSyncedAtUtc: input.deletedAtUtc,
         updatedAt: input.deletedAtUtc,
       })

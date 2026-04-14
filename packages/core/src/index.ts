@@ -53,6 +53,7 @@ export * from './services/referral-service.js';
 export * from './services/sale-service.js';
 export * from './services/sales-history-service.js';
 export * from './services/sports-access-service.js';
+export * from './services/sports-broadcast-countries.js';
 export * from './services/sports-live-event-service.js';
 export * from './services/sports-data-service.js';
 export * from './services/sports-service.js';

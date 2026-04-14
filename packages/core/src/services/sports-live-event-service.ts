@@ -14,6 +14,7 @@ export type SportsLiveEventChannelSummary = {
   eventName: string;
   sportChannelId: string;
   eventChannelId: string | null;
+  scoreMessageId: string | null;
   status: 'scheduled' | 'live' | 'finished' | 'cleanup_due' | 'deleted' | 'failed';
   kickoffAtUtc: Date;
   lastScoreSnapshot: Record<string, unknown> | null;
@@ -42,6 +43,7 @@ function mapSportsLiveEventChannelSummary(
     eventName: record.eventName,
     sportChannelId: record.sportChannelId,
     eventChannelId: record.eventChannelId,
+    scoreMessageId: record.scoreMessageId,
     status: record.status,
     kickoffAtUtc: record.kickoffAtUtc,
     lastScoreSnapshot: record.lastScoreSnapshot,
@@ -66,6 +68,7 @@ export class SportsLiveEventService {
     sportChannelId: string;
     kickoffAtUtc: Date;
     eventChannelId: string | null;
+    scoreMessageId?: string | null;
     status: SportsLiveEventChannelSummary['status'];
     lastScoreSnapshot: Record<string, unknown> | null;
     lastStateSnapshot: Record<string, unknown> | null;

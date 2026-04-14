@@ -13,6 +13,7 @@ type SportsLiveEventRow = {
   eventName: string;
   sportChannelId: string;
   eventChannelId: string | null;
+  scoreMessageId: string | null;
   status: 'scheduled' | 'live' | 'finished' | 'cleanup_due' | 'deleted' | 'failed';
   kickoffAtUtc: Date;
   lastScoreSnapshot: Record<string, unknown> | null;
@@ -74,6 +75,7 @@ function makeRow(overrides: Partial<SportsLiveEventRow> = {}): SportsLiveEventRo
     eventName: 'Rangers vs Celtic',
     sportChannelId: 'sport-1',
     eventChannelId: null,
+    scoreMessageId: null,
     status: 'scheduled',
     kickoffAtUtc: new Date('2026-03-20T12:30:00.000Z'),
     lastScoreSnapshot: null,
@@ -153,6 +155,7 @@ function createStatefulMockDb(rows: SportsLiveEventRow[]): MockDb {
               eventName: String(value.eventName),
               sportChannelId: String(value.sportChannelId),
               eventChannelId: value.eventChannelId ?? null,
+              scoreMessageId: value.scoreMessageId ?? null,
               status: (value.status ?? 'scheduled') as SportsLiveEventRow['status'],
               kickoffAtUtc: value.kickoffAtUtc ?? new Date('1970-01-01T00:00:00.000Z'),
               lastScoreSnapshot: (value.lastScoreSnapshot ?? null) as Record<string, unknown> | null,
@@ -258,6 +261,7 @@ describe('SportsLiveEventService', () => {
       guildId: 'guild-1',
       eventId: 'evt-1',
       eventName: 'Rangers vs Celtic',
+      scoreMessageId: 'msg-score-1',
     });
     const distractor = makeRow({
       id: '01J0SPORTSLIVE000000000002',
@@ -282,6 +286,7 @@ describe('SportsLiveEventService', () => {
     expect(result.value?.id).toBe(target.id);
     expect(result.value?.guildId).toBe('guild-1');
     expect(result.value?.eventId).toBe('evt-1');
+    expect(result.value?.scoreMessageId).toBe('msg-score-1');
     expect(result.value?.id).not.toBe(distractor.id);
   });
 

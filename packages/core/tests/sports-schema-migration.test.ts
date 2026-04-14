@@ -20,4 +20,18 @@ describe('sports schema migration', () => {
     expect(migration).toContain('broadcast_country');
     expect(migration).toContain('information_schema.columns');
   });
+
+  it('includes the shared broadcast countries and live score message migration', () => {
+    const migrationPath = path.resolve(
+      process.cwd(),
+      'drizzle/migrations/0027_sports_broadcast_countries.sql',
+    );
+    const migration = readFileSync(migrationPath, 'utf8');
+
+    expect(migration).toContain('sports_guild_configs');
+    expect(migration).toContain('broadcast_countries');
+    expect(migration).toContain('JSON_ARRAY(`broadcast_country`)');
+    expect(migration).toContain('sports_live_event_channels');
+    expect(migration).toContain('score_message_id');
+  });
 });

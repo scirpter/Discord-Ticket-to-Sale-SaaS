@@ -1,7 +1,6 @@
 import { err, ok, type Result } from 'neverthrow';
 
 import { AppError } from '../domain/errors.js';
-import { getEnv } from '../config/env.js';
 import {
   SportsRepository,
   type SportsChannelBindingRecord,
@@ -9,6 +8,7 @@ import {
   type SportsProfileRecord,
 } from '../repositories/sports-repository.js';
 import { SportsAccessService } from './sports-access-service.js';
+import { normalizeBroadcastCountries } from './sports-broadcast-countries.js';
 import {
   assertValidTimezone,
   computeNextRunAtUtc,
@@ -25,6 +25,7 @@ export type SportsGuildConfigSummary = {
   localTimeHhMm: string;
   timezone: string;
   broadcastCountry: string;
+  broadcastCountries: string[];
   nextRunAtUtc: string;
   lastRunAtUtc: string | null;
   lastLocalRunDate: string | null;
@@ -67,6 +68,7 @@ function mapGuildConfigSummary(config: SportsGuildConfigRecord): SportsGuildConf
     localTimeHhMm: config.localTimeHhmm,
     timezone: config.timezone,
     broadcastCountry: config.broadcastCountry,
+    broadcastCountries: config.broadcastCountries,
     nextRunAtUtc: config.nextRunAtUtc.toISOString(),
     lastRunAtUtc: config.lastRunAtUtc?.toISOString() ?? null,
     lastLocalRunDate: config.lastLocalRunDate ?? null,
@@ -102,7 +104,6 @@ function mapChannelBindingSummary(
 export class SportsService {
   private readonly sportsRepository = new SportsRepository();
   private readonly sportsAccessService = new SportsAccessService();
-  private readonly env = getEnv();
 
   public async getGuildStatus(input: {
     guildId: string;
@@ -169,13 +170,17 @@ export class SportsService {
     liveCategoryChannelId: string | null;
     localTimeHhMm: string;
     timezone: string;
-    broadcastCountry: string;
+    broadcastCountry?: string;
+    broadcastCountries?: string[];
     actorDiscordUserId: string;
   }): Promise<Result<SportsGuildConfigSummary, AppError>> {
     try {
       const timezone = assertValidTimezone(input.timezone);
       const parsed = parseDailyTimeHhMm(input.localTimeHhMm);
       const normalizedTime = `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
+      const broadcastCountries = normalizeBroadcastCountries(
+        input.broadcastCountries ?? [input.broadcastCountry ?? ''],
+      );
       const nextRunAtUtc = computeNextRunAtUtc({
         timezone,
         timeHhMm: normalizedTime,
@@ -188,7 +193,7 @@ export class SportsService {
         liveCategoryChannelId: input.liveCategoryChannelId,
         localTimeHhmm: normalizedTime,
         timezone,
-        broadcastCountry: input.broadcastCountry.trim() || this.env.SPORTS_BROADCAST_COUNTRY,
+        broadcastCountries,
         nextRunAtUtc,
         updatedByDiscordUserId: input.actorDiscordUserId,
       });
