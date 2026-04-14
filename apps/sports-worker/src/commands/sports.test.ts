@@ -57,6 +57,11 @@ vi.mock('@voodoo/core', () => {
     SportsDataService,
     SportsLiveEventService,
     SportsService,
+    logger: {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+    },
     getEnv: () => ({
       superAdminDiscordIds: (process.env.SUPER_ADMIN_DISCORD_IDS ?? '')
         .split(',')
@@ -104,6 +109,7 @@ import {
   SportsDataService,
   SportsLiveEventService,
   SportsService,
+  logger,
   resetEnvForTests,
 } from '@voodoo/core';
 
@@ -292,6 +298,66 @@ describe('sports command', () => {
     });
     expect(editReply).toHaveBeenCalledWith({
       content: expect.not.stringContaining('Empty sport channels today'),
+    });
+  });
+
+  it('still completes setup when activation status lookup fails after sync and publish succeed', async () => {
+    process.env.SUPER_ADMIN_DISCORD_IDS = 'owner-1';
+    resetEnvForTests();
+
+    vi.spyOn(SportsAccessService.prototype, 'getGuildActivationState').mockResolvedValue({
+      isErr: () => true,
+      isOk: () => false,
+      error: new Error('activation lookup exploded'),
+    } as Awaited<ReturnType<SportsAccessService['getGuildActivationState']>>);
+
+    const { interaction, editReply } = createInteractionMock({
+      userId: 'owner-1',
+      subcommand: 'setup',
+      categoryName: 'Sports Listings',
+    });
+
+    await sportsCommand.execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining('Sports worker setup is complete for this server.'),
+    });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.not.stringContaining('Activation is still pending.'),
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.any(Error),
+        guildId: 'guild-1',
+      }),
+      'sports setup could not load activation status after setup',
+    );
+  });
+
+  it('maps defer failures through the command catch instead of throwing out of execute', async () => {
+    vi.spyOn(SportsAccessService.prototype, 'getCommandAccessState').mockResolvedValue(
+      createOkResult({
+        locked: false,
+        allowed: true,
+        activated: true,
+        authorizedUserCount: 1,
+      }) as Awaited<ReturnType<SportsAccessService['getCommandAccessState']>>,
+    );
+
+    const { interaction } = createInteractionMock({
+      userId: 'user-2',
+      subcommand: 'status',
+    });
+    const reply = interaction.reply as ReturnType<typeof vi.fn>;
+    interaction.deferReply = vi.fn(async () => {
+      throw new Error('defer failed');
+    }) as never;
+
+    await expect(sportsCommand.execute(interaction)).resolves.toBeUndefined();
+
+    expect(reply).toHaveBeenCalledWith({
+      content: 'defer failed',
+      flags: MessageFlags.Ephemeral,
     });
   });
 

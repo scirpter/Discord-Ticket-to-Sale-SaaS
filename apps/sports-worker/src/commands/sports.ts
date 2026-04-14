@@ -12,6 +12,7 @@ import {
   SportsService,
   type SportsGuildConfigSummary,
   getEnv,
+  logger,
 } from '@voodoo/core';
 
 import {
@@ -192,8 +193,8 @@ function buildSportsLiveStatusMessage(input: {
 
 function buildSetupMessage(input: {
   guildId: string;
-  activated: boolean;
-  authorizedUserCount: number;
+  activated: boolean | null;
+  authorizedUserCount: number | null;
   setup: Awaited<ReturnType<typeof syncSportsGuildChannels>>;
   publish: Awaited<ReturnType<typeof publishSportsForGuild>>;
 }): string {
@@ -209,11 +210,11 @@ function buildSetupMessage(input: {
     `Next scheduled run (UTC): ${input.setup.config.nextRunAtUtc}`,
   ];
 
-  if (!input.activated) {
+  if (input.activated === false) {
     lines.push(
       `Activation is still pending. Run \`/activation grant guild_id:${input.guildId} user_id:<customer-user-id>\` to enable daily automation and customer \`/search\` usage.`,
     );
-  } else if (input.authorizedUserCount > 0) {
+  } else if (input.activated === true && (input.authorizedUserCount ?? 0) > 0) {
     lines.push(`Activation is active for ${input.authorizedUserCount} authorized user(s).`);
   }
 
@@ -287,9 +288,9 @@ export const sportsCommand = {
       return;
     }
 
-    await deferEphemeralReply(interaction);
-
     try {
+      await deferEphemeralReply(interaction);
+
       const permissionError = await getSportsPermissionError(interaction);
       if (permissionError) {
         await sendEphemeralReply(interaction, permissionError);
@@ -402,32 +403,37 @@ export const sportsCommand = {
       if (subcommand === 'setup') {
         const categoryName = interaction.options.getString('category_name');
         const liveCategoryName = interaction.options.getString('live_category_name');
-        const [activationStateResult, syncResult] = await Promise.all([
-          sportsAccessService.getGuildActivationState({ guildId }),
-          syncSportsGuildChannels({
-            guild: interaction.guild,
-            actorDiscordUserId: interaction.user.id,
-            categoryName,
-            liveCategoryName,
-          }),
-        ]);
-
-        if (activationStateResult.isErr()) {
-          await sendEphemeralReply(interaction, mapSportsError(activationStateResult.error));
-          return;
-        }
+        const syncResult = await syncSportsGuildChannels({
+          guild: interaction.guild,
+          actorDiscordUserId: interaction.user.id,
+          categoryName,
+          liveCategoryName,
+        });
 
         const publishResult = await publishSportsForGuild({
           guild: interaction.guild,
           actorDiscordUserId: interaction.user.id,
         });
 
+        let activated: boolean | null = null;
+        let authorizedUserCount: number | null = null;
+        const activationStateResult = await sportsAccessService.getGuildActivationState({ guildId });
+        if (activationStateResult.isErr()) {
+          logger.warn(
+            { err: activationStateResult.error, guildId },
+            'sports setup could not load activation status after setup',
+          );
+        } else {
+          activated = activationStateResult.value.activated;
+          authorizedUserCount = activationStateResult.value.authorizedUserCount;
+        }
+
         await sendEphemeralReply(
           interaction,
           buildSetupMessage({
             guildId,
-            activated: activationStateResult.value.activated,
-            authorizedUserCount: activationStateResult.value.authorizedUserCount,
+            activated,
+            authorizedUserCount,
             setup: syncResult,
             publish: publishResult,
           }),
@@ -437,6 +443,15 @@ export const sportsCommand = {
 
       await sendEphemeralReply(interaction, `Unknown sports subcommand: ${subcommand}`);
     } catch (error) {
+      logger.error(
+        {
+          err: error,
+          commandName: 'sports',
+          subcommand: interaction.options.getSubcommand(false) ?? null,
+          guildId: interaction.guildId,
+        },
+        'sports command failed',
+      );
       await sendEphemeralReply(interaction, mapSportsError(error));
     }
   },
