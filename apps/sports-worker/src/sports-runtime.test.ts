@@ -23,6 +23,10 @@ vi.mock('@voodoo/core', () => {
     public async listDailyListingsForLocalDate(): Promise<never> {
       throw new Error('Mock listDailyListingsForLocalDate not implemented');
     }
+
+    public async listDailyListingsForLocalDateAcrossCountries(): Promise<never> {
+      throw new Error('Mock listDailyListingsForLocalDateAcrossCountries not implemented');
+    }
   }
 
   class SportsAccessService {}
@@ -47,7 +51,7 @@ vi.mock('@voodoo/core', () => {
 });
 
 import { SportsDataService, SportsService } from '@voodoo/core';
-import { syncSportsGuildChannels } from './sports-runtime.js';
+import { publishSportsForGuild, syncSportsGuildChannels } from './sports-runtime.js';
 
 function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; value: T } {
   return {
@@ -57,25 +61,39 @@ function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; va
   };
 }
 
+function createCategoryChannel(id: string, name: string) {
+  return {
+    id,
+    name,
+    type: 4,
+    setName: vi.fn(async () => undefined),
+  };
+}
+
+function createManagedTextChannel(id: string, name: string, topic: string) {
+  return {
+    id,
+    name,
+    topic,
+    type: 0,
+    parentId: 'category-1',
+    send: vi.fn(async () => undefined),
+    edit: vi.fn(async () => undefined),
+    bulkDelete: vi.fn(async () => undefined),
+    messages: {
+      fetch: vi.fn(async () => ({ size: 0 })),
+    },
+  };
+}
+
 describe('sports runtime country handling', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('preserves the existing broadcaster country during sync when no override is provided', async () => {
+  it('defaults setup to shared United Kingdom and United States countries when no override is supplied', async () => {
     vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
-      createOkResult({
-        configId: 'cfg-1',
-        guildId: 'guild-1',
-        enabled: true,
-        managedCategoryChannelId: 'category-1',
-        localTimeHhMm: '00:01',
-        timezone: 'America/New_York',
-        broadcastCountry: 'United States',
-        nextRunAtUtc: '2026-03-21T04:01:00.000Z',
-        lastRunAtUtc: null,
-        lastLocalRunDate: null,
-      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+      createOkResult(null) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
     );
     const upsertGuildConfig = vi.spyOn(SportsService.prototype, 'upsertGuildConfig').mockResolvedValue(
       createOkResult({
@@ -83,10 +101,12 @@ describe('sports runtime country handling', () => {
         guildId: 'guild-1',
         enabled: true,
         managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
         localTimeHhMm: '00:01',
-        timezone: 'America/New_York',
-        broadcastCountry: 'United States',
-        nextRunAtUtc: '2026-03-21T04:01:00.000Z',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
         lastRunAtUtc: null,
         lastLocalRunDate: null,
       }) as Awaited<ReturnType<SportsService['upsertGuildConfig']>>,
@@ -94,21 +114,31 @@ describe('sports runtime country handling', () => {
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
     );
-    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
-      createOkResult([]) as unknown as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
-    );
+    const listDailyListingsAcrossCountries = vi
+      .spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDateAcrossCountries')
+      .mockResolvedValue(
+        createOkResult({
+          data: [],
+          degraded: false,
+          failedCountries: [],
+          successfulCountries: ['United Kingdom', 'United States'],
+        }) as unknown as Awaited<
+          ReturnType<SportsDataService['listDailyListingsForLocalDateAcrossCountries']>
+        >,
+      );
 
+    const category = createCategoryChannel('category-1', 'Sports Listings');
     const guild = {
       id: 'guild-1',
       channels: {
         fetch: vi.fn(async (channelId?: string) => {
           if (channelId === 'category-1') {
-            return { id: 'category-1', name: 'Sports Listings', type: 4, setName: vi.fn(async () => undefined) };
+            return category;
           }
 
-          return new Map<string, unknown>([['category-1', { id: 'category-1', name: 'Sports Listings', type: 4 }]]);
+          return new Map<string, unknown>();
         }),
-        create: vi.fn(async () => ({ id: 'category-1', name: 'Sports Listings', type: 4 })),
+        create: vi.fn(async () => category),
       },
     };
 
@@ -120,11 +150,159 @@ describe('sports runtime country handling', () => {
 
     expect(upsertGuildConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        timezone: 'America/New_York',
+        timezone: 'Europe/London',
         localTimeHhMm: '00:01',
-        broadcastCountry: 'United States',
+        broadcastCountries: ['United Kingdom', 'United States'],
       }),
     );
+    expect(listDailyListingsAcrossCountries).toHaveBeenCalledWith({
+      localDate: '2026-03-20',
+      timezone: 'Europe/London',
+      broadcastCountries: ['United Kingdom', 'United States'],
+    });
+  });
+
+  it('publishes shared-country header and topic copy from the multi-country daily listings payload', async () => {
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    const upsertChannelBinding = vi
+      .spyOn(SportsService.prototype, 'upsertChannelBinding')
+      .mockImplementation(async (input) =>
+        createOkResult({
+          bindingId: 'binding-1',
+          guildId: input.guildId,
+          sportId: input.sportId,
+          sportName: input.sportName,
+          sportSlug: input.sportSlug,
+          channelId: input.channelId,
+        }) as Awaited<ReturnType<SportsService['upsertChannelBinding']>>,
+      );
+    const listDailyListingsAcrossCountries = vi
+      .spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDateAcrossCountries')
+      .mockResolvedValue(
+        createOkResult({
+          data: [
+            {
+              sportName: 'Soccer',
+              listings: [
+                {
+                  eventId: 'event-1',
+                  sportName: 'Soccer',
+                  eventName: 'Rangers vs Celtic',
+                  season: '2025-2026',
+                  eventCountry: 'Scotland',
+                  startTimeUtc: '2026-03-20T15:00:00.000Z',
+                  startTimeUkLabel: '15:00',
+                  imageUrl: null,
+                  broadcasters: [
+                    {
+                      channelId: 'uk-1',
+                      channelName: 'Sky Sports Main Event',
+                      country: 'United Kingdom',
+                      logoUrl: null,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          degraded: true,
+          failedCountries: ['United States'],
+          successfulCountries: ['United Kingdom'],
+        }) as unknown as Awaited<
+          ReturnType<SportsDataService['listDailyListingsForLocalDateAcrossCountries']>
+        >,
+      );
+
+    const category = createCategoryChannel('category-1', 'Sports Listings');
+    const managedChannels = new Map<string, ReturnType<typeof createManagedTextChannel>>();
+    let managedChannelCount = 0;
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        fetch: vi.fn(async (channelId?: string) => {
+          if (channelId === 'category-1') {
+            return category;
+          }
+          if (channelId) {
+            return managedChannels.get(channelId) ?? null;
+          }
+
+          return new Map<string, unknown>([
+            ['category-1', category],
+            ...managedChannels.entries(),
+          ]);
+        }),
+        create: vi.fn(async (input: { name: string; type: number; topic: string }) => {
+          managedChannelCount += 1;
+          const channel = createManagedTextChannel(`sport-${managedChannelCount}`, input.name, input.topic);
+          managedChannels.set(channel.id, channel);
+          return channel;
+        }),
+      },
+    };
+
+    const result = await publishSportsForGuild({
+      guild: guild as never,
+      actorDiscordUserId: 'user-1',
+    });
+
+    expect(result).toEqual({
+      publishedChannelCount: 1,
+      listingCount: 1,
+      createdChannelCount: 1,
+    });
+    expect(listDailyListingsAcrossCountries).toHaveBeenCalledWith({
+      localDate: '2026-03-20',
+      timezone: 'Europe/London',
+      broadcastCountries: ['United Kingdom', 'United States'],
+    });
+    expect(guild.channels.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'soccer',
+        topic:
+          'Managed by the sports worker. Daily TV listings for tracked broadcasters in United Kingdom and United States refresh automatically at 00:01 (Europe/London).',
+      }),
+    );
+
+    const createdChannel = managedChannels.get('sport-1');
+    expect(createdChannel).toBeDefined();
+    expect(upsertChannelBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sportName: 'Soccer',
+        channelId: 'sport-1',
+      }),
+    );
+    expect(createdChannel?.send).toHaveBeenCalledWith({
+      content: expect.stringContaining(
+        'TV listings for Friday, 20 March 2026 from tracked broadcasters in United Kingdom and United States.',
+      ),
+    });
+    expect(createdChannel?.send).toHaveBeenCalledWith({
+      content: expect.stringContaining(
+        'Tracked broadcaster countries: United Kingdom and United States.',
+      ),
+    });
+    expect(createdChannel?.send).toHaveBeenCalledWith({
+      content: expect.not.stringContaining('Tracked broadcaster country:'),
+    });
   });
 
   it('stores a dedicated live event category when one is configured during sync', async () => {
@@ -141,6 +319,7 @@ describe('sports runtime country handling', () => {
         localTimeHhMm: '00:01',
         timezone: 'Europe/London',
         broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
         nextRunAtUtc: '2026-03-21T00:01:00.000Z',
         lastRunAtUtc: null,
         lastLocalRunDate: null,
@@ -149,8 +328,15 @@ describe('sports runtime country handling', () => {
     vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
       createOkResult([]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
     );
-    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDate').mockResolvedValue(
-      createOkResult([]) as unknown as Awaited<ReturnType<SportsDataService['listDailyListingsForLocalDate']>>,
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDateAcrossCountries').mockResolvedValue(
+      createOkResult({
+        data: [],
+        degraded: false,
+        failedCountries: [],
+        successfulCountries: ['United Kingdom', 'United States'],
+      }) as unknown as Awaited<
+        ReturnType<SportsDataService['listDailyListingsForLocalDateAcrossCountries']>
+      >,
     );
 
     const createdCategories: Array<{ name: string; type: number }> = [];

@@ -15,6 +15,7 @@ import { ChannelType, type CategoryChannel, type Client, type Guild, type TextCh
 
 import {
   buildSportEventEmbed,
+  formatBroadcastCountriesLabel,
   buildSportHeaderMessage,
 } from './ui/sports-embeds.js';
 
@@ -24,6 +25,7 @@ const sportsDataService = new SportsDataService();
 const sportsAccessService = new SportsAccessService();
 
 const DEFAULT_CATEGORY_NAME = 'Sports Listings';
+const DEFAULT_SHARED_BROADCAST_COUNTRIES = ['United Kingdom', 'United States'];
 const RETRY_DELAY_MS = 15 * 60 * 1000;
 
 let schedulerTimer: NodeJS.Timeout | null = null;
@@ -32,9 +34,11 @@ let schedulerTickInFlight = false;
 function buildManagedChannelTopic(input: {
   timezone: string;
   publishTime: string;
-  broadcastCountry: string;
+  broadcastCountries: string[];
 }): string {
-  return `Managed by the sports worker. Daily ${input.broadcastCountry} TV listings refresh automatically at ${input.publishTime} (${input.timezone}).`;
+  const countriesLabel = formatBroadcastCountriesLabel(input.broadcastCountries);
+
+  return `Managed by the sports worker. Daily TV listings for tracked broadcasters in ${countriesLabel} refresh automatically at ${input.publishTime} (${input.timezone}).`;
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -146,7 +150,7 @@ async function ensureManagedTextChannel(input: {
   const desiredTopic = buildManagedChannelTopic({
     timezone: input.config.timezone,
     publishTime: input.config.localTimeHhMm,
-    broadcastCountry: input.config.broadcastCountry,
+    broadcastCountries: input.config.broadcastCountries,
   });
 
   if (input.binding?.channelId) {
@@ -245,17 +249,29 @@ async function getTodayListingsBySport(config: SportsGuildConfigSummary): Promis
     year: 'numeric',
   }).format(new Date(`${localDate}T12:00:00Z`));
 
-  const listingsResult = await sportsDataService.listDailyListingsForLocalDate({
+  const listingsResult = await sportsDataService.listDailyListingsForLocalDateAcrossCountries({
     localDate,
     timezone: config.timezone,
-    broadcastCountry: config.broadcastCountry,
+    broadcastCountries: config.broadcastCountries,
   });
   if (listingsResult.isErr()) {
     throw listingsResult.error;
   }
 
+  if (listingsResult.value.degraded) {
+    logger.warn(
+      {
+        localDate,
+        timezone: config.timezone,
+        successfulCountries: listingsResult.value.successfulCountries,
+        failedCountries: listingsResult.value.failedCountries,
+      },
+      'sports daily multi-country listings degraded',
+    );
+  }
+
   const listingsBySport = new Map(
-    listingsResult.value
+    listingsResult.value.data
       .filter((entry) => entry.listings.length > 0)
       .map((entry) => [entry.sportName, entry.listings]),
   );
@@ -271,6 +287,7 @@ export async function syncSportsGuildChannels(input: {
   guild: Guild;
   actorDiscordUserId: string;
   categoryName: string | null;
+  broadcastCountries?: string[] | null;
   broadcastCountry?: string | null;
   liveCategoryName?: string | null;
 }): Promise<{
@@ -301,10 +318,11 @@ export async function syncSportsGuildChannels(input: {
     liveCategoryChannelId: liveCategory?.id ?? null,
     localTimeHhMm: existingConfigResult.value?.localTimeHhMm ?? env.SPORTS_DEFAULT_PUBLISH_TIME,
     timezone: existingConfigResult.value?.timezone ?? env.SPORTS_DEFAULT_TIMEZONE,
-    broadcastCountry:
-      input.broadcastCountry?.trim() ||
-      existingConfigResult.value?.broadcastCountry ||
-      env.SPORTS_BROADCAST_COUNTRY,
+    broadcastCountries:
+      input.broadcastCountries?.map((country) => country.trim()).filter((country) => country.length > 0) ??
+      (input.broadcastCountry?.trim() ? [input.broadcastCountry.trim()] : null) ??
+      existingConfigResult.value?.broadcastCountries ??
+      DEFAULT_SHARED_BROADCAST_COUNTRIES,
     actorDiscordUserId: input.actorDiscordUserId,
   });
   if (configResult.isErr()) {
@@ -444,7 +462,7 @@ export async function publishSportsForGuild(input: {
       content: buildSportHeaderMessage({
         sportName: binding.sportName,
         dateLabel,
-        broadcastCountry: config.broadcastCountry,
+        broadcastCountries: config.broadcastCountries,
         listingsCount: listings.length,
       }),
     });

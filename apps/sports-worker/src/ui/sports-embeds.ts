@@ -31,16 +31,37 @@ function buildTimezoneFooter(timezone: string): string {
   return `Times shown in the configured server timezone (${timezone}).`;
 }
 
+export function formatBroadcastCountriesLabel(broadcastCountries: readonly string[]): string {
+  const normalizedCountries = broadcastCountries
+    .map((country) => country.trim())
+    .filter((country) => country.length > 0);
+
+  if (normalizedCountries.length === 0) {
+    return 'the configured broadcasters';
+  }
+
+  if (normalizedCountries.length === 1) {
+    return normalizedCountries[0]!;
+  }
+
+  return new Intl.ListFormat('en', {
+    style: 'long',
+    type: 'conjunction',
+  }).format(normalizedCountries);
+}
+
 export function buildSportHeaderMessage(input: {
   sportName: string;
   dateLabel: string;
-  broadcastCountry: string;
+  broadcastCountries: string[];
   listingsCount: number;
 }): string {
+  const countriesLabel = formatBroadcastCountriesLabel(input.broadcastCountries);
+
   return [
     `**${input.sportName}**`,
-    `${input.broadcastCountry} TV listings for ${input.dateLabel}.`,
-    `Tracked broadcaster country: ${input.broadcastCountry}.`,
+    `TV listings for ${input.dateLabel} from tracked broadcasters in ${countriesLabel}.`,
+    `Tracked broadcaster countries: ${countriesLabel}.`,
     `Events today: ${input.listingsCount}.`,
   ].join('\n');
 }
