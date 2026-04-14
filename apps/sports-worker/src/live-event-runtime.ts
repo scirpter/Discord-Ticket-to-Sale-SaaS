@@ -495,6 +495,9 @@ async function ensureSportChannelForLiveEvent(input: {
   bindingsBySport: Map<string, SportsChannelBindingSummary>;
   usedNames: Set<string>;
   sportName: string;
+  topicBroadcastCountries?: string[];
+  topicDegraded?: boolean;
+  topicFailedCountries?: string[];
 }): Promise<TextChannel | null> {
   const existingBinding = input.bindingsBySport.get(input.sportName) ?? null;
   if (existingBinding) {
@@ -516,7 +519,11 @@ async function ensureSportChannelForLiveEvent(input: {
       topic: buildManagedChannelTopic({
         timezone: input.config.timezone,
         publishTime: input.config.localTimeHhMm,
-        broadcastCountries: normalizeBroadcastCountries(input.config.broadcastCountries),
+        broadcastCountries:
+          input.topicBroadcastCountries ??
+          normalizeBroadcastCountries(input.config.broadcastCountries),
+        degraded: input.topicDegraded,
+        failedCountries: input.topicFailedCountries,
       }),
       reason: `Create the managed ${input.sportName} sport channel for live event publishing.`,
     }),
@@ -972,6 +979,9 @@ export async function reconcileLiveEventsForGuild(input: {
   let createdChannelCount = 0;
   let updatedChannelCount = 0;
   let markedFinishedCount = 0;
+  const sportChannelTopicBroadcastCountries = liveEventsResult.value.degraded
+    ? liveEventsResult.value.successfulCountries
+    : normalizeBroadcastCountries(config.broadcastCountries);
 
   for (const event of televisedLiveEvents) {
     const sportName = event.sportName ?? DEFAULT_CATEGORY_NAME;
@@ -988,6 +998,9 @@ export async function reconcileLiveEventsForGuild(input: {
       bindingsBySport,
       usedNames,
       sportName,
+      topicBroadcastCountries: sportChannelTopicBroadcastCountries,
+      topicDegraded: liveEventsResult.value.degraded,
+      topicFailedCountries: liveEventsResult.value.failedCountries,
     });
     if (!sportChannel) {
       continue;
