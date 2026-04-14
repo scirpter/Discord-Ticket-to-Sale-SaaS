@@ -295,6 +295,7 @@ export type SportsLiveEvent = {
   leagueName: string | null;
   statusLabel: string;
   scoreLabel: string | null;
+  startTimeUtc: string | null;
   startTimeUkLabel: string | null;
   imageUrl: string | null;
   broadcasters: SportsBroadcast[];
@@ -704,8 +705,8 @@ function sortSportsBroadcasts(left: SportsBroadcast, right: SportsBroadcast): nu
   return (left.channelId ?? '').localeCompare(right.channelId ?? '', UK_LOCALE);
 }
 
-function buildSportsBroadcastKey(broadcaster: SportsBroadcast): string {
-  return broadcaster.channelId ?? broadcaster.channelName.toLowerCase();
+function normalizeBroadcastName(value: string): string {
+  return normalizeForSearch(value);
 }
 
 function mergeSportsBroadcast(
@@ -721,17 +722,28 @@ function mergeSportsBroadcast(
 }
 
 function mergeSportsBroadcasts(broadcasters: readonly SportsBroadcast[]): SportsBroadcast[] {
-  const merged = new Map<string, SportsBroadcast>();
+  const merged: SportsBroadcast[] = [];
   for (const broadcaster of broadcasters) {
-    const key = buildSportsBroadcastKey(broadcaster);
-    const existing = merged.get(key);
-    merged.set(
-      key,
-      existing ? mergeSportsBroadcast(existing, broadcaster) : { ...broadcaster },
+    const existingIndex = merged.findIndex(
+      (item) =>
+        (item.channelId !== null &&
+          broadcaster.channelId !== null &&
+          item.channelId === broadcaster.channelId) ||
+        normalizeBroadcastName(item.channelName) === normalizeBroadcastName(broadcaster.channelName),
     );
+
+    if (existingIndex >= 0) {
+      const existing = merged[existingIndex];
+      if (existing) {
+        merged[existingIndex] = mergeSportsBroadcast(existing, broadcaster);
+      }
+      continue;
+    }
+
+    merged.push({ ...broadcaster });
   }
 
-  return [...merged.values()].sort(sortSportsBroadcasts);
+  return merged.sort(sortSportsBroadcasts);
 }
 
 function buildSportsListingKey(listing: Pick<SportsListing, 'eventId' | 'sportName'>): string {
@@ -749,18 +761,19 @@ function buildSportsListingFallbackKey(
 }
 
 function buildSportsLiveEventFallbackKey(
-  event: Pick<SportsLiveEvent, 'sportName' | 'eventName' | 'startTimeUkLabel'>,
+  event: Pick<SportsLiveEvent, 'sportName' | 'eventName' | 'leagueName' | 'startTimeUtc'>,
 ): string | null {
   const sportName = firstNonEmpty(event.sportName);
-  const startTime = firstNonEmpty(event.startTimeUkLabel);
-  if (!sportName || !startTime) {
+  const startTimeUtc = firstNonEmpty(event.startTimeUtc);
+  if (!sportName || !startTimeUtc) {
     return null;
   }
 
   return [
     normalizeForSearch(sportName),
     normalizeForSearch(event.eventName),
-    startTime,
+    normalizeForSearch(firstNonEmpty(event.leagueName) ?? ''),
+    startTimeUtc,
   ].join('|');
 }
 
@@ -873,6 +886,7 @@ function mergeSportsLiveEvent(
     leagueName: firstNonEmpty(primary.leagueName, secondary.leagueName),
     statusLabel: firstNonEmpty(primary.statusLabel, secondary.statusLabel) ?? primary.statusLabel,
     scoreLabel: firstNonEmpty(primary.scoreLabel, secondary.scoreLabel),
+    startTimeUtc: firstNonEmpty(primary.startTimeUtc, secondary.startTimeUtc),
     startTimeUkLabel: firstNonEmpty(primary.startTimeUkLabel, secondary.startTimeUkLabel),
     imageUrl: firstNonEmpty(primary.imageUrl, secondary.imageUrl),
     broadcasters: mergeSportsBroadcasts([...primary.broadcasters, ...secondary.broadcasters]),
@@ -1112,16 +1126,30 @@ export class SportsDataService {
   }): Promise<Result<T, AppError>> {
     const broadcastCountries = normalizeBroadcastCountries(input.broadcastCountries);
     const successful: T[] = [];
+    const successfulCountries: string[] = [];
+    const failedCountries: string[] = [];
+    const failureDetails: Array<{
+      broadcastCountry: string;
+      errorCode: string;
+      errorMessage: string;
+    }> = [];
     let firstError: AppError | null = null;
 
     for (const broadcastCountry of broadcastCountries) {
       const result = await input.fetchCountry(broadcastCountry);
       if (result.isOk()) {
         successful.push(result.value);
+        successfulCountries.push(broadcastCountry);
         continue;
       }
 
       firstError ??= result.error;
+      failedCountries.push(broadcastCountry);
+      failureDetails.push({
+        broadcastCountry,
+        errorCode: result.error.code,
+        errorMessage: result.error.message,
+      });
     }
 
     if (successful.length === 0) {
@@ -1132,6 +1160,17 @@ export class SportsDataService {
             'Sports data could not be loaded from TheSportsDB. Check the API key and try again.',
             502,
           ),
+      );
+    }
+
+    if (failedCountries.length > 0) {
+      logger.warn(
+        {
+          successfulCountries,
+          failedCountries,
+          failures: failureDetails,
+        },
+        'sports multi-country aggregation partially failed',
       );
     }
 
@@ -1640,6 +1679,7 @@ export class SportsDataService {
               awayScore: event.intAwayScore,
               score: event.intScore,
             }),
+            startTimeUtc: eventDateTime ? eventDateTime.toISOString() : null,
             startTimeUkLabel: eventDateTime ? formatUkTime(eventDateTime, input.timezone) : null,
             imageUrl: firstNonEmpty(event.strThumb, event.strPoster),
             broadcasters,
