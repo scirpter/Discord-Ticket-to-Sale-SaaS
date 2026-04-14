@@ -162,6 +162,139 @@ describe('sports runtime country handling', () => {
     });
   });
 
+  it('uses degraded successful-country topic copy during sync', async () => {
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'upsertGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['upsertGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: null,
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'upsertChannelBinding').mockImplementation(async (input) =>
+      createOkResult({
+        bindingId: 'binding-1',
+        guildId: input.guildId,
+        sportId: input.sportId,
+        sportName: input.sportName,
+        sportSlug: input.sportSlug,
+        channelId: input.channelId,
+      }) as Awaited<ReturnType<SportsService['upsertChannelBinding']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDateAcrossCountries').mockResolvedValue(
+      createOkResult({
+        data: [
+          {
+            sportName: 'Soccer',
+            listings: [
+              {
+                eventId: 'event-1',
+                sportName: 'Soccer',
+                eventName: 'Rangers vs Celtic',
+                season: '2025-2026',
+                eventCountry: 'Scotland',
+                startTimeUtc: '2026-03-20T15:00:00.000Z',
+                startTimeUkLabel: '15:00',
+                imageUrl: null,
+                broadcasters: [
+                  {
+                    channelId: 'uk-1',
+                    channelName: 'Sky Sports Main Event',
+                    country: 'United Kingdom',
+                    logoUrl: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        degraded: true,
+        failedCountries: ['United States'],
+        successfulCountries: ['United Kingdom'],
+      }) as unknown as Awaited<
+        ReturnType<SportsDataService['listDailyListingsForLocalDateAcrossCountries']>
+      >,
+    );
+
+    const category = createCategoryChannel('category-1', 'Sports Listings');
+    const soccerChannel = createManagedTextChannel('sport-1', 'soccer', 'old topic');
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        fetch: vi.fn(async (channelId?: string) => {
+          if (channelId === 'category-1') {
+            return category;
+          }
+          if (channelId === 'sport-1') {
+            return soccerChannel;
+          }
+
+          return new Map<string, unknown>([
+            ['category-1', category],
+            ['sport-1', soccerChannel],
+          ]);
+        }),
+        create: vi.fn(async () => category),
+      },
+    };
+
+    const result = await syncSportsGuildChannels({
+      guild: guild as never,
+      actorDiscordUserId: 'user-1',
+      categoryName: null,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        channelCount: 1,
+        createdChannelCount: 0,
+        updatedChannelCount: 1,
+      }),
+    );
+    expect(soccerChannel.edit).toHaveBeenCalledWith({
+      name: 'soccer',
+      parent: 'category-1',
+      topic:
+        'Managed by the sports worker. Daily TV listings currently reflect tracked broadcasters in United Kingdom. Coverage is degraded because data is unavailable for United States. Refreshes automatically at 00:01 (Europe/London).',
+    });
+  });
+
   it('publishes shared-country header and topic copy from the multi-country daily listings payload', async () => {
     vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
       createOkResult({

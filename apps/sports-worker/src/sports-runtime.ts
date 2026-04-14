@@ -367,7 +367,8 @@ export async function syncSportsGuildChannels(input: {
     throw bindingsResult.error;
   }
 
-  const { listingsBySport } = await getTodayListingsBySport(configResult.value);
+  const { listingsBySport, degraded, successfulCountries, failedCountries } =
+    await getTodayListingsBySport(configResult.value);
   const bindingsBySport = new Map(bindingsResult.value.map((binding) => [binding.sportName, binding]));
   const fetchedChannels = await input.guild.channels.fetch();
   const usedNames = new Set(
@@ -392,6 +393,9 @@ export async function syncSportsGuildChannels(input: {
       },
       config: configResult.value,
       usedNames,
+      topicBroadcastCountries: successfulCountries,
+      topicDegraded: degraded,
+      topicFailedCountries: failedCountries,
     });
 
     const bindingResult = await sportsService.upsertChannelBinding({
