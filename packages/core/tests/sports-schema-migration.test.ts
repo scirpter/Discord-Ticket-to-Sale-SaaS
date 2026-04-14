@@ -30,7 +30,9 @@ describe('sports schema migration', () => {
 
     expect(migration).toContain('sports_guild_configs');
     expect(migration).toContain('broadcast_countries');
+    expect(migration).toContain("ADD COLUMN `broadcast_countries` json DEFAULT ('[]')");
     expect(migration).toContain('JSON_ARRAY(`broadcast_country`)');
+    expect(migration).toContain("MODIFY COLUMN `broadcast_countries` json DEFAULT ('[]') NOT NULL");
     expect(migration).toContain('sports_live_event_channels');
     expect(migration).toContain('score_message_id');
   });

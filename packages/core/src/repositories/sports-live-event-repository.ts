@@ -235,7 +235,9 @@ export class SportsLiveEventRepository {
           eventName: input.eventName,
           sportChannelId: input.sportChannelId,
           eventChannelId: input.eventChannelId,
-          scoreMessageId: input.scoreMessageId ?? null,
+          ...(input.scoreMessageId !== undefined
+            ? { scoreMessageId: input.scoreMessageId }
+            : {}),
           status: input.status,
           kickoffAtUtc: input.kickoffAtUtc,
           lastScoreSnapshot: input.lastScoreSnapshot,
