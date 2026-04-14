@@ -301,6 +301,13 @@ export type SportsLiveEvent = {
   broadcasters: SportsBroadcast[];
 };
 
+export type SportsMultiCountryAggregation<T> = {
+  data: T;
+  degraded: boolean;
+  failedCountries: string[];
+  successfulCountries: string[];
+};
+
 export type SportsEventHighlight = {
   eventId: string;
   eventName: string | null;
@@ -1123,7 +1130,7 @@ export class SportsDataService {
     broadcastCountries: readonly string[];
     fetchCountry: (broadcastCountry: string) => Promise<Result<T, AppError>>;
     merge: (values: readonly T[]) => T;
-  }): Promise<Result<T, AppError>> {
+  }): Promise<Result<SportsMultiCountryAggregation<T>, AppError>> {
     const broadcastCountries = normalizeBroadcastCountries(input.broadcastCountries);
     const successful: T[] = [];
     const successfulCountries: string[] = [];
@@ -1174,7 +1181,12 @@ export class SportsDataService {
       );
     }
 
-    return ok(input.merge(successful));
+    return ok({
+      data: input.merge(successful),
+      degraded: failedCountries.length > 0,
+      failedCountries,
+      successfulCountries,
+    });
   }
 
   private async lookupTeam(query: string): Promise<SportsApiV2TeamSearch | null> {
@@ -1468,7 +1480,7 @@ export class SportsDataService {
     localDate: string;
     timezone: string;
     broadcastCountries: string[];
-  }): Promise<Result<SportsListingsBySport[], AppError>> {
+  }): Promise<Result<SportsMultiCountryAggregation<SportsListingsBySport[]>, AppError>> {
     return this.collectCountryResults({
       broadcastCountries: input.broadcastCountries,
       fetchCountry: async (broadcastCountry) =>
@@ -1700,7 +1712,7 @@ export class SportsDataService {
   public async listLiveEventsAcrossCountries(input: {
     timezone: string;
     broadcastCountries: string[];
-  }): Promise<Result<SportsLiveEvent[], AppError>> {
+  }): Promise<Result<SportsMultiCountryAggregation<SportsLiveEvent[]>, AppError>> {
     return this.collectCountryResults({
       broadcastCountries: input.broadcastCountries,
       fetchCountry: async (broadcastCountry) =>

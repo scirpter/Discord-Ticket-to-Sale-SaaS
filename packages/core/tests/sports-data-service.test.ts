@@ -249,37 +249,42 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        sportName: 'Soccer',
-        listings: [
-          {
-            eventId: 'evt-shared',
-            sportName: 'Soccer',
-            eventName: 'Rangers vs Celtic',
-            season: '2025-2026',
-            eventCountry: 'Scotland',
-            startTimeUtc: '2026-03-20T15:00:00.000Z',
-            startTimeUkLabel: '15:00',
-            imageUrl: 'https://img.test/shared-thumb.jpg',
-            broadcasters: [
-              {
-                channelId: 'us-1',
-                channelName: 'ESPN Deportes',
-                country: 'United States',
-                logoUrl: 'https://img.test/espn-logo.png',
-              },
-              {
-                channelId: 'uk-1',
-                channelName: 'Sky Sports Main Event',
-                country: 'United Kingdom',
-                logoUrl: 'https://img.test/sky-logo.png',
-              },
-            ],
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          sportName: 'Soccer',
+          listings: [
+            {
+              eventId: 'evt-shared',
+              sportName: 'Soccer',
+              eventName: 'Rangers vs Celtic',
+              season: '2025-2026',
+              eventCountry: 'Scotland',
+              startTimeUtc: '2026-03-20T15:00:00.000Z',
+              startTimeUkLabel: '15:00',
+              imageUrl: 'https://img.test/shared-thumb.jpg',
+              broadcasters: [
+                {
+                  channelId: 'us-1',
+                  channelName: 'ESPN Deportes',
+                  country: 'United States',
+                  logoUrl: 'https://img.test/espn-logo.png',
+                },
+                {
+                  channelId: 'uk-1',
+                  channelName: 'Sky Sports Main Event',
+                  country: 'United Kingdom',
+                  logoUrl: 'https://img.test/sky-logo.png',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      degraded: false,
+      failedCountries: [],
+      successfulCountries: ['United Kingdom', 'United States'],
+    });
   });
 
   it('merges daily listings when countries return different event ids for the same kickoff', async () => {
@@ -348,37 +353,42 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        sportName: 'Soccer',
-        listings: [
-          {
-            eventId: 'evt-uk',
-            sportName: 'Soccer',
-            eventName: 'Rangers vs Celtic',
-            season: '2025-2026',
-            eventCountry: 'Scotland',
-            startTimeUtc: '2026-03-20T15:00:00.000Z',
-            startTimeUkLabel: '15:00',
-            imageUrl: 'https://img.test/shared-thumb.jpg',
-            broadcasters: [
-              {
-                channelId: 'us-1',
-                channelName: 'ESPN Deportes',
-                country: 'United States',
-                logoUrl: 'https://img.test/espn-logo.png',
-              },
-              {
-                channelId: 'uk-1',
-                channelName: 'Sky Sports Main Event',
-                country: 'United Kingdom',
-                logoUrl: 'https://img.test/sky-logo.png',
-              },
-            ],
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          sportName: 'Soccer',
+          listings: [
+            {
+              eventId: 'evt-uk',
+              sportName: 'Soccer',
+              eventName: 'Rangers vs Celtic',
+              season: '2025-2026',
+              eventCountry: 'Scotland',
+              startTimeUtc: '2026-03-20T15:00:00.000Z',
+              startTimeUkLabel: '15:00',
+              imageUrl: 'https://img.test/shared-thumb.jpg',
+              broadcasters: [
+                {
+                  channelId: 'us-1',
+                  channelName: 'ESPN Deportes',
+                  country: 'United States',
+                  logoUrl: 'https://img.test/espn-logo.png',
+                },
+                {
+                  channelId: 'uk-1',
+                  channelName: 'Sky Sports Main Event',
+                  country: 'United Kingdom',
+                  logoUrl: 'https://img.test/sky-logo.png',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      degraded: false,
+      failedCountries: [],
+      successfulCountries: ['United Kingdom', 'United States'],
+    });
   });
 
   it('dedupes broadcasters when names match and only one feed provides a channel id', async () => {
@@ -447,31 +457,36 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        sportName: 'Soccer',
-        listings: [
-          {
-            eventId: 'evt-shared',
-            sportName: 'Soccer',
-            eventName: 'Rangers vs Celtic',
-            season: '2025-2026',
-            eventCountry: 'Scotland',
-            startTimeUtc: '2026-03-20T15:00:00.000Z',
-            startTimeUkLabel: '15:00',
-            imageUrl: 'https://img.test/shared-thumb.jpg',
-            broadcasters: [
-              {
-                channelId: 'dazn-1',
-                channelName: 'DAZN 1',
-                country: 'United Kingdom',
-                logoUrl: 'https://img.test/dazn-logo.png',
-              },
-            ],
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          sportName: 'Soccer',
+          listings: [
+            {
+              eventId: 'evt-shared',
+              sportName: 'Soccer',
+              eventName: 'Rangers vs Celtic',
+              season: '2025-2026',
+              eventCountry: 'Scotland',
+              startTimeUtc: '2026-03-20T15:00:00.000Z',
+              startTimeUkLabel: '15:00',
+              imageUrl: 'https://img.test/shared-thumb.jpg',
+              broadcasters: [
+                {
+                  channelId: 'dazn-1',
+                  channelName: 'DAZN 1',
+                  country: 'United Kingdom',
+                  logoUrl: 'https://img.test/dazn-logo.png',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      degraded: false,
+      failedCountries: [],
+      successfulCountries: ['United Kingdom', 'United States'],
+    });
   });
 
   it('reads event broadcasters from tvevent lookup responses', async () => {
@@ -982,33 +997,38 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        eventId: 'evt-1',
-        eventName: 'Rangers vs Celtic',
-        sportName: 'Soccer',
-        leagueName: 'Scottish Premiership',
-        statusLabel: 'Live',
-        scoreLabel: '2-1',
-        startTimeUtc: '2026-03-20T15:00:00.000Z',
-        startTimeUkLabel: '15:00',
-        imageUrl: 'https://img.test/live-event.jpg',
-        broadcasters: [
-          {
-            channelId: 'us-1',
-            channelName: 'ESPN Deportes',
-            country: 'United States',
-            logoUrl: 'https://img.test/espn-logo.png',
-          },
-          {
-            channelId: 'uk-1',
-            channelName: 'Sky Sports Main Event',
-            country: 'United Kingdom',
-            logoUrl: 'https://img.test/sky-logo.png',
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          eventId: 'evt-1',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          statusLabel: 'Live',
+          scoreLabel: '2-1',
+          startTimeUtc: '2026-03-20T15:00:00.000Z',
+          startTimeUkLabel: '15:00',
+          imageUrl: 'https://img.test/live-event.jpg',
+          broadcasters: [
+            {
+              channelId: 'us-1',
+              channelName: 'ESPN Deportes',
+              country: 'United States',
+              logoUrl: 'https://img.test/espn-logo.png',
+            },
+            {
+              channelId: 'uk-1',
+              channelName: 'Sky Sports Main Event',
+              country: 'United Kingdom',
+              logoUrl: 'https://img.test/sky-logo.png',
+            },
+          ],
+        },
+      ],
+      degraded: false,
+      failedCountries: [],
+      successfulCountries: ['United Kingdom', 'United States'],
+    });
   });
 
   it('merges live events when countries return different event ids for the same kickoff', async () => {
@@ -1098,33 +1118,38 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        eventId: 'evt-uk',
-        eventName: 'Rangers vs Celtic',
-        sportName: 'Soccer',
-        leagueName: 'Scottish Premiership',
-        statusLabel: 'Live',
-        scoreLabel: '2-1',
-        startTimeUtc: '2026-03-20T15:00:00.000Z',
-        startTimeUkLabel: '15:00',
-        imageUrl: 'https://img.test/live-event.jpg',
-        broadcasters: [
-          {
-            channelId: 'us-1',
-            channelName: 'ESPN Deportes',
-            country: 'United States',
-            logoUrl: 'https://img.test/espn-logo.png',
-          },
-          {
-            channelId: 'uk-1',
-            channelName: 'Sky Sports Main Event',
-            country: 'United Kingdom',
-            logoUrl: 'https://img.test/sky-logo.png',
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          eventId: 'evt-uk',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          statusLabel: 'Live',
+          scoreLabel: '2-1',
+          startTimeUtc: '2026-03-20T15:00:00.000Z',
+          startTimeUkLabel: '15:00',
+          imageUrl: 'https://img.test/live-event.jpg',
+          broadcasters: [
+            {
+              channelId: 'us-1',
+              channelName: 'ESPN Deportes',
+              country: 'United States',
+              logoUrl: 'https://img.test/espn-logo.png',
+            },
+            {
+              channelId: 'uk-1',
+              channelName: 'Sky Sports Main Event',
+              country: 'United Kingdom',
+              logoUrl: 'https://img.test/sky-logo.png',
+            },
+          ],
+        },
+      ],
+      degraded: false,
+      failedCountries: [],
+      successfulCountries: ['United Kingdom', 'United States'],
+    });
   });
 
   it('does not merge distinct live events that share teams and clock label across countries', async () => {
@@ -1214,46 +1239,51 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        eventId: 'evt-us-2',
-        eventName: 'Rangers v Celtic',
-        sportName: 'Soccer',
-        leagueName: 'Legends Cup',
-        statusLabel: 'Live',
-        scoreLabel: '0-0',
-        startTimeUtc: '2026-03-21T15:00:00.000Z',
-        startTimeUkLabel: '15:00',
-        imageUrl: 'https://img.test/live-event-2.jpg',
-        broadcasters: [
-          {
-            channelId: 'us-2',
-            channelName: 'ESPN',
-            country: 'United States',
-            logoUrl: 'https://img.test/espn-logo.png',
-          },
-        ],
-      },
-      {
-        eventId: 'evt-uk-1',
-        eventName: 'Rangers vs Celtic',
-        sportName: 'Soccer',
-        leagueName: 'Scottish Premiership',
-        statusLabel: 'Live',
-        scoreLabel: '2-1',
-        startTimeUtc: '2026-03-20T15:00:00.000Z',
-        startTimeUkLabel: '15:00',
-        imageUrl: 'https://img.test/live-event-1.jpg',
-        broadcasters: [
-          {
-            channelId: 'uk-1',
-            channelName: 'Sky Sports Main Event',
-            country: 'United Kingdom',
-            logoUrl: 'https://img.test/sky-logo.png',
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          eventId: 'evt-us-2',
+          eventName: 'Rangers v Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Legends Cup',
+          statusLabel: 'Live',
+          scoreLabel: '0-0',
+          startTimeUtc: '2026-03-21T15:00:00.000Z',
+          startTimeUkLabel: '15:00',
+          imageUrl: 'https://img.test/live-event-2.jpg',
+          broadcasters: [
+            {
+              channelId: 'us-2',
+              channelName: 'ESPN',
+              country: 'United States',
+              logoUrl: 'https://img.test/espn-logo.png',
+            },
+          ],
+        },
+        {
+          eventId: 'evt-uk-1',
+          eventName: 'Rangers vs Celtic',
+          sportName: 'Soccer',
+          leagueName: 'Scottish Premiership',
+          statusLabel: 'Live',
+          scoreLabel: '2-1',
+          startTimeUtc: '2026-03-20T15:00:00.000Z',
+          startTimeUkLabel: '15:00',
+          imageUrl: 'https://img.test/live-event-1.jpg',
+          broadcasters: [
+            {
+              channelId: 'uk-1',
+              channelName: 'Sky Sports Main Event',
+              country: 'United Kingdom',
+              logoUrl: 'https://img.test/sky-logo.png',
+            },
+          ],
+        },
+      ],
+      degraded: false,
+      failedCountries: [],
+      successfulCountries: ['United Kingdom', 'United States'],
+    });
   });
 
   it('returns partial daily listing results when one configured country feed fails', async () => {
@@ -1310,31 +1340,36 @@ describe('pickBestSportsSearchResult', () => {
       throw result.error;
     }
 
-    expect(result.value).toEqual([
-      {
-        sportName: 'Soccer',
-        listings: [
-          {
-            eventId: 'evt-us',
-            sportName: 'Soccer',
-            eventName: 'Inter Miami vs LA Galaxy',
-            season: '2026',
-            eventCountry: 'United States',
-            startTimeUtc: '2026-03-20T23:30:00.000Z',
-            startTimeUkLabel: '23:30',
-            imageUrl: 'https://img.test/mls-thumb.jpg',
-            broadcasters: [
-              {
-                channelId: 'us-1',
-                channelName: 'ESPN',
-                country: 'United States',
-                logoUrl: 'https://img.test/espn-logo.png',
-              },
-            ],
-          },
-        ],
-      },
-    ]);
+    expect(result.value).toEqual({
+      data: [
+        {
+          sportName: 'Soccer',
+          listings: [
+            {
+              eventId: 'evt-us',
+              sportName: 'Soccer',
+              eventName: 'Inter Miami vs LA Galaxy',
+              season: '2026',
+              eventCountry: 'United States',
+              startTimeUtc: '2026-03-20T23:30:00.000Z',
+              startTimeUkLabel: '23:30',
+              imageUrl: 'https://img.test/mls-thumb.jpg',
+              broadcasters: [
+                {
+                  channelId: 'us-1',
+                  channelName: 'ESPN',
+                  country: 'United States',
+                  logoUrl: 'https://img.test/espn-logo.png',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      degraded: true,
+      failedCountries: ['United Kingdom'],
+      successfulCountries: ['United States'],
+    });
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
