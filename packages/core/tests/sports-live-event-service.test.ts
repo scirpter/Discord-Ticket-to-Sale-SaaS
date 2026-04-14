@@ -290,7 +290,7 @@ describe('SportsLiveEventService', () => {
     expect(result.value?.id).not.toBe(distractor.id);
   });
 
-  it('preserves an existing score message id when a duplicate upsert omits it', async () => {
+  it('keeps the current score message id when the caller threads it through unchanged', async () => {
     const rows: SportsLiveEventRow[] = [
       makeRow({
         id: '01J0SPORTSLIVE000000000003',
@@ -313,6 +313,7 @@ describe('SportsLiveEventService', () => {
       sportChannelId: 'sport-1',
       kickoffAtUtc: new Date('2026-03-20T12:30:00.000Z'),
       eventChannelId: 'event-channel-1',
+      scoreMessageId: 'msg-score-1',
       status: 'live',
       lastScoreSnapshot: { home: 2, away: 1 },
       lastStateSnapshot: { phase: '2H' },
@@ -328,6 +329,47 @@ describe('SportsLiveEventService', () => {
 
     expect(result.value.scoreMessageId).toBe('msg-score-1');
     expect(rows[0]?.scoreMessageId).toBe('msg-score-1');
+  });
+
+  it('updates the stored score message id when the caller provides a replacement', async () => {
+    const rows: SportsLiveEventRow[] = [
+      makeRow({
+        id: '01J0SPORTSLIVE000000000004',
+        guildId: 'guild-1',
+        eventId: 'evt-1',
+        eventName: 'Rangers vs Celtic',
+        eventChannelId: 'event-channel-1',
+        scoreMessageId: 'msg-score-1',
+        status: 'live',
+      }),
+    ];
+    const mockDb = createStatefulMockDb(rows);
+    const service = new SportsLiveEventService(createRepositoryWithMockDb(mockDb));
+
+    const result = await service.upsertTrackedEvent({
+      guildId: 'guild-1',
+      sportName: 'Soccer',
+      eventId: 'evt-1',
+      eventName: 'Rangers vs Celtic',
+      sportChannelId: 'sport-1',
+      kickoffAtUtc: new Date('2026-03-20T12:30:00.000Z'),
+      eventChannelId: 'event-channel-1',
+      scoreMessageId: 'msg-score-2',
+      status: 'live',
+      lastScoreSnapshot: { home: 3, away: 1 },
+      lastStateSnapshot: { phase: 'FT' },
+      lastSyncedAtUtc: new Date('2026-03-20T13:05:00.000Z'),
+      finishedAtUtc: null,
+      deleteAfterUtc: null,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+
+    expect(result.value.scoreMessageId).toBe('msg-score-2');
+    expect(rows[0]?.scoreMessageId).toBe('msg-score-2');
   });
 
   it('marks finished events for cleanup three hours later', async () => {

@@ -196,7 +196,7 @@ export class SportsLiveEventRepository {
     sportChannelId: string;
     kickoffAtUtc: Date;
     eventChannelId: string | null;
-    scoreMessageId?: string | null;
+    scoreMessageId: string | null;
     status: SportsLiveEventChannelRecord['status'];
     lastScoreSnapshot: Record<string, unknown> | null;
     lastStateSnapshot: Record<string, unknown> | null;
@@ -217,7 +217,7 @@ export class SportsLiveEventRepository {
         eventName: input.eventName,
         sportChannelId: input.sportChannelId,
         eventChannelId: input.eventChannelId,
-        scoreMessageId: input.scoreMessageId ?? null,
+        scoreMessageId: input.scoreMessageId,
         status: input.status,
         kickoffAtUtc: input.kickoffAtUtc,
         lastScoreSnapshot: input.lastScoreSnapshot,
@@ -235,9 +235,7 @@ export class SportsLiveEventRepository {
           eventName: input.eventName,
           sportChannelId: input.sportChannelId,
           eventChannelId: input.eventChannelId,
-          ...(input.scoreMessageId !== undefined
-            ? { scoreMessageId: input.scoreMessageId }
-            : {}),
+          scoreMessageId: input.scoreMessageId,
           status: input.status,
           kickoffAtUtc: input.kickoffAtUtc,
           lastScoreSnapshot: input.lastScoreSnapshot,

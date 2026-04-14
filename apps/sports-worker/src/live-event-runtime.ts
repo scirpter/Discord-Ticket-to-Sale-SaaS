@@ -160,27 +160,16 @@ function findAdoptableLiveEventChannel(input: {
   return null;
 }
 
-async function clearManagedChannel(channel: TextChannel): Promise<void> {
-  while (true) {
-    const messages = await channel.messages.fetch({ limit: 100 });
-    if (messages.size === 0) {
-      return;
-    }
-
-    const bulkDeletable = messages.filter((message) => Date.now() - message.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
-    if (bulkDeletable.size > 0) {
-      await channel.bulkDelete(bulkDeletable, true);
-    }
-
-    const oldMessages = messages.filter((message) => !bulkDeletable.has(message.id));
-    for (const message of oldMessages.values()) {
-      await message.delete().catch(() => null);
-    }
-
-    if (messages.size < 100) {
-      return;
-    }
+function isUnknownMessageError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
   }
+
+  if ('code' in error && error.code === 10_008) {
+    return true;
+  }
+
+  return 'status' in error && error.status === 404;
 }
 
 async function getManagedGuildContext(guildId: string): Promise<{
@@ -269,16 +258,50 @@ async function ensureSportChannelForLiveEvent(input: {
 async function renderActiveLiveEventChannel(input: {
   channel: TextChannel;
   event: SportsLiveEvent;
-}): Promise<void> {
-  await LIVE_EVENT_QUEUE.add(async () => {
-    await clearManagedChannel(input.channel);
-    await input.channel.send({
-      content: buildLiveEventHeaderMessage(input.event),
-    });
-    await input.channel.send({
+  scoreMessageId: string | null;
+  shouldSendHeader: boolean;
+  allowNoopEdit?: boolean;
+}): Promise<{ scoreMessageId: string }> {
+  const renderResult = await LIVE_EVENT_QUEUE.add(async (): Promise<{ scoreMessageId: string }> => {
+    if (input.scoreMessageId) {
+      try {
+        const existingMessage = await input.channel.messages.fetch(input.scoreMessageId);
+        if (input.allowNoopEdit !== true) {
+          await existingMessage.edit({
+            embeds: [buildLiveEventEmbed(input.event)],
+          });
+        }
+
+        return {
+          scoreMessageId: existingMessage.id,
+        };
+      } catch (error) {
+        if (!isUnknownMessageError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    if (input.shouldSendHeader) {
+      await input.channel.send({
+        content: buildLiveEventHeaderMessage(input.event),
+      });
+    }
+
+    const scoreMessage = await input.channel.send({
       embeds: [buildLiveEventEmbed(input.event)],
     });
+
+    return {
+      scoreMessageId: scoreMessage.id,
+    };
   });
+
+  if (!renderResult) {
+    throw new Error('Failed to render the managed live event score message.');
+  }
+
+  return renderResult;
 }
 
 async function renderFinishedLiveEventChannel(input: {
@@ -595,9 +618,13 @@ export async function reconcileLiveEventsForGuild(input: {
   }
   const liveCategory = await fetchManagedCategory(input.guild, config.liveCategoryChannelId ?? null);
 
-  const liveEventsResult = await sportsDataService.listLiveEvents({
+  const broadcastCountries =
+    config.broadcastCountries && config.broadcastCountries.length > 0
+      ? config.broadcastCountries
+      : [input.broadcastCountry];
+  const liveEventsResult = await sportsDataService.listLiveEventsAcrossCountries({
     timezone: input.timezone,
-    broadcastCountry: input.broadcastCountry,
+    broadcastCountries,
   });
   if (liveEventsResult.isErr()) {
     throw liveEventsResult.error;
@@ -609,9 +636,19 @@ export async function reconcileLiveEventsForGuild(input: {
     throw trackedEventsResult.error;
   }
 
-  const televisedLiveEvents = liveEventsResult.value.filter(
+  const televisedLiveEvents = liveEventsResult.value.data.filter(
     (event) => event.broadcasters.length > 0 && typeof event.sportName === 'string' && event.sportName.trim().length > 0,
   );
+  if (liveEventsResult.value.degraded) {
+    logger.warn(
+      {
+        guildId: input.guild.id,
+        failedCountries: liveEventsResult.value.failedCountries,
+        successfulCountries: liveEventsResult.value.successfulCountries,
+      },
+      'live event runtime is reconciling with degraded multi-country results',
+    );
+  }
   const trackedEventsByEventId = new Map(
     trackedEventsResult.value.map((trackedEvent) => [trackedEvent.eventId, trackedEvent]),
   );
@@ -681,6 +718,13 @@ export async function reconcileLiveEventsForGuild(input: {
       areSnapshotsEqual(trackedEvent.lastStateSnapshot, desiredSnapshots.stateSnapshot);
 
     if (existingChannel && isPlacementUnchanged && isTrackedStateUnchanged) {
+      const renderResult = await renderActiveLiveEventChannel({
+        channel: existingChannel,
+        event,
+        scoreMessageId: trackedEvent?.scoreMessageId ?? null,
+        shouldSendHeader: false,
+        allowNoopEdit: true,
+      });
       const heartbeatResult = await sportsLiveEventService.upsertTrackedEvent({
         guildId: input.guild.id,
         sportName,
@@ -689,6 +733,7 @@ export async function reconcileLiveEventsForGuild(input: {
         sportChannelId: sportChannel.id,
         kickoffAtUtc: trackedEvent?.kickoffAtUtc ?? now,
         eventChannelId: existingChannel.id,
+        scoreMessageId: renderResult.scoreMessageId,
         status: 'live',
         lastScoreSnapshot: desiredSnapshots.scoreSnapshot,
         lastStateSnapshot: desiredSnapshots.stateSnapshot,
@@ -704,7 +749,8 @@ export async function reconcileLiveEventsForGuild(input: {
     }
 
     let targetChannel: TextChannel;
-    if (existingChannel) {
+    let shouldSendHeader = false;
+    if (existingChannel && !isPlacementUnchanged) {
       const reservedName = reserveUniqueChannelName({
         base: desiredName,
         usedNames,
@@ -726,9 +772,12 @@ export async function reconcileLiveEventsForGuild(input: {
       );
       updatedChannelCount += 1;
       targetChannel = existingChannel;
+    } else if (existingChannel) {
+      targetChannel = existingChannel;
     } else if (adoptedChannel) {
       trackedEventChannelIds.add(adoptedChannel.id);
       targetChannel = adoptedChannel;
+      shouldSendHeader = true;
     } else {
       const reservedName = reserveUniqueChannelName({
         base: desiredName,
@@ -745,11 +794,14 @@ export async function reconcileLiveEventsForGuild(input: {
       )) as TextChannel;
       trackedEventChannelIds.add(targetChannel.id);
       createdChannelCount += 1;
+      shouldSendHeader = true;
     }
 
-    await renderActiveLiveEventChannel({
+    const renderResult = await renderActiveLiveEventChannel({
       channel: targetChannel,
       event,
+      scoreMessageId: trackedEvent?.scoreMessageId ?? null,
+      shouldSendHeader,
     });
 
     const persistedTrackedEvent = await sportsLiveEventService.upsertTrackedEvent({
@@ -760,6 +812,7 @@ export async function reconcileLiveEventsForGuild(input: {
       sportChannelId: sportChannel.id,
       kickoffAtUtc: trackedEvent?.kickoffAtUtc ?? now,
       eventChannelId: targetChannel.id,
+      scoreMessageId: renderResult.scoreMessageId,
       status: 'live',
       lastScoreSnapshot: desiredSnapshots.scoreSnapshot,
       lastStateSnapshot: desiredSnapshots.stateSnapshot,
@@ -774,48 +827,50 @@ export async function reconcileLiveEventsForGuild(input: {
   }
 
   const liveEventIds = new Set(televisedLiveEvents.map((event) => event.eventId));
-  for (const trackedEvent of trackedEventsResult.value) {
-    if (
-      liveEventIds.has(trackedEvent.eventId) ||
-      trackedEvent.status === 'cleanup_due' ||
-      trackedEvent.status === 'deleted' ||
-      trackedEvent.status === 'failed'
-    ) {
-      continue;
-    }
+  if (!liveEventsResult.value.degraded) {
+    for (const trackedEvent of trackedEventsResult.value) {
+      if (
+        liveEventIds.has(trackedEvent.eventId) ||
+        trackedEvent.status === 'cleanup_due' ||
+        trackedEvent.status === 'deleted' ||
+        trackedEvent.status === 'failed'
+      ) {
+        continue;
+      }
 
-    const finishedResult = await sportsLiveEventService.markFinished({
-      guildId: input.guild.id,
-      eventId: trackedEvent.eventId,
-      finishedAtUtc: now,
-    });
-    if (finishedResult.isErr()) {
-      logger.warn(
-        { guildId: input.guild.id, eventId: trackedEvent.eventId, err: finishedResult.error },
-        'live event runtime could not mark the tracked event as finished',
-      );
-      continue;
-    }
-    const eventChannel = await fetchTrackedEventChannel(input.guild, trackedEvent.eventChannelId);
-    const deleteAfterUtc =
-      finishedResult.value.deleteAfterUtc?.toISOString() ??
-      new Date(now.getTime() + LIVE_EVENT_CLEANUP_WINDOW_MS).toISOString();
-
-    if (eventChannel) {
-      await renderFinishedLiveEventChannel({
-        channel: eventChannel,
-        eventName: trackedEvent.eventName,
-        sportName: trackedEvent.sportName,
-        deleteAfterUtc,
-      });
-      await postLiveEventHighlightsIfAvailable({
+      const finishedResult = await sportsLiveEventService.markFinished({
         guildId: input.guild.id,
-        trackedEvent: finishedResult.value,
-        channel: eventChannel,
-        now,
+        eventId: trackedEvent.eventId,
+        finishedAtUtc: now,
       });
+      if (finishedResult.isErr()) {
+        logger.warn(
+          { guildId: input.guild.id, eventId: trackedEvent.eventId, err: finishedResult.error },
+          'live event runtime could not mark the tracked event as finished',
+        );
+        continue;
+      }
+      const eventChannel = await fetchTrackedEventChannel(input.guild, trackedEvent.eventChannelId);
+      const deleteAfterUtc =
+        finishedResult.value.deleteAfterUtc?.toISOString() ??
+        new Date(now.getTime() + LIVE_EVENT_CLEANUP_WINDOW_MS).toISOString();
+
+      if (eventChannel) {
+        await renderFinishedLiveEventChannel({
+          channel: eventChannel,
+          eventName: trackedEvent.eventName,
+          sportName: trackedEvent.sportName,
+          deleteAfterUtc,
+        });
+        await postLiveEventHighlightsIfAvailable({
+          guildId: input.guild.id,
+          trackedEvent: finishedResult.value,
+          channel: eventChannel,
+          now,
+        });
+      }
+      markedFinishedCount += 1;
     }
-    markedFinishedCount += 1;
   }
 
   for (const trackedEvent of trackedEventsResult.value) {

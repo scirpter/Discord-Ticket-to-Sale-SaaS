@@ -21,6 +21,27 @@ vi.mock('@voodoo/core', () => {
       throw new Error('Mock listLiveEvents not implemented');
     }
 
+    public async listLiveEventsAcrossCountries(): Promise<never> {
+      const result: any = await this.listLiveEvents();
+      if (typeof result === 'object' && result !== null && 'isErr' in result && typeof result.isErr === 'function') {
+        if (result.isErr()) {
+          return result as never;
+        }
+
+        return {
+          ...result,
+          value: {
+            data: result.value,
+            degraded: false,
+            failedCountries: [],
+            successfulCountries: ['United Kingdom'],
+          },
+        } as never;
+      }
+
+      return result as never;
+    }
+
     public async getEventHighlights(): Promise<never> {
       throw new Error('Mock getEventHighlights not implemented');
     }
@@ -118,6 +139,7 @@ type MockTrackedEvent = {
   eventName: string;
   sportChannelId: string;
   eventChannelId: string | null;
+  scoreMessageId: string | null;
   status: 'scheduled' | 'live' | 'finished' | 'cleanup_due' | 'deleted' | 'failed';
   kickoffAtUtc: Date;
   lastScoreSnapshot: Record<string, unknown> | null;
@@ -160,6 +182,17 @@ function createTextChannel(input: {
   parentId: string | null;
   topic?: string | null;
 }): TextChannel {
+  const storedMessages = new Map<string, { id: string; createdTimestamp: number; edit: Mock; delete: Mock }>();
+  let sentMessageCount = 0;
+  const fetchMessages = vi.fn(async (messageIdOrOptions?: string | { limit: number }) => {
+    if (typeof messageIdOrOptions === 'string') {
+      return storedMessages.get(messageIdOrOptions) ?? null;
+    }
+
+    return new Collection(
+      [...storedMessages.values()].map((message) => [message.id, message] as const),
+    );
+  });
   const channel = {
     id: input.id,
     name: input.name,
@@ -179,11 +212,24 @@ function createTextChannel(input: {
       }
       return channel;
     }),
-    send: vi.fn(async () => undefined),
+    send: vi.fn(async () => {
+      sentMessageCount += 1;
+      const message = {
+        id: `${input.id}-message-${sentMessageCount}`,
+        createdTimestamp: Date.now(),
+        edit: vi.fn(async () => undefined),
+        delete: vi.fn(async () => {
+          storedMessages.delete(message.id);
+        }),
+      };
+      storedMessages.set(message.id, message);
+      return message;
+    }),
     bulkDelete: vi.fn(async () => undefined),
     messages: {
-      fetch: vi.fn(async () => new Collection()),
+      fetch: fetchMessages,
     },
+    __storedMessages: storedMessages,
   };
 
   return channel as unknown as TextChannel;
@@ -285,6 +331,7 @@ function makeLiveEvent(overrides: Partial<SportsLiveEvent> = {}): SportsLiveEven
     leagueName: 'Scottish Premiership',
     statusLabel: 'Live',
     scoreLabel: '2-1',
+    startTimeUtc: '2026-03-20T15:00:00.000Z',
     startTimeUkLabel: '15:00',
     imageUrl: 'https://img.test/live-event.jpg',
     broadcasters: [
@@ -308,6 +355,7 @@ function makeTrackedEvent(overrides: Partial<MockTrackedEvent> = {}): MockTracke
     eventName: 'Rangers vs Celtic',
     sportChannelId: 'sport-1',
     eventChannelId: 'live-1',
+    scoreMessageId: null,
     status: 'live' as const,
     kickoffAtUtc: new Date('2026-03-20T15:00:00.000Z'),
     lastScoreSnapshot: null,
@@ -667,6 +715,219 @@ describe('live event runtime', () => {
     expect(existingLiveChannel.edit).toHaveBeenCalled();
   });
 
+  it('de-duplicates the same live event when the merged UK and USA feeds both contain it', async () => {
+    const { guild, create, liveCategory } = createGuildFixture();
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: liveCategory.id,
+        localTimeHhMm: '01:00',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T01:00:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: 'soccer',
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    const listLiveEventsAcrossCountries = vi
+      .spyOn(SportsDataService.prototype, 'listLiveEventsAcrossCountries')
+      .mockResolvedValue(
+        createOkResult({
+          data: [
+            makeLiveEvent({
+              broadcasters: [
+                {
+                  channelId: 'uk-1',
+                  channelName: 'Sky Sports Main Event',
+                  country: 'United Kingdom',
+                  logoUrl: null,
+                },
+                {
+                  channelId: 'us-1',
+                  channelName: 'ESPN',
+                  country: 'United States',
+                  logoUrl: null,
+                },
+              ],
+            }),
+          ],
+          degraded: false,
+          failedCountries: [],
+          successfulCountries: ['United Kingdom', 'United States'],
+        }) as unknown as Awaited<ReturnType<SportsDataService['listLiveEventsAcrossCountries']>>,
+      );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([]) as unknown as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            eventChannelId: 'live-1',
+            status: 'live',
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
+
+    const result = await reconcileLiveEventsForGuild({
+      guild,
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      now: new Date('2026-03-20T15:07:00.000Z'),
+    });
+
+    expect(result.createdChannelCount).toBe(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(listLiveEventsAcrossCountries).toHaveBeenCalledWith({
+      timezone: 'Europe/London',
+      broadcastCountries: ['United Kingdom', 'United States'],
+    });
+    expect(upsertTrackedEvent).toHaveBeenCalledTimes(1);
+    expect(upsertTrackedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+        eventChannelId: 'live-1',
+      }),
+    );
+  });
+
+  it('edits the persisted score message instead of clearing and reposting the live channel', async () => {
+    const { guild, channels, create } = createGuildFixture();
+    const existingLiveChannel = createTextChannel({
+      id: 'live-1',
+      name: 'live-rangers-vs-celtic',
+      parentId: 'live-category-1',
+      topic: 'Managed by the sports worker for live event evt-1.',
+    });
+    const persistedScoreMessage = {
+      id: 'msg-score-1',
+      createdTimestamp: Date.now(),
+      edit: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+    (
+      existingLiveChannel as unknown as {
+        __storedMessages: Map<
+          string,
+          { id: string; createdTimestamp: number; edit: Mock; delete: Mock }
+        >;
+      }
+    ).__storedMessages.set(persistedScoreMessage.id, persistedScoreMessage);
+    channels.set(existingLiveChannel.id, existingLiveChannel);
+
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: 'live-category-1',
+        localTimeHhMm: '01:00',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T01:00:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: 'soccer',
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+          createdAt: new Date('2026-03-20T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-20T12:00:00.000Z'),
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listLiveEventsAcrossCountries').mockResolvedValue(
+      createOkResult({
+        data: [
+          makeLiveEvent({
+            scoreLabel: '3-1',
+          }),
+        ],
+        degraded: false,
+        failedCountries: [],
+        successfulCountries: ['United Kingdom', 'United States'],
+      }) as unknown as Awaited<ReturnType<SportsDataService['listLiveEventsAcrossCountries']>>,
+    );
+    vi.spyOn(SportsLiveEventService.prototype, 'listTrackedEvents').mockResolvedValue(
+      createOkResult([
+        makeTrackedEvent({
+          eventChannelId: 'live-1',
+          scoreMessageId: 'msg-score-1',
+          status: 'live',
+          lastScoreSnapshot: { scoreLabel: '2-1' },
+          lastStateSnapshot: { statusLabel: 'Live', broadcasterCount: 1 },
+        }),
+      ]) as Awaited<ReturnType<SportsLiveEventService['listTrackedEvents']>>,
+    );
+    const upsertTrackedEvent = vi
+      .spyOn(SportsLiveEventService.prototype, 'upsertTrackedEvent')
+      .mockResolvedValue(
+        createOkResult(
+          makeTrackedEvent({
+            eventChannelId: 'live-1',
+            scoreMessageId: 'msg-score-1',
+            status: 'live',
+            lastScoreSnapshot: { scoreLabel: '3-1' },
+            lastStateSnapshot: { statusLabel: 'Live', broadcasterCount: 1 },
+          }),
+        ) as Awaited<ReturnType<SportsLiveEventService['upsertTrackedEvent']>>,
+      );
+
+    const result = await reconcileLiveEventsForGuild({
+      guild,
+      timezone: 'Europe/London',
+      broadcastCountry: 'United Kingdom',
+      now: new Date('2026-03-20T15:07:00.000Z'),
+    });
+
+    expect(result.createdChannelCount).toBe(0);
+    expect(create).not.toHaveBeenCalled();
+    expect(existingLiveChannel.bulkDelete).not.toHaveBeenCalled();
+    expect(existingLiveChannel.send).not.toHaveBeenCalled();
+    expect((existingLiveChannel.messages.fetch as Mock).mock.calls).toContainEqual(['msg-score-1']);
+    expect(persistedScoreMessage.edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: [expect.anything()],
+      }),
+    );
+    expect(upsertTrackedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+        eventChannelId: 'live-1',
+        scoreMessageId: 'msg-score-1',
+      }),
+    );
+  });
+
   it('skips Discord rewrites but persists the sync heartbeat when the live event state is unchanged', async () => {
     const { guild, channels, create } = createGuildFixture();
     const existingLiveChannel = createTextChannel({
@@ -674,6 +935,19 @@ describe('live event runtime', () => {
       name: 'live-rangers-vs-celtic',
       parentId: 'live-category-1',
       topic: 'Managed by the sports worker for live event evt-1.',
+    });
+    (
+      existingLiveChannel as unknown as {
+        __storedMessages: Map<
+          string,
+          { id: string; createdTimestamp: number; edit: Mock; delete: Mock }
+        >;
+      }
+    ).__storedMessages.set('msg-score-1', {
+      id: 'msg-score-1',
+      createdTimestamp: Date.now(),
+      edit: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
     });
     channels.set(existingLiveChannel.id, existingLiveChannel);
 
@@ -713,6 +987,7 @@ describe('live event runtime', () => {
       createOkResult([
         makeTrackedEvent({
           eventChannelId: 'live-1',
+          scoreMessageId: 'msg-score-1',
           status: 'live',
           lastScoreSnapshot: { scoreLabel: '2-1' },
           lastStateSnapshot: { statusLabel: 'Live', broadcasterCount: 1 },
@@ -725,6 +1000,7 @@ describe('live event runtime', () => {
         createOkResult(
           makeTrackedEvent({
             eventChannelId: 'live-1',
+            scoreMessageId: 'msg-score-1',
             status: 'live',
             lastScoreSnapshot: { scoreLabel: '2-1' },
             lastStateSnapshot: { statusLabel: 'Live', broadcasterCount: 1 },
@@ -744,12 +1020,13 @@ describe('live event runtime', () => {
     expect(create).not.toHaveBeenCalled();
     expect(existingLiveChannel.edit).not.toHaveBeenCalled();
     expect(existingLiveChannel.send).not.toHaveBeenCalled();
-    expect(existingLiveChannel.messages.fetch).not.toHaveBeenCalled();
+    expect(existingLiveChannel.messages.fetch).toHaveBeenCalledWith('msg-score-1');
     expect(upsertTrackedEvent).toHaveBeenCalledTimes(1);
     expect(upsertTrackedEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventId: 'evt-1',
         eventChannelId: 'live-1',
+        scoreMessageId: 'msg-score-1',
         lastSyncedAtUtc: new Date('2026-03-20T15:07:00.000Z'),
         status: 'live',
       }),

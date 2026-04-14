@@ -68,7 +68,7 @@ export class SportsLiveEventService {
     sportChannelId: string;
     kickoffAtUtc: Date;
     eventChannelId: string | null;
-    scoreMessageId?: string | null;
+    scoreMessageId: string | null;
     status: SportsLiveEventChannelSummary['status'];
     lastScoreSnapshot: Record<string, unknown> | null;
     lastStateSnapshot: Record<string, unknown> | null;
