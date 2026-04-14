@@ -278,7 +278,7 @@ describe('sports runtime country handling', () => {
       expect.objectContaining({
         name: 'soccer',
         topic:
-          'Managed by the sports worker. Daily TV listings for tracked broadcasters in United Kingdom and United States refresh automatically at 00:01 (Europe/London).',
+          'Managed by the sports worker. Daily TV listings currently reflect tracked broadcasters in United Kingdom. Coverage is degraded because data is unavailable for United States. Refreshes automatically at 00:01 (Europe/London).',
       }),
     );
 
@@ -292,16 +292,138 @@ describe('sports runtime country handling', () => {
     );
     expect(createdChannel?.send).toHaveBeenCalledWith({
       content: expect.stringContaining(
-        'TV listings for Friday, 20 March 2026 from tracked broadcasters in United Kingdom and United States.',
+        'TV listings for Friday, 20 March 2026 from tracked broadcasters in United Kingdom.',
       ),
     });
     expect(createdChannel?.send).toHaveBeenCalledWith({
       content: expect.stringContaining(
-        'Tracked broadcaster countries: United Kingdom and United States.',
+        'Tracked broadcaster countries in this update: United Kingdom.',
+      ),
+    });
+    expect(createdChannel?.send).toHaveBeenCalledWith({
+      content: expect.stringContaining(
+        'Coverage is degraded. Missing broadcaster countries: United States.',
       ),
     });
     expect(createdChannel?.send).toHaveBeenCalledWith({
       content: expect.not.stringContaining('Tracked broadcaster country:'),
+    });
+  });
+
+  it('does not clear bound channels for sports absent from a degraded payload', async () => {
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-1',
+          guildId: 'guild-1',
+          sportId: null,
+          sportName: 'Soccer',
+          sportSlug: 'soccer',
+          channelId: 'sport-1',
+        },
+        {
+          bindingId: 'binding-2',
+          guildId: 'guild-1',
+          sportId: null,
+          sportName: 'Rugby Union',
+          sportSlug: 'rugby-union',
+          channelId: 'sport-2',
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDateAcrossCountries').mockResolvedValue(
+      createOkResult({
+        data: [
+          {
+            sportName: 'Soccer',
+            listings: [
+              {
+                eventId: 'event-1',
+                sportName: 'Soccer',
+                eventName: 'Rangers vs Celtic',
+                season: '2025-2026',
+                eventCountry: 'Scotland',
+                startTimeUtc: '2026-03-20T15:00:00.000Z',
+                startTimeUkLabel: '15:00',
+                imageUrl: null,
+                broadcasters: [
+                  {
+                    channelId: 'uk-1',
+                    channelName: 'Sky Sports Main Event',
+                    country: 'United Kingdom',
+                    logoUrl: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        degraded: true,
+        failedCountries: ['United States'],
+        successfulCountries: ['United Kingdom'],
+      }) as unknown as Awaited<
+        ReturnType<SportsDataService['listDailyListingsForLocalDateAcrossCountries']>
+      >,
+    );
+
+    const category = createCategoryChannel('category-1', 'Sports Listings');
+    const soccerChannel = createManagedTextChannel('sport-1', 'soccer', 'old topic');
+    const rugbyChannel = createManagedTextChannel('sport-2', 'rugby-union', 'old topic');
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        fetch: vi.fn(async (channelId?: string) => {
+          if (channelId === 'category-1') {
+            return category;
+          }
+          if (channelId === 'sport-1') {
+            return soccerChannel;
+          }
+          if (channelId === 'sport-2') {
+            return rugbyChannel;
+          }
+
+          return new Map<string, unknown>([
+            ['category-1', category],
+            ['sport-1', soccerChannel],
+            ['sport-2', rugbyChannel],
+          ]);
+        }),
+      },
+    };
+
+    const result = await publishSportsForGuild({
+      guild: guild as never,
+      actorDiscordUserId: 'user-1',
+    });
+
+    expect(result).toEqual({
+      publishedChannelCount: 1,
+      listingCount: 1,
+      createdChannelCount: 0,
+    });
+    expect(soccerChannel.messages.fetch).toHaveBeenCalled();
+    expect(rugbyChannel.messages.fetch).not.toHaveBeenCalled();
+    expect(rugbyChannel.send).not.toHaveBeenCalled();
+    expect(rugbyChannel.edit).toHaveBeenCalledWith({
+      topic:
+        'Managed by the sports worker. Daily TV listings currently reflect tracked broadcasters in United Kingdom. Coverage is degraded because data is unavailable for United States. Refreshes automatically at 00:01 (Europe/London).',
     });
   });
 

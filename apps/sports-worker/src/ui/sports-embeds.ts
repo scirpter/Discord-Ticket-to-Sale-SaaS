@@ -55,15 +55,28 @@ export function buildSportHeaderMessage(input: {
   dateLabel: string;
   broadcastCountries: string[];
   listingsCount: number;
+  degraded?: boolean;
+  failedCountries?: string[];
 }): string {
   const countriesLabel = formatBroadcastCountriesLabel(input.broadcastCountries);
+  const failedCountriesLabel =
+    input.degraded && input.failedCountries && input.failedCountries.length > 0
+      ? formatBroadcastCountriesLabel(input.failedCountries)
+      : null;
 
   return [
     `**${input.sportName}**`,
     `TV listings for ${input.dateLabel} from tracked broadcasters in ${countriesLabel}.`,
-    `Tracked broadcaster countries: ${countriesLabel}.`,
+    input.degraded
+      ? `Tracked broadcaster countries in this update: ${countriesLabel}.`
+      : `Tracked broadcaster countries: ${countriesLabel}.`,
+    failedCountriesLabel
+      ? `Coverage is degraded. Missing broadcaster countries: ${failedCountriesLabel}.`
+      : null,
     `Events today: ${input.listingsCount}.`,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function truncateText(value: string | null | undefined, maxLength = MAX_DESCRIPTION_LENGTH): string | null {

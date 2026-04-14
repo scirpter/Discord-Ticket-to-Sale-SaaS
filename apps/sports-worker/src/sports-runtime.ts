@@ -35,8 +35,18 @@ function buildManagedChannelTopic(input: {
   timezone: string;
   publishTime: string;
   broadcastCountries: string[];
+  degraded?: boolean;
+  failedCountries?: string[];
 }): string {
   const countriesLabel = formatBroadcastCountriesLabel(input.broadcastCountries);
+  const failedCountriesLabel =
+    input.degraded && input.failedCountries && input.failedCountries.length > 0
+      ? formatBroadcastCountriesLabel(input.failedCountries)
+      : null;
+
+  if (failedCountriesLabel) {
+    return `Managed by the sports worker. Daily TV listings currently reflect tracked broadcasters in ${countriesLabel}. Coverage is degraded because data is unavailable for ${failedCountriesLabel}. Refreshes automatically at ${input.publishTime} (${input.timezone}).`;
+  }
 
   return `Managed by the sports worker. Daily TV listings for tracked broadcasters in ${countriesLabel} refresh automatically at ${input.publishTime} (${input.timezone}).`;
 }
@@ -146,11 +156,16 @@ async function ensureManagedTextChannel(input: {
   sport: Pick<SportDefinition, 'sportId' | 'sportName' | 'channelSlug'>;
   config: SportsGuildConfigSummary;
   usedNames: Set<string>;
+  topicBroadcastCountries?: string[];
+  topicDegraded?: boolean;
+  topicFailedCountries?: string[];
 }): Promise<{ channel: TextChannel; created: boolean }> {
   const desiredTopic = buildManagedChannelTopic({
     timezone: input.config.timezone,
     publishTime: input.config.localTimeHhMm,
-    broadcastCountries: input.config.broadcastCountries,
+    broadcastCountries: input.topicBroadcastCountries ?? input.config.broadcastCountries,
+    degraded: input.topicDegraded,
+    failedCountries: input.topicFailedCountries,
   });
 
   if (input.binding?.channelId) {
@@ -182,6 +197,14 @@ async function ensureManagedTextChannel(input: {
   });
 
   return { channel, created: true };
+}
+
+async function syncManagedTextChannelTopic(channel: TextChannel, desiredTopic: string): Promise<void> {
+  if (channel.topic === desiredTopic) {
+    return;
+  }
+
+  await channel.edit({ topic: desiredTopic });
 }
 
 async function clearManagedChannel(channel: TextChannel): Promise<void> {
@@ -236,6 +259,9 @@ async function getTodayListingsBySport(config: SportsGuildConfigSummary): Promis
   localDate: string;
   dateLabel: string;
   listingsBySport: Map<string, SportsListing[]>;
+  degraded: boolean;
+  successfulCountries: string[];
+  failedCountries: string[];
 }> {
   const localDate = resolveSportsLocalDate({
     timezone: config.timezone,
@@ -275,11 +301,18 @@ async function getTodayListingsBySport(config: SportsGuildConfigSummary): Promis
       .filter((entry) => entry.listings.length > 0)
       .map((entry) => [entry.sportName, entry.listings]),
   );
+  const successfulCountries =
+    listingsResult.value.successfulCountries.length > 0
+      ? listingsResult.value.successfulCountries
+      : config.broadcastCountries;
 
   return {
     localDate,
     dateLabel,
     listingsBySport,
+    degraded: listingsResult.value.degraded,
+    successfulCountries,
+    failedCountries: listingsResult.value.failedCountries,
   };
 }
 
@@ -396,7 +429,8 @@ export async function publishSportsForGuild(input: {
   createdChannelCount: number;
 }> {
   const { config, bindings } = await getRequiredGuildContext(input.guild.id);
-  const { dateLabel, listingsBySport } = await getTodayListingsBySport(config);
+  const { dateLabel, listingsBySport, degraded, successfulCountries, failedCountries } =
+    await getTodayListingsBySport(config);
   const category =
     config.managedCategoryChannelId &&
     (await input.guild.channels.fetch(config.managedCategoryChannelId).catch(() => null));
@@ -410,6 +444,13 @@ export async function publishSportsForGuild(input: {
 
   let createdChannelCount = 0;
   const bindingMap = new Map(bindings.map((binding) => [binding.sportName, binding]));
+  const desiredTopic = buildManagedChannelTopic({
+    timezone: config.timezone,
+    publishTime: config.localTimeHhMm,
+    broadcastCountries: successfulCountries,
+    degraded,
+    failedCountries,
+  });
 
   for (const [sportName] of listingsBySport) {
     if (bindingMap.has(sportName) || !isCategoryChannel(category)) {
@@ -427,6 +468,9 @@ export async function publishSportsForGuild(input: {
       },
       config,
       usedNames,
+      topicBroadcastCountries: successfulCountries,
+      topicDegraded: degraded,
+      topicFailedCountries: failedCountries,
     });
     const bindingResult = await sportsService.upsertChannelBinding({
       guildId: input.guild.id,
@@ -457,13 +501,16 @@ export async function publishSportsForGuild(input: {
       continue;
     }
 
+    await syncManagedTextChannelTopic(channel, desiredTopic);
     await clearManagedChannel(channel);
     await channel.send({
       content: buildSportHeaderMessage({
         sportName: binding.sportName,
         dateLabel,
-        broadcastCountries: config.broadcastCountries,
+        broadcastCountries: successfulCountries,
         listingsCount: listings.length,
+        degraded,
+        failedCountries,
       }),
     });
 
@@ -483,6 +530,11 @@ export async function publishSportsForGuild(input: {
 
     const channel = await input.guild.channels.fetch(binding.channelId).catch(() => null);
     if (!isManagedTextChannel(channel)) {
+      continue;
+    }
+
+    await syncManagedTextChannelTopic(channel, desiredTopic);
+    if (degraded) {
       continue;
     }
 
