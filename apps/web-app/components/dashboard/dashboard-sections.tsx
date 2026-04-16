@@ -58,6 +58,7 @@ import {
   parseWholePoints,
   previewReferralRewardPoints,
 } from '@/lib/dashboard-format';
+import { SETTINGS_MENU_ITEMS, type SettingsPanelId } from '@/lib/dashboard-settings-menu';
 import {
   shouldLoadCustomerPoints,
   shouldShowCustomerPointsLoading,
@@ -94,33 +95,6 @@ const cryptoWalletFields: Array<{
   { key: 'trc20', label: 'TRC20 wallet' },
   { key: 'solana', label: 'Solana wallet' },
 ];
-
-const settingsMenuItems = [
-  {
-    id: 'default-currency',
-    label: 'Default Currency',
-    description: 'Choose the money format used across checkout and summary cards.',
-    info: 'This becomes the primary dashboard currency display for the selected Discord server.',
-  },
-  {
-    id: 'staff-roles',
-    label: 'Staff Roles',
-    description: 'Control which Discord roles can manage sales operations.',
-    info: 'Only the roles selected here should be able to work paid-order and support flows.',
-  },
-  {
-    id: 'paid-log-channel',
-    label: 'Paid Log Channel',
-    description: 'Pick where successful payment notifications should land.',
-    info: 'Use a private channel that your moderators or staff can monitor without cluttering public chat.',
-  },
-  {
-    id: 'telegram',
-    label: 'Telegram Integration',
-    description: 'Enable the bridge, generate an invite, and connect a Telegram chat.',
-    info: 'When disabled, Telegram connect controls stay hidden and the backend rejects new connection attempts.',
-  },
-] as const;
 
 const pointsMenuItems = [
   {
@@ -1614,9 +1588,9 @@ export function SettingsSection() {
   const [defaultCurrency, setDefaultCurrency] = useState('GBP');
   const [paidLogChannelId, setPaidLogChannelId] = useState('');
   const [staffRoleIds, setStaffRoleIds] = useState<string[]>([]);
+  const [tipEnabled, setTipEnabled] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(false);
-  const [activeSettingsPanel, setActiveSettingsPanel] =
-    useState<(typeof settingsMenuItems)[number]['id']>('default-currency');
+  const [activeSettingsPanel, setActiveSettingsPanel] = useState<SettingsPanelId>('default-currency');
   const [generatedTelegram, setGeneratedTelegram] = useState<Awaited<
     ReturnType<typeof generateTelegramLink>
   > | null>(null);
@@ -1629,6 +1603,7 @@ export function SettingsSection() {
     setDefaultCurrency(config.defaultCurrency || 'GBP');
     setPaidLogChannelId(config.paidLogChannelId ?? '');
     setStaffRoleIds(config.staffRoleIds);
+    setTipEnabled(config.tipEnabled);
     setTelegramEnabled(config.telegramEnabled);
   }, [config]);
 
@@ -1638,6 +1613,7 @@ export function SettingsSection() {
         defaultCurrency,
         paidLogChannelId: paidLogChannelId || null,
         staffRoleIds,
+        tipEnabled,
         telegramEnabled,
       });
     } catch {}
@@ -1663,7 +1639,7 @@ export function SettingsSection() {
     <SectionShell
       eyebrow="Settings"
       title="Server settings"
-      description="Keep the essentials focused: default currency, staff roles, paid-log destination, and Telegram integration."
+      description="Keep the essentials focused: default currency, staff roles, paid-log destination, tipping, and Telegram integration."
       action={
         <Button type="button" className="min-h-11" disabled={actionPending || !isLinkedToCurrentTenant} onClick={() => void handleSave()}>
           {actionPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
@@ -1678,7 +1654,7 @@ export function SettingsSection() {
         <div className="grid gap-5 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <SectionMenu
             title="Settings Menu"
-            items={settingsMenuItems}
+            items={SETTINGS_MENU_ITEMS}
             activeId={activeSettingsPanel}
             onChange={setActiveSettingsPanel}
           />
@@ -1782,6 +1758,41 @@ export function SettingsSection() {
                       ))}
                     </select>
                   </div>
+                </div>
+              </Panel>
+            ) : null}
+
+            {activeSettingsPanel === 'tipping' ? (
+              <Panel
+                title={
+                  <span className="flex items-center gap-2">
+                    Tipping
+                    <InfoButton label="Control whether the sales flow asks the customer if they want to add an optional GBP tip before checkout." />
+                  </span>
+                }
+                description="Turn the optional tip prompt on or off for this Discord server."
+              >
+                <div className="space-y-5">
+                  <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border/70 bg-background/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-medium">Enable optional tipping</p>
+                      <p className="text-sm text-muted-foreground">
+                        When enabled, customers are asked if they want to add a GBP tip before
+                        their checkout link is generated.
+                      </p>
+                    </div>
+                    <div id="tip-enabled">
+                      <FeatureToggle
+                        checked={tipEnabled}
+                        label="Enable tipping"
+                        onChange={setTipEnabled}
+                      />
+                    </div>
+                  </div>
+                  <InfoTip>
+                    Save after changing this toggle so the live Discord and Telegram sale flows
+                    pick up the updated tipping behavior.
+                  </InfoTip>
                 </div>
               </Panel>
             ) : null}

@@ -110,6 +110,23 @@ function mapProfileRecord(config: SportsGuildConfigRecord): SportsProfileRecord 
 export class SportsRepository {
   private readonly db = getDb();
 
+  private getAffectedRowCount(result: unknown): number {
+    if (typeof result === 'object' && result !== null) {
+      if ('affectedRows' in result && typeof result.affectedRows === 'number') {
+        return result.affectedRows;
+      }
+      if ('rowsAffected' in result && typeof result.rowsAffected === 'number') {
+        return result.rowsAffected;
+      }
+    }
+
+    if (Array.isArray(result) && result.length > 0) {
+      return this.getAffectedRowCount(result[0]);
+    }
+
+    return 0;
+  }
+
   public async getGuildConfig(guildId: string): Promise<SportsGuildConfigRecord | null> {
     const row = await this.db.query.sportsGuildConfigs.findFirst({
       where: eq(sportsGuildConfigs.guildId, guildId),
@@ -218,7 +235,7 @@ export class SportsRepository {
   public async listChannelBindings(guildId: string): Promise<SportsChannelBindingRecord[]> {
     const rows = await this.db.query.sportsChannelBindings.findMany({
       where: eq(sportsChannelBindings.guildId, guildId),
-      orderBy: (table, { asc }) => [asc(table.sportName)],
+      orderBy: (table, { asc }) => [asc(table.sportName), asc(table.createdAt), asc(table.id)],
     });
 
     return rows.map(mapChannelBindingRow);
@@ -233,6 +250,7 @@ export class SportsRepository {
         eq(sportsChannelBindings.guildId, input.guildId),
         eq(sportsChannelBindings.sportName, input.sportName),
       ),
+      orderBy: (table, { asc }) => [asc(table.createdAt), asc(table.id)],
     });
 
     return row ? mapChannelBindingRow(row) : null;
@@ -283,5 +301,10 @@ export class SportsRepository {
     }
 
     return record;
+  }
+
+  public async deleteChannelBinding(bindingId: string): Promise<boolean> {
+    const result = await this.db.delete(sportsChannelBindings).where(eq(sportsChannelBindings.id, bindingId));
+    return this.getAffectedRowCount(result) > 0;
   }
 }

@@ -16,6 +16,9 @@ describe('getDashboardFocusForTutorialStep', () => {
     expect(getDashboardFocusForTutorialStep('paid-log-channel')).toEqual({
       dashboard: 'sales',
     });
+    expect(getDashboardFocusForTutorialStep('tip-enabled')).toEqual({
+      dashboard: 'sales',
+    });
     expect(getDashboardFocusForTutorialStep('points-adjust-email')).toEqual({
       dashboard: 'sales',
     });

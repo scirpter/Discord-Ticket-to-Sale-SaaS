@@ -167,7 +167,7 @@ Copy `.env.example` to `.env` and fill values.
 - The dashboard sales page now supports all-sales browsing with `day`, `week`, `month`, and custom date filters plus search by date, customer email, or TXID/payment reference.
 - The dashboard sales page now also includes a manual `Clear sales history` action plus optional daily, weekly, or monthly auto-clear scheduling with saved time and timezone settings.
 - The dashboard sidebar now keeps a Discord bot invite button visible so merchants can reinstall or add the bot again after redesign updates.
-- Settings now uses an internal sidebar flow for default currency, staff roles, paid-log channel, and Telegram integration, including add/copy/regenerate Telegram actions when the Telegram feature is enabled.
+- Settings now uses an internal sidebar flow for default currency, staff roles, paid-log channel, tipping, and Telegram integration, including add/copy/regenerate Telegram actions when the Telegram feature is enabled.
 - Payments now separates the Voodoo Pay wallet, fixed `checkout.voodoo-pay.uk` host, callback secret rotation, and hosted crypto wallet controls into a dedicated page.
 - Payment saves now normalize empty/null crypto wallet fields and return field-specific validation errors instead of a generic `Validation failed` banner.
 - Coupons, points, referrals, and Telegram now use persisted feature toggles in `guild_configs`; when disabled, the UI hides those controls and the backend rejects the related actions.
