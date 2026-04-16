@@ -248,6 +248,21 @@ export class SportsService {
     }
   }
 
+  public async deleteChannelBinding(input: {
+    bindingId: string;
+  }): Promise<Result<{ deleted: boolean }, AppError>> {
+    try {
+      const deleted = await this.sportsRepository.deleteChannelBinding(input.bindingId);
+      return ok({ deleted });
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError('SPORTS_CONFIG_WRITE_FAILED', 'Sports channel update failed.', 500),
+      );
+    }
+  }
+
   public async listDueGuilds(input: {
     now: Date;
     limit: number;

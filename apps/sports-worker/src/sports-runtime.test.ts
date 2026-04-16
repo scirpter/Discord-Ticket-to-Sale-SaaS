@@ -17,6 +17,10 @@ vi.mock('@voodoo/core', () => {
     public async upsertChannelBinding(): Promise<never> {
       throw new Error('Mock upsertChannelBinding not implemented');
     }
+
+    public async deleteChannelBinding(): Promise<never> {
+      throw new Error('Mock deleteChannelBinding not implemented');
+    }
   }
 
   class SportsDataService {
@@ -79,6 +83,7 @@ function createManagedTextChannel(id: string, name: string, topic: string) {
     parentId: 'category-1',
     send: vi.fn(async () => undefined),
     edit: vi.fn(async () => undefined),
+    delete: vi.fn(async () => undefined),
     bulkDelete: vi.fn(async () => undefined),
     messages: {
       fetch: vi.fn(async () => ({ size: 0 })),
@@ -292,6 +297,174 @@ describe('sports runtime country handling', () => {
       parent: 'category-1',
       topic:
         'Managed by the sports worker. Daily TV listings currently reflect tracked broadcasters in United Kingdom. Coverage is degraded because data is unavailable for United States. Refreshes automatically at 00:01 (Europe/London).',
+    });
+  });
+
+  it('removes duplicate bindings and duplicate managed channels before syncing today sports', async () => {
+    vi.spyOn(SportsService.prototype, 'getGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['getGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'upsertGuildConfig').mockResolvedValue(
+      createOkResult({
+        configId: 'cfg-1',
+        guildId: 'guild-1',
+        enabled: true,
+        managedCategoryChannelId: 'category-1',
+        liveCategoryChannelId: null,
+        localTimeHhMm: '00:01',
+        timezone: 'Europe/London',
+        broadcastCountry: 'United Kingdom',
+        broadcastCountries: ['United Kingdom', 'United States'],
+        nextRunAtUtc: '2026-03-21T00:01:00.000Z',
+        lastRunAtUtc: null,
+        lastLocalRunDate: null,
+      }) as Awaited<ReturnType<SportsService['upsertGuildConfig']>>,
+    );
+    vi.spyOn(SportsService.prototype, 'listChannelBindings').mockResolvedValue(
+      createOkResult([
+        {
+          bindingId: 'binding-baseball-1',
+          guildId: 'guild-1',
+          sportId: null,
+          sportName: 'Baseball',
+          sportSlug: 'baseball',
+          channelId: 'sport-1',
+        },
+        {
+          bindingId: 'binding-baseball-2',
+          guildId: 'guild-1',
+          sportId: null,
+          sportName: 'Baseball',
+          sportSlug: 'baseball-2',
+          channelId: 'sport-2',
+        },
+      ]) as unknown as Awaited<ReturnType<SportsService['listChannelBindings']>>,
+    );
+    const deleteChannelBinding = vi
+      .spyOn(SportsService.prototype, 'deleteChannelBinding')
+      .mockResolvedValue(createOkResult({ deleted: true }) as never);
+    const upsertChannelBinding = vi
+      .spyOn(SportsService.prototype, 'upsertChannelBinding')
+      .mockImplementation(async (input) =>
+        createOkResult({
+          bindingId: 'binding-baseball-1',
+          guildId: input.guildId,
+          sportId: input.sportId,
+          sportName: input.sportName,
+          sportSlug: input.sportSlug,
+          channelId: input.channelId,
+        }) as Awaited<ReturnType<SportsService['upsertChannelBinding']>>,
+      );
+    vi.spyOn(SportsDataService.prototype, 'listDailyListingsForLocalDateAcrossCountries').mockResolvedValue(
+      createOkResult({
+        data: [
+          {
+            sportName: 'Baseball',
+            listings: [
+              {
+                eventId: 'event-1',
+                sportName: 'Baseball',
+                eventName: 'Yankees vs Red Sox',
+                season: '2026',
+                eventCountry: 'United States',
+                startTimeUtc: '2026-03-20T15:00:00.000Z',
+                startTimeUkLabel: '15:00',
+                imageUrl: null,
+                broadcasters: [
+                  {
+                    channelId: 'us-1',
+                    channelName: 'ESPN',
+                    country: 'United States',
+                    logoUrl: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        degraded: false,
+        failedCountries: [],
+        successfulCountries: ['United Kingdom', 'United States'],
+      }) as unknown as Awaited<
+        ReturnType<SportsDataService['listDailyListingsForLocalDateAcrossCountries']>
+      >,
+    );
+
+    const category = createCategoryChannel('category-1', 'Sports Listings');
+    const baseballChannel = createManagedTextChannel(
+      'sport-1',
+      'baseball',
+      'Managed by the sports worker. Daily TV listings for tracked broadcasters in United Kingdom and United States refresh automatically at 00:01 (Europe/London).',
+    );
+    const baseballDuplicateChannel = createManagedTextChannel(
+      'sport-2',
+      'baseball-2',
+      'Managed by the sports worker. Daily TV listings for tracked broadcasters in United Kingdom and United States refresh automatically at 00:01 (Europe/London).',
+    );
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        fetch: vi.fn(async (channelId?: string) => {
+          if (channelId === 'category-1') {
+            return category;
+          }
+          if (channelId === 'sport-1') {
+            return baseballChannel;
+          }
+          if (channelId === 'sport-2') {
+            return baseballDuplicateChannel;
+          }
+
+          return new Map<string, unknown>([
+            ['category-1', category],
+            ['sport-1', baseballChannel],
+            ['sport-2', baseballDuplicateChannel],
+          ]);
+        }),
+        create: vi.fn(async () => category),
+      },
+    };
+
+    const result = await syncSportsGuildChannels({
+      guild: guild as never,
+      actorDiscordUserId: 'user-1',
+      categoryName: null,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        channelCount: 1,
+        createdChannelCount: 0,
+        updatedChannelCount: 1,
+      }),
+    );
+    expect(deleteChannelBinding).toHaveBeenCalledWith({ bindingId: 'binding-baseball-2' });
+    expect(baseballDuplicateChannel.delete).toHaveBeenCalledTimes(1);
+    expect(upsertChannelBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sportName: 'Baseball',
+        sportSlug: 'baseball',
+        channelId: 'sport-1',
+      }),
+    );
+    expect(baseballChannel.edit).toHaveBeenCalledWith({
+      name: 'baseball',
+      parent: 'category-1',
+      topic:
+        'Managed by the sports worker. Daily TV listings for tracked broadcasters in United Kingdom and United States refresh automatically at 00:01 (Europe/London).',
     });
   });
 

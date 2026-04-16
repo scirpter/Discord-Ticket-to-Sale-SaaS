@@ -197,6 +197,13 @@
       "when": 1776196800000,
       "tag": "0027_sports_broadcast_countries",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1776369600000,
+      "tag": "0028_repair_sports_channel_bindings",
+      "breakpoints": true
     }
   ]
 }

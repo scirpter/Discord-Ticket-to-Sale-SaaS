@@ -27,6 +27,7 @@ const sportsAccessService = new SportsAccessService();
 const DEFAULT_CATEGORY_NAME = 'Sports Listings';
 const DEFAULT_SHARED_BROADCAST_COUNTRIES = ['United Kingdom', 'United States'];
 const RETRY_DELAY_MS = 15 * 60 * 1000;
+const MANAGED_CHANNEL_TOPIC_PREFIX = 'Managed by the sports worker.';
 
 let schedulerTimer: NodeJS.Timeout | null = null;
 let schedulerTickInFlight = false;
@@ -45,10 +46,10 @@ function buildManagedChannelTopic(input: {
       : null;
 
   if (failedCountriesLabel) {
-    return `Managed by the sports worker. Daily TV listings currently reflect tracked broadcasters in ${countriesLabel}. Coverage is degraded because data is unavailable for ${failedCountriesLabel}. Refreshes automatically at ${input.publishTime} (${input.timezone}).`;
+    return `${MANAGED_CHANNEL_TOPIC_PREFIX} Daily TV listings currently reflect tracked broadcasters in ${countriesLabel}. Coverage is degraded because data is unavailable for ${failedCountriesLabel}. Refreshes automatically at ${input.publishTime} (${input.timezone}).`;
   }
 
-  return `Managed by the sports worker. Daily TV listings for tracked broadcasters in ${countriesLabel} refresh automatically at ${input.publishTime} (${input.timezone}).`;
+  return `${MANAGED_CHANNEL_TOPIC_PREFIX} Daily TV listings for tracked broadcasters in ${countriesLabel} refresh automatically at ${input.publishTime} (${input.timezone}).`;
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -105,6 +106,153 @@ function isCategoryChannel(channel: unknown): channel is CategoryChannel {
 
 function isManagedTextChannel(channel: unknown): channel is TextChannel {
   return typeof channel === 'object' && channel !== null && 'type' in channel && channel.type === ChannelType.GuildText;
+}
+
+function hasManagedChannelTopic(topic: string | null | undefined): boolean {
+  return typeof topic === 'string' && topic.startsWith(MANAGED_CHANNEL_TOPIC_PREFIX);
+}
+
+function isNumericSlugSuffix(value: string): boolean {
+  return /-\d+$/u.test(value);
+}
+
+function scoreBindingForCanonicalSelection(binding: SportsChannelBindingSummary, sportName: string): number {
+  const normalizedSportSlug = normalizeChannelName(sportName);
+  let score = 0;
+
+  if (binding.sportSlug === normalizedSportSlug) {
+    score += 100;
+  }
+
+  if (!isNumericSlugSuffix(binding.sportSlug)) {
+    score += 10;
+  }
+
+  score -= binding.sportSlug.length;
+  return score;
+}
+
+function partitionBindingsByCanonical(input: {
+  bindings: SportsChannelBindingSummary[];
+}): {
+  canonicalBindings: SportsChannelBindingSummary[];
+  duplicateBindings: SportsChannelBindingSummary[];
+} {
+  const bindingsBySport = new Map<string, SportsChannelBindingSummary[]>();
+
+  for (const binding of input.bindings) {
+    const current = bindingsBySport.get(binding.sportName) ?? [];
+    current.push(binding);
+    bindingsBySport.set(binding.sportName, current);
+  }
+
+  const canonicalBindings: SportsChannelBindingSummary[] = [];
+  const duplicateBindings: SportsChannelBindingSummary[] = [];
+
+  for (const [sportName, bindings] of bindingsBySport) {
+    const rankedBindings = [...bindings].sort((left, right) => {
+      const scoreDifference =
+        scoreBindingForCanonicalSelection(right, sportName) -
+        scoreBindingForCanonicalSelection(left, sportName);
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+
+      return left.bindingId.localeCompare(right.bindingId);
+    });
+
+    const canonicalBinding = rankedBindings.shift();
+    if (!canonicalBinding) {
+      continue;
+    }
+
+    canonicalBindings.push(canonicalBinding);
+    duplicateBindings.push(...rankedBindings);
+  }
+
+  return { canonicalBindings, duplicateBindings };
+}
+
+async function deleteManagedChannel(channel: TextChannel, reason: string): Promise<void> {
+  await channel.delete(reason).catch((error) => {
+    logger.warn(
+      {
+        err: error instanceof Error ? error : new Error(String(error)),
+        channelId: channel.id,
+      },
+      'sports worker could not delete managed channel',
+    );
+  });
+}
+
+async function reconcileDuplicateBindings(input: {
+  guild: Guild;
+  category: CategoryChannel;
+  bindings: SportsChannelBindingSummary[];
+}): Promise<{
+  bindings: SportsChannelBindingSummary[];
+  removedChannelIds: Set<string>;
+}> {
+  const { canonicalBindings, duplicateBindings } = partitionBindingsByCanonical({
+    bindings: input.bindings,
+  });
+  const removedChannelIds = new Set<string>();
+
+  for (const duplicateBinding of duplicateBindings) {
+    const channel = await input.guild.channels.fetch(duplicateBinding.channelId).catch(() => null);
+    if (
+      isManagedTextChannel(channel) &&
+      channel.parentId === input.category.id &&
+      hasManagedChannelTopic(channel.topic)
+    ) {
+      removedChannelIds.add(channel.id);
+      await deleteManagedChannel(
+        channel,
+        'Removing duplicate sports worker managed channel.',
+      );
+    }
+
+    const deleteBindingResult = await sportsService.deleteChannelBinding({
+      bindingId: duplicateBinding.bindingId,
+    });
+    if (deleteBindingResult.isErr()) {
+      throw deleteBindingResult.error;
+    }
+  }
+
+  return {
+    bindings: canonicalBindings,
+    removedChannelIds,
+  };
+}
+
+async function removeOrphanedManagedChannels(input: {
+  guild: Guild;
+  category: CategoryChannel;
+  activeChannelIds: Set<string>;
+  removedChannelIds?: Set<string>;
+}): Promise<void> {
+  const fetchedChannels = await input.guild.channels.fetch();
+
+  for (const channel of fetchedChannels.values()) {
+    if (!isManagedTextChannel(channel)) {
+      continue;
+    }
+
+    if (channel.parentId !== input.category.id) {
+      continue;
+    }
+
+    if (!hasManagedChannelTopic(channel.topic)) {
+      continue;
+    }
+
+    if (input.activeChannelIds.has(channel.id) || input.removedChannelIds?.has(channel.id)) {
+      continue;
+    }
+
+    await deleteManagedChannel(channel, 'Removing orphaned sports worker managed channel.');
+  }
 }
 
 async function ensureManagedCategory(input: {
@@ -367,13 +515,22 @@ export async function syncSportsGuildChannels(input: {
     throw bindingsResult.error;
   }
 
+  const dedupedBindingsResult = await reconcileDuplicateBindings({
+    guild: input.guild,
+    category,
+    bindings: bindingsResult.value,
+  });
+
   const { listingsBySport, degraded, successfulCountries, failedCountries } =
     await getTodayListingsBySport(configResult.value);
-  const bindingsBySport = new Map(bindingsResult.value.map((binding) => [binding.sportName, binding]));
+  const bindingsBySport = new Map(
+    dedupedBindingsResult.bindings.map((binding) => [binding.sportName, binding]),
+  );
   const fetchedChannels = await input.guild.channels.fetch();
   const usedNames = new Set(
     [...fetchedChannels.values()]
       .filter((channel): channel is NonNullable<typeof channel> => channel !== null)
+      .filter((channel) => !dedupedBindingsResult.removedChannelIds.has(channel.id))
       .map((channel) => channel.name),
   );
 
@@ -409,12 +566,23 @@ export async function syncSportsGuildChannels(input: {
       throw bindingResult.error;
     }
 
+    bindingsBySport.set(sportName, bindingResult.value);
+
     if (ensured.created) {
       createdChannelCount += 1;
     } else {
       updatedChannelCount += 1;
     }
   }
+
+  await removeOrphanedManagedChannels({
+    guild: input.guild,
+    category,
+    activeChannelIds: new Set(
+      [...bindingsBySport.values()].map((binding) => binding.channelId),
+    ),
+    removedChannelIds: dedupedBindingsResult.removedChannelIds,
+  });
 
   return {
     config: configResult.value,

@@ -36,4 +36,19 @@ describe('sports schema migration', () => {
     expect(migration).toContain('sports_live_event_channels');
     expect(migration).toContain('score_message_id');
   });
+
+  it('includes the sports channel bindings repair migration', () => {
+    const migrationPath = path.resolve(
+      process.cwd(),
+      'drizzle/migrations/0028_repair_sports_channel_bindings.sql',
+    );
+    const migration = readFileSync(migrationPath, 'utf8');
+
+    expect(migration).toContain('sports_channel_bindings');
+    expect(migration).toContain('profile_id');
+    expect(migration).toContain('ROW_NUMBER() OVER');
+    expect(migration).toContain('sports_channel_bindings_guild_sport_uq');
+    expect(migration).toContain('DROP INDEX `sports_channel_bindings_profile_sport_uq`');
+    expect(migration).toContain('DROP COLUMN `profile_id`');
+  });
 });
