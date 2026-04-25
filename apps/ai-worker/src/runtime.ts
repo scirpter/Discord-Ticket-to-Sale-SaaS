@@ -163,6 +163,18 @@ function buildUnansweredLogPayload(result: AiRuntimeUnanswered) {
   };
 }
 
+function buildCompletedUnansweredLogComponents() {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(AI_UNANSWERED_ADD_QA_CUSTOM_ID)
+      .setLabel('Reply created')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true),
+  );
+
+  return [row];
+}
+
 async function postUnansweredLog(client: Client, result: AiRuntimeUnanswered): Promise<void> {
   try {
     const channel = await client.channels.fetch(result.logChannelId);
@@ -281,6 +293,24 @@ export async function handleAiUnansweredLearningInteraction(
       content: 'AI Q&A saved. Future matching questions can use this answer.',
       flags: MessageFlags.Ephemeral,
     });
+
+    if (interaction.isFromMessage?.()) {
+      try {
+        await interaction.message.edit({
+          components: buildCompletedUnansweredLogComponents(),
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            guildId: interaction.guildId,
+            messageId: interaction.message.id,
+          },
+          'ai-worker failed to mark unanswered log reply as created',
+        );
+      }
+    }
+
     return true;
   }
 

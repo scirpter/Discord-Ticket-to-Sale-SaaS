@@ -385,11 +385,19 @@ describe('AI Discord channel sync service', () => {
         });
       }
 
-      if (requestUrl.endsWith('/channels/forum-1/threads/active')) {
-        return new Response(JSON.stringify({ threads: [{ id: 'thread-1', name: 'Setup guide' }] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+      if (requestUrl.endsWith('/guilds/guild-1/threads/active')) {
+        return new Response(
+          JSON.stringify({
+            threads: [
+              { id: 'thread-1', name: 'Setup guide', parent_id: 'forum-1' },
+              { id: 'thread-other', name: 'Other forum', parent_id: 'forum-2' },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
       }
 
       if (requestUrl.includes('/channels/forum-1/threads/archived/public')) {
@@ -439,5 +447,113 @@ describe('AI Discord channel sync service', () => {
         ],
       }),
     );
+  });
+
+  it('syncs forum channel thread messages when direct channel history is empty', async () => {
+    const source = {
+      id: 'source-1',
+      guildId: 'guild-1',
+      channelId: 'forum-1',
+      status: 'pending' as const,
+      lastSyncedAt: null,
+      lastSyncStartedAt: null,
+      lastSyncError: null,
+      lastMessageId: null,
+      messageCount: 0,
+      createdByDiscordUserId: 'user-1',
+      updatedByDiscordUserId: 'user-1',
+      createdAt: new Date('2026-04-23T00:00:00.000Z'),
+      updatedAt: new Date('2026-04-23T00:00:00.000Z'),
+    };
+    const repository = {
+      getDiscordChannelSource: vi.fn().mockResolvedValue(source),
+      listDiscordChannelSources: vi.fn(),
+      listDiscordChannelCategorySources: vi.fn(),
+      createDiscordChannelSource: vi.fn(),
+      createDiscordChannelCategorySource: vi.fn(),
+      deleteDiscordChannelSource: vi.fn(),
+      deleteDiscordChannelCategorySource: vi.fn(),
+      markDiscordChannelSyncStarted: vi.fn().mockResolvedValue(undefined),
+      replaceDiscordChannelMessages: vi.fn().mockResolvedValue([]),
+      markDiscordChannelSyncCompleted: vi.fn().mockResolvedValue(undefined),
+      markDiscordChannelSyncFailed: vi.fn().mockResolvedValue(undefined),
+      deleteDiscordChannelMessage: vi.fn(),
+    };
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes('/channels/forum-1/messages')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (requestUrl.endsWith('/channels/forum-1')) {
+        return new Response(JSON.stringify({ id: 'forum-1', name: 'setup-guides', type: 15 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (requestUrl.endsWith('/guilds/guild-1/threads/active')) {
+        return new Response(
+          JSON.stringify({
+            threads: [
+              { id: 'thread-1', name: 'Setup guide', parent_id: 'forum-1' },
+              { id: 'thread-other', name: 'Other forum', parent_id: 'forum-2' },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+
+      if (requestUrl.includes('/channels/forum-1/threads/archived/public')) {
+        return new Response(JSON.stringify({ threads: [], has_more: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response(
+        JSON.stringify([
+          {
+            id: 'msg-1',
+            channel_id: 'thread-1',
+            author: { id: 'author-1', bot: false },
+            content: 'Pinned forum answer',
+            timestamp: '2026-04-23T12:00:00.000Z',
+            edited_timestamp: null,
+          },
+        ]),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    const service = new AiDiscordChannelSyncService(repository, fetchMock as typeof fetch);
+
+    const result = await service.syncChannelSource({ guildId: 'guild-1', sourceId: 'source-1' });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.replaceDiscordChannelMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'forum-1',
+        messages: [
+          expect.objectContaining({
+            channelId: 'thread-1',
+            messageId: 'msg-1',
+            contentText: 'Pinned forum answer',
+          }),
+        ],
+      }),
+    );
+    expect(repository.markDiscordChannelSyncCompleted).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      messageCount: 1,
+      lastMessageId: 'msg-1',
+      updatedByDiscordUserId: null,
+    });
   });
 });

@@ -44,7 +44,7 @@
 - Runs as a separate Discord application/token dedicated to the AI bot.
 - Keeps `/activation` as the only slash-command surface.
 - Processes passive message replies in configured channels, enforces role allowlist/blocklist rules, retrieves grounded evidence, and posts inline or thread replies.
-- Logs unanswered qualifying questions to the configured admin channel and handles the Discord Add Q&A button/modal flow for members with Administrator permission.
+- Logs unanswered qualifying questions to the configured admin channel and handles the Discord Add Q&A button/modal flow for members with Administrator permission. After a Q&A is saved from a log item, the original Add Q&A button is replaced with a disabled `Reply created` button so admins can see which questions were handled.
 
 ## Data Layer
 
@@ -70,7 +70,7 @@
   - `ai_role_rules` for allowlist/blocklist role filtering
   - `ai_website_sources` for manual approved URLs and sync state
   - `ai_knowledge_documents` for normalized synced website content
-  - `ai_discord_channel_sources` and `ai_discord_channel_category_sources` for synced Discord knowledge channels, forum/media post threads, and category auto-select rules
+  - `ai_discord_channel_sources` and `ai_discord_channel_category_sources` for synced Discord knowledge channels, forum/media post threads, and category auto-select rules. Forum/media sources fall back to post-thread sync when direct channel history is empty or unavailable.
   - `ai_custom_qas` for admin-authored grounded Q&A pairs
 
 ## Security and Reliability

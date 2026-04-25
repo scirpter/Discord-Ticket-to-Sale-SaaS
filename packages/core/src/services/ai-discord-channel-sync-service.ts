@@ -60,6 +60,7 @@ type DiscordGuildChannelPayload = {
 type DiscordThreadPayload = {
   id: string;
   name?: string | null;
+  parent_id?: string | null;
   thread_metadata?: {
     archive_timestamp?: string | null;
   } | null;
@@ -498,7 +499,7 @@ export class AiDiscordChannelSyncService {
         updatedByDiscordUserId: input.actorDiscordUserId ?? null,
       });
 
-      const messages = await this.fetchKnowledgeMessages(source.channelId);
+      const messages = await this.fetchKnowledgeMessages(source.channelId, input.guildId);
       const syncMessages = messages
         .map((message) => {
           const contentText = extractDiscordMessageKnowledgeText(message);
@@ -626,9 +627,19 @@ export class AiDiscordChannelSyncService {
     return messages;
   }
 
-  private async fetchKnowledgeMessages(channelId: string): Promise<DiscordMessagePayload[]> {
+  private async fetchKnowledgeMessages(channelId: string, guildId: string): Promise<DiscordMessagePayload[]> {
     try {
-      return await this.fetchChannelMessages(channelId);
+      const messages = await this.fetchChannelMessages(channelId);
+      if (messages.length > 0) {
+        return messages;
+      }
+
+      const channel = await this.fetchChannel(channelId);
+      if (isForumLikeKnowledgeChannel(channel)) {
+        return this.fetchForumLikeChannelMessages(channelId, guildId);
+      }
+
+      return messages;
     } catch (error) {
       if (!(error instanceof AppError) || error.code !== 'AI_DISCORD_CHANNEL_HISTORY_FAILED') {
         throw error;
@@ -639,7 +650,7 @@ export class AiDiscordChannelSyncService {
         throw error;
       }
 
-      return this.fetchForumLikeChannelMessages(channelId);
+      return this.fetchForumLikeChannelMessages(channelId, guildId);
     }
   }
 
@@ -666,8 +677,8 @@ export class AiDiscordChannelSyncService {
     return (await response.json()) as DiscordGuildChannelPayload;
   }
 
-  private async fetchForumLikeChannelMessages(channelId: string): Promise<DiscordMessagePayload[]> {
-    const threads = await this.fetchForumLikeThreads(channelId);
+  private async fetchForumLikeChannelMessages(channelId: string, guildId: string): Promise<DiscordMessagePayload[]> {
+    const threads = await this.fetchForumLikeThreads(channelId, guildId);
     const messages: DiscordMessagePayload[] = [];
 
     for (const thread of threads) {
@@ -687,10 +698,13 @@ export class AiDiscordChannelSyncService {
     return messages;
   }
 
-  private async fetchForumLikeThreads(channelId: string): Promise<DiscordThreadPayload[]> {
-    const activeThreads = await this.fetchThreadList(`${getEnv().DISCORD_API_BASE_URL}/channels/${channelId}/threads/active`);
+  private async fetchForumLikeThreads(channelId: string, guildId: string): Promise<DiscordThreadPayload[]> {
+    const activeThreads = await this.fetchThreadList(`${getEnv().DISCORD_API_BASE_URL}/guilds/${guildId}/threads/active`);
     const threadById = new Map<string, DiscordThreadPayload>();
     for (const thread of activeThreads.threads ?? []) {
+      if (thread.parent_id !== channelId) {
+        continue;
+      }
       threadById.set(thread.id, thread);
     }
 

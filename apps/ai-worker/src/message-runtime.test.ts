@@ -614,4 +614,62 @@ describe('AI message runtime', () => {
       }),
     );
   });
+
+  it('marks the unanswered log Add Q&A button as created after modal submission', async () => {
+    const reply = vi.fn(async () => undefined);
+    const edit = vi.fn(async () => undefined);
+    const createCustomQa = vi.fn(async () =>
+      createOkResult({
+        customQaId: 'qa-1',
+        question: 'unknown question?',
+        answer: 'Use the setup guide.',
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    const interaction = {
+      isButton: () => false,
+      isModalSubmit: () => true,
+      isFromMessage: () => true,
+      customId: AI_UNANSWERED_MODAL_CUSTOM_ID,
+      guildId: 'guild-1',
+      user: { id: 'admin-1' },
+      message: { edit },
+      fields: {
+        getTextInputValue: vi.fn((fieldId: string) =>
+          fieldId === 'question' ? 'unknown question?' : 'Use the setup guide.',
+        ),
+      },
+      reply,
+    } as never;
+
+    const handled = await handleAiUnansweredLearningInteraction(interaction, {
+      createCustomQa,
+    } as never);
+
+    expect(handled).toBe(true);
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        components: expect.any(Array),
+      }),
+    );
+    const editCalls = edit.mock.calls as unknown as Array<[
+      {
+        components: Array<{ components: Array<{ data: { label: string; disabled: boolean; style: number } }> }>;
+      },
+    ]>;
+    const editPayload = editCalls[0]?.[0];
+    expect(editPayload).toBeDefined();
+    if (!editPayload) {
+      return;
+    }
+    const editPayloadData = editPayload as {
+      components: Array<{ components: Array<{ data: { label: string; disabled: boolean; style: number } }> }>;
+    };
+    expect(editPayloadData.components[0]?.components[0]?.data).toEqual(
+      expect.objectContaining({
+        label: 'Reply created',
+        disabled: true,
+      }),
+    );
+  });
 });
