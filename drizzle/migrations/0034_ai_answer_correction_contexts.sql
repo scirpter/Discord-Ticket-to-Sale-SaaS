@@ -9,5 +9,5 @@ CREATE TABLE `ai_answer_correction_contexts` (
   CONSTRAINT `ai_answer_correction_contexts_id` PRIMARY KEY(`id`),
   CONSTRAINT `ai_answer_correction_contexts_source_message_uq` UNIQUE(`guild_id`,`source_channel_id`,`source_message_id`)
 );
-
+--> statement-breakpoint
 CREATE INDEX `ai_answer_correction_contexts_guild_idx` ON `ai_answer_correction_contexts` (`guild_id`);
