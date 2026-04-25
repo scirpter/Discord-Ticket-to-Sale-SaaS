@@ -190,4 +190,64 @@ describe('AiAnswerService', () => {
       evidenceCount: 1,
     });
   });
+
+  it('instructs the model to rewrite custom Q&A answers into the configured personality', async () => {
+    const retrieveEvidence = vi.fn().mockResolvedValue([
+      {
+        sourceType: 'custom_qa',
+        sourceId: 'qa-1',
+        content: 'Q: Do refunds exist?\nA: yea mate refund is 14 days lol',
+        title: null,
+        url: null,
+        question: 'Do refunds exist?',
+        answer: 'yea mate refund is 14 days lol',
+        channelId: null,
+        messageId: null,
+        score: 12,
+      },
+    ]);
+    const generateGroundedResponse = vi.fn().mockResolvedValue({
+      outputText: 'Refunds are available for 14 days after purchase.',
+      requestId: 'req_123',
+      model: 'gpt-4o-mini',
+    });
+    const service = new AiAnswerService(
+      {
+        retrieveEvidence,
+      },
+      {
+        generateGroundedResponse,
+      },
+    );
+
+    const result = await service.answerMessage({
+      guildId: 'guild-1',
+      question: 'Do refunds exist?',
+      tonePreset: 'professional',
+      toneInstructions: 'Use a polished support tone.',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(generateGroundedResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(
+          'Treat Approved Q&A answers as source facts, not final wording.',
+        ),
+      }),
+    );
+    expect(generateGroundedResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(
+          'Rewrite Custom Q&A answers into the configured tone and personality.',
+        ),
+      }),
+    );
+    expect(generateGroundedResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(
+          'Preserve exact facts, prices, dates, links, and policy constraints from Custom Q&A.',
+        ),
+      }),
+    );
+  });
 });
