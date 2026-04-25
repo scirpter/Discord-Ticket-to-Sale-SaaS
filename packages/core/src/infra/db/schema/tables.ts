@@ -988,6 +988,27 @@ export const aiCustomQas = mysqlTable(
   }),
 );
 
+export const aiAnswerCorrectionContexts = mysqlTable(
+  'ai_answer_correction_contexts',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    sourceChannelId: varchar('source_channel_id', { length: 32 }).notNull(),
+    sourceMessageId: varchar('source_message_id', { length: 32 }).notNull(),
+    question: text('question').notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    sourceMessageUnique: uniqueIndex('ai_answer_correction_contexts_source_message_uq').on(
+      table.guildId,
+      table.sourceChannelId,
+      table.sourceMessageId,
+    ),
+    guildIdx: index('ai_answer_correction_contexts_guild_idx').on(table.guildId),
+  }),
+);
+
 export const aiDiscordChannelSources = mysqlTable(
   'ai_discord_channel_sources',
   {

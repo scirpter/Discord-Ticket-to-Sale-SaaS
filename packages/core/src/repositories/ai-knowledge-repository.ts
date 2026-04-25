@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
 import {
+  aiAnswerCorrectionContexts,
   aiCustomQas,
   aiDiscordChannelCategorySources,
   aiDiscordChannelMessages,
@@ -14,6 +15,16 @@ import { isMysqlDuplicateEntryError } from '../utils/mysql-errors.js';
 
 export type AiWebsiteSourceStatus = 'pending' | 'syncing' | 'ready' | 'failed';
 export type AiDiscordChannelSourceStatus = 'pending' | 'syncing' | 'ready' | 'failed';
+
+export type AiAnswerCorrectionContextRecord = {
+  id: string;
+  guildId: string;
+  sourceChannelId: string;
+  sourceMessageId: string;
+  question: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 export type AiWebsiteSourceRecord = {
   id: string;
@@ -170,6 +181,20 @@ function mapWebsiteSourceRow(row: typeof aiWebsiteSources.$inferSelect): AiWebsi
     pageTitle: row.pageTitle ?? null,
     createdByDiscordUserId: row.createdByDiscordUserId ?? null,
     updatedByDiscordUserId: row.updatedByDiscordUserId ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapAnswerCorrectionContextRow(
+  row: typeof aiAnswerCorrectionContexts.$inferSelect,
+): AiAnswerCorrectionContextRecord {
+  return {
+    id: row.id,
+    guildId: row.guildId,
+    sourceChannelId: row.sourceChannelId,
+    sourceMessageId: row.sourceMessageId,
+    question: row.question,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -402,6 +427,49 @@ export class AiKnowledgeRepository {
       );
 
     return true;
+  }
+
+  public async saveAnswerCorrectionContext(input: {
+    guildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+    question: string;
+  }): Promise<void> {
+    const now = new Date();
+
+    await this.db
+      .insert(aiAnswerCorrectionContexts)
+      .values({
+        id: ulid(),
+        guildId: input.guildId,
+        sourceChannelId: input.sourceChannelId,
+        sourceMessageId: input.sourceMessageId,
+        question: input.question,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          question: input.question,
+          updatedAt: now,
+        },
+      });
+  }
+
+  public async getAnswerCorrectionContext(input: {
+    guildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+  }): Promise<AiAnswerCorrectionContextRecord | null> {
+    const row = await this.db.query.aiAnswerCorrectionContexts.findFirst({
+      where: and(
+        eq(aiAnswerCorrectionContexts.guildId, input.guildId),
+        eq(aiAnswerCorrectionContexts.sourceChannelId, input.sourceChannelId),
+        eq(aiAnswerCorrectionContexts.sourceMessageId, input.sourceMessageId),
+      ),
+    });
+
+    return row ? mapAnswerCorrectionContextRow(row) : null;
   }
 
   public async listKnowledgeDocuments(input: {

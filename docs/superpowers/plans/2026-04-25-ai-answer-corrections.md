@@ -4,7 +4,7 @@
 
 **Goal:** Add persistent admin correction buttons to AI bot answers and save corrected answers as Custom Q&A.
 
-**Architecture:** Keep correction state in Discord message components plus existing Custom Q&A storage. The AI worker builds answer payloads with a correction button, opens the correction modal without pre-acknowledgement network I/O, fetches the original user message only after modal submit when the Question field is blank, saves Q&A, then disables the button on the original bot answer.
+**Architecture:** Keep button identity in Discord message components, store source-question context in `ai_answer_correction_contexts`, and save final corrections through existing Custom Q&A storage. The AI worker builds answer payloads with a correction button, persists the source question after sending, opens the correction modal with the stored question prefilled, saves Q&A, then disables the button on the original bot answer.
 
 **Tech Stack:** TypeScript, discord.js v14, Vitest, existing `AiKnowledgeManagementService`.
 

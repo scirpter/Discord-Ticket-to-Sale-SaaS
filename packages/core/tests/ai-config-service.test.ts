@@ -11,6 +11,7 @@ import {
   aiWebsiteSources,
   aiKnowledgeDocuments,
   aiCustomQas,
+  aiAnswerCorrectionContexts,
   aiDiscordChannelCategorySources,
   aiDiscordChannelSources,
   aiDiscordChannelMessages,
@@ -77,9 +78,34 @@ describe('AI env and schema foundation', () => {
     expect(aiWebsiteSources).toBeDefined();
     expect(aiKnowledgeDocuments).toBeDefined();
     expect(aiCustomQas).toBeDefined();
+    expect(aiAnswerCorrectionContexts).toBeDefined();
     expect(aiDiscordChannelCategorySources).toBeDefined();
     expect(aiDiscordChannelSources).toBeDefined();
     expect(aiDiscordChannelMessages).toBeDefined();
+  });
+
+  it('deduplicates stored AI answer correction context per source message', () => {
+    const tableConfig = getTableConfig(aiAnswerCorrectionContexts);
+    const columnNames = tableConfig.columns.map((column) => column.name);
+    const indexSummary = tableConfig.indexes.map((index) => ({
+      columns: index.config.columns.map((column) => column.name),
+      name: index.config.name,
+      unique: index.config.unique,
+    }));
+
+    expect(columnNames).toEqual(
+      expect.arrayContaining([
+        'guild_id',
+        'source_channel_id',
+        'source_message_id',
+        'question',
+      ]),
+    );
+    expect(indexSummary).toContainEqual({
+      columns: ['guild_id', 'source_channel_id', 'source_message_id'],
+      name: 'ai_answer_correction_contexts_source_message_uq',
+      unique: true,
+    });
   });
 
   it('defines unanswered learning and reply frequency settings on AI guild configs', () => {

@@ -15,7 +15,12 @@ import {
   type Interaction,
   type Message,
 } from 'discord.js';
-import { AiKnowledgeManagementService, logger, type AiReplyMode } from '@voodoo/core';
+import {
+  AiKnowledgeRepository,
+  AiKnowledgeManagementService,
+  logger,
+  type AiReplyMode,
+} from '@voodoo/core';
 
 import {
   handleAiMessage,
@@ -34,6 +39,55 @@ type AiAnswerCorrectionRef = {
   channelId: string;
   messageId: string;
 };
+
+type AiAnswerCorrectionContext = {
+  question: string;
+};
+
+type AiAnswerCorrectionContextStore = {
+  saveContext(input: {
+    guildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+    question: string;
+  }): Promise<void>;
+  getContext(input: {
+    guildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+  }): Promise<AiAnswerCorrectionContext | null>;
+};
+
+type AiWorkerRuntimeDependencies = {
+  correctionContextStore?: AiAnswerCorrectionContextStore;
+};
+
+type AiAnswerCorrectionBackingRepository = {
+  saveAnswerCorrectionContext(input: {
+    guildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+    question: string;
+  }): Promise<void>;
+  getAnswerCorrectionContext(input: {
+    guildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+  }): Promise<AiAnswerCorrectionContext | null>;
+};
+
+function createDefaultAnswerCorrectionContextStore(): AiAnswerCorrectionContextStore {
+  const repository = new AiKnowledgeRepository() as unknown as AiAnswerCorrectionBackingRepository;
+
+  return {
+    saveContext(input) {
+      return repository.saveAnswerCorrectionContext(input);
+    },
+    getContext(input) {
+      return repository.getAnswerCorrectionContext(input);
+    },
+  };
+}
 
 export function createAiClientOptions(): ClientOptions {
   return {
@@ -285,6 +339,7 @@ function buildAddQaModal(question: string): ModalBuilder {
 
 function buildAnswerCorrectionModal(input: {
   ref: AiAnswerCorrectionRef;
+  question?: string | null;
 }): ModalBuilder {
   const questionInput = new TextInputBuilder()
     .setCustomId(AI_UNANSWERED_QUESTION_FIELD_ID)
@@ -292,6 +347,10 @@ function buildAnswerCorrectionModal(input: {
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false)
     .setPlaceholder('Leave blank to use the original message.');
+
+  if (input.question) {
+    questionInput.setValue(truncateModalValue(input.question));
+  }
 
   const answerInput = new TextInputBuilder()
     .setCustomId(AI_UNANSWERED_ANSWER_FIELD_ID)
@@ -336,11 +395,73 @@ async function fetchOriginalMessageQuestion(
   }
 }
 
+async function loadStoredAnswerCorrectionQuestion(input: {
+  guildId: string;
+  ref: AiAnswerCorrectionRef;
+  correctionContextStore: AiAnswerCorrectionContextStore;
+}): Promise<string | null> {
+  try {
+    const context = await input.correctionContextStore.getContext({
+      guildId: input.guildId,
+      sourceChannelId: input.ref.channelId,
+      sourceMessageId: input.ref.messageId,
+    });
+
+    return context?.question ?? null;
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        guildId: input.guildId,
+        channelId: input.ref.channelId,
+        messageId: input.ref.messageId,
+      },
+      'ai-worker failed to load answer correction context',
+    );
+    return null;
+  }
+}
+
+async function saveAnswerCorrectionContext(input: {
+  message: Message;
+  question: string;
+  correctionContextStore?: AiAnswerCorrectionContextStore;
+}): Promise<void> {
+  if (!input.message.guildId) {
+    return;
+  }
+
+  const question = input.question.trim();
+  if (!question) {
+    return;
+  }
+
+  try {
+    await (input.correctionContextStore ?? createDefaultAnswerCorrectionContextStore()).saveContext({
+      guildId: input.message.guildId,
+      sourceChannelId: input.message.channelId,
+      sourceMessageId: input.message.id,
+      question,
+    });
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        guildId: input.message.guildId,
+        channelId: input.message.channelId,
+        messageId: input.message.id,
+      },
+      'ai-worker failed to store answer correction context',
+    );
+  }
+}
+
 type AiCustomQaCreator = Pick<AiKnowledgeManagementService, 'createCustomQa'>;
 
 export async function handleAiUnansweredLearningInteraction(
   interaction: Interaction,
   knowledgeService: AiCustomQaCreator = new AiKnowledgeManagementService(),
+  correctionContextStore: AiAnswerCorrectionContextStore = createDefaultAnswerCorrectionContextStore(),
 ): Promise<boolean> {
   if (
     interaction.isButton() &&
@@ -374,7 +495,13 @@ export async function handleAiUnansweredLearningInteraction(
       return true;
     }
 
-    await interaction.showModal(buildAnswerCorrectionModal({ ref }));
+    const question = await loadStoredAnswerCorrectionQuestion({
+      guildId: interaction.guildId,
+      ref,
+      correctionContextStore,
+    });
+
+    await interaction.showModal(buildAnswerCorrectionModal({ ref, question }));
     return true;
   }
 
@@ -551,6 +678,7 @@ export async function processIncomingMessage(
   client: Client,
   message: Message,
   dependencies?: AiMessageRuntimeDependencies,
+  runtimeDependencies?: AiWorkerRuntimeDependencies,
 ): Promise<void> {
   const result = await handleAiMessage(
     {
@@ -613,6 +741,11 @@ export async function processIncomingMessage(
         ref: { channelId: message.channelId, messageId: message.id },
       }),
     );
+    await saveAnswerCorrectionContext({
+      message,
+      question: message.content,
+      correctionContextStore: runtimeDependencies?.correctionContextStore,
+    });
     return;
   }
 
@@ -622,4 +755,9 @@ export async function processIncomingMessage(
       ref: { channelId: message.channelId, messageId: message.id },
     }),
   );
+  await saveAnswerCorrectionContext({
+    message,
+    question: message.content,
+    correctionContextStore: runtimeDependencies?.correctionContextStore,
+  });
 }

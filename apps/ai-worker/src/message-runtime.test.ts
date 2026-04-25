@@ -30,11 +30,22 @@ vi.mock('@voodoo/core', () => {
     }
   }
 
+  class AiKnowledgeRepository {
+    public async saveAnswerCorrectionContext(): Promise<never> {
+      throw new Error('Mock saveAnswerCorrectionContext not implemented');
+    }
+
+    public async getAnswerCorrectionContext(): Promise<never> {
+      throw new Error('Mock getAnswerCorrectionContext not implemented');
+    }
+  }
+
   return {
     AiAccessService,
     AiConfigService,
     AiAnswerService,
     AiKnowledgeManagementService,
+    AiKnowledgeRepository,
     logger: {
       warn: loggerWarn,
     },
@@ -435,8 +446,11 @@ describe('AI message runtime', () => {
   it('replies inline in the source channel when inline mode is configured', async () => {
     const dependencies = createDependencies();
     const { message, reply, startThread } = createMessage();
+    const saveContext = vi.fn(async () => undefined);
 
-    await processIncomingMessage({} as never, message, dependencies);
+    await processIncomingMessage({} as never, message, dependencies, {
+      correctionContextStore: { saveContext, getContext: vi.fn() },
+    });
 
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -456,6 +470,12 @@ describe('AI message runtime', () => {
       }),
     );
     expect(startThread).not.toHaveBeenCalled();
+    expect(saveContext).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceChannelId: 'allowed-channel',
+      sourceMessageId: 'msg-1',
+      question: 'What is the refund policy?',
+    });
   });
 
   it('replies in a thread when thread mode is configured', async () => {
@@ -587,12 +607,20 @@ describe('AI message runtime', () => {
     );
   });
 
-  it('opens a correction modal for admin Mark wrong clicks without fetching before acknowledgement', async () => {
+  it('opens a correction modal for admin Mark wrong clicks with the stored question prefilled', async () => {
     const showModal = vi.fn(async () => undefined);
     const fetchChannel = vi.fn(async () => ({
       messages: {
         fetch: vi.fn(),
       },
+    }));
+    const getContext = vi.fn(async () => ({
+      guildId: 'guild-1',
+      sourceChannelId: 'allowed-channel',
+      sourceMessageId: 'msg-1',
+      question: 'What is the refund policy?',
+      createdAt: new Date(),
+      updatedAt: new Date(),
     }));
     const interaction = {
       isButton: () => true,
@@ -610,9 +638,17 @@ describe('AI message runtime', () => {
       showModal,
     } as never;
 
-    const handled = await handleAiUnansweredLearningInteraction(interaction);
+    const handled = await handleAiUnansweredLearningInteraction(interaction, undefined, {
+      getContext,
+      saveContext: vi.fn(),
+    });
 
     expect(handled).toBe(true);
+    expect(getContext).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceChannelId: 'allowed-channel',
+      sourceMessageId: 'msg-1',
+    });
     expect(fetchChannel).not.toHaveBeenCalled();
     expect(showModal).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -622,7 +658,7 @@ describe('AI message runtime', () => {
       }),
     );
     const showModalCalls = showModal.mock.calls as unknown as Array<[unknown]>;
-    expect(JSON.stringify(showModalCalls[0]?.[0])).toContain('Leave blank to use the original message.');
+    expect(JSON.stringify(showModalCalls[0]?.[0])).toContain('What is the refund policy?');
   });
 
   it('opens an Add Q&A modal for admin button clicks', async () => {
