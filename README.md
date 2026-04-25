@@ -72,7 +72,7 @@ Copy `.env.example` to `.env` and fill values.
 
 Voodoo AI separates where the bot replies from what the bot can use as evidence. Reply channels control where the bot answers. Website sources, custom Q&A, and Discord knowledge channels control what the bot can cite when generating answers.
 
-Discord knowledge channels are intended for read-only, announcement, forum, or media channels. Selecting one backfills the latest 500 messages, stores message text plus Discord embed text as grounding material, refreshes selected channels four times per day, and removes deleted messages from stored knowledge when Discord emits a delete event. Forum and media channels are read through their post threads, including channels whose direct history endpoint returns no messages. Categories can also be auto-selected so every current and future text, announcement, forum, or media channel inside the category is backfilled and refreshed automatically. Website sources are also refreshed four times per day so updated docs or blogs are picked up automatically. If the AI cannot ground an answer in approved evidence, it stays silent instead of posting a fallback refusal.
+Discord knowledge channels are intended for read-only, announcement, forum, or media channels. Selecting one backfills the latest 500 messages, stores message text plus Discord embed text as grounding material, refreshes selected channels four times per day, and removes deleted messages from stored knowledge when Discord emits a delete event. Forum and media channels are read through their post threads, including channels whose direct history endpoint returns no messages. Categories can also be auto-selected so every current and future text, announcement, forum, or media channel inside the category is backfilled and refreshed automatically. Website sources are also refreshed four times per day so updated docs or blogs are picked up automatically. If the AI cannot ground an answer in approved evidence, it stays silent instead of posting a fallback refusal. If an answer is wrong, Discord administrators can use the persistent `Mark wrong` button on the AI reply to save the right answer as Custom Q&A for future matching questions.
 
 ## Commands
 
@@ -229,6 +229,7 @@ Discord knowledge channels are intended for read-only, announcement, forum, or m
   - reply channels and category auto-select rules with inline/thread mode
   - reply frequency controls for low, mid, or max answer aggressiveness
   - unanswered-question logging to a server admin channel with Discord `Add Q&A` conversion; saved items disable the log button as `Reply created`
+  - persistent `Mark wrong` buttons on AI answers so server administrators can save corrected answers as Custom Q&A
   - allowlist/blocklist role rules
   - tone preset plus custom instructions
   - manual website sources with sync-on-save and manual re-sync

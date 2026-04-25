@@ -25,8 +25,15 @@ import {
 
 export const AI_UNANSWERED_ADD_QA_CUSTOM_ID = 'ai:unanswered:add-qa';
 export const AI_UNANSWERED_MODAL_CUSTOM_ID = 'ai:unanswered:qa-submit';
+export const AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX = 'ai:answer:wrong:';
+export const AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX = 'ai:answer:correction-submit:';
 const AI_UNANSWERED_QUESTION_FIELD_ID = 'question';
 const AI_UNANSWERED_ANSWER_FIELD_ID = 'answer';
+
+type AiAnswerCorrectionRef = {
+  channelId: string;
+  messageId: string;
+};
 
 export function createAiClientOptions(): ClientOptions {
   return {
@@ -128,6 +135,23 @@ function truncateModalValue(value: string): string {
   return value.length > 4000 ? value.slice(0, 4000) : value;
 }
 
+function parseAnswerCorrectionRef(customId: string, prefix: string): AiAnswerCorrectionRef | null {
+  if (!customId.startsWith(prefix)) {
+    return null;
+  }
+
+  const [channelId, messageId] = customId.slice(prefix.length).split(':');
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
+}
+
+function hasAdministratorPermission(interaction: Interaction): boolean {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+}
+
 function extractQuestionFromUnansweredLog(interaction: Interaction): string | null {
   if (!interaction.isButton()) {
     return null;
@@ -173,6 +197,36 @@ function buildCompletedUnansweredLogComponents() {
   );
 
   return [row];
+}
+
+function buildAnswerCorrectionComponents(ref: AiAnswerCorrectionRef) {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX}${ref.channelId}:${ref.messageId}`)
+      .setLabel('Mark wrong')
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return [row];
+}
+
+function buildCompletedAnswerCorrectionComponents(ref: AiAnswerCorrectionRef) {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX}${ref.channelId}:${ref.messageId}`)
+      .setLabel('Correction saved')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true),
+  );
+
+  return [row];
+}
+
+function buildAiAnswerPayload(input: { content: string; ref: AiAnswerCorrectionRef }) {
+  return {
+    content: input.content,
+    components: buildAnswerCorrectionComponents(input.ref),
+  };
 }
 
 async function postUnansweredLog(client: Client, result: AiRuntimeUnanswered): Promise<void> {
@@ -229,12 +283,101 @@ function buildAddQaModal(question: string): ModalBuilder {
     );
 }
 
+function buildAnswerCorrectionModal(input: {
+  ref: AiAnswerCorrectionRef;
+}): ModalBuilder {
+  const questionInput = new TextInputBuilder()
+    .setCustomId(AI_UNANSWERED_QUESTION_FIELD_ID)
+    .setLabel('Question')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setPlaceholder('Leave blank to use the original message.');
+
+  const answerInput = new TextInputBuilder()
+    .setCustomId(AI_UNANSWERED_ANSWER_FIELD_ID)
+    .setLabel('Right answer')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true);
+
+  return new ModalBuilder()
+    .setCustomId(
+      `${AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX}${input.ref.channelId}:${input.ref.messageId}`,
+    )
+    .setTitle('Correct AI answer')
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(questionInput),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(answerInput),
+    );
+}
+
+async function fetchOriginalMessageQuestion(
+  interaction: Interaction,
+  ref: AiAnswerCorrectionRef,
+): Promise<string | null> {
+  try {
+    const channel = await interaction.client.channels.fetch(ref.channelId);
+    if (!channel || !('messages' in channel)) {
+      return null;
+    }
+
+    const message = await channel.messages.fetch(ref.messageId);
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    return content.length > 0 ? content : null;
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        channelId: ref.channelId,
+        messageId: ref.messageId,
+      },
+      'ai-worker failed to fetch original message for answer correction',
+    );
+    return null;
+  }
+}
+
 type AiCustomQaCreator = Pick<AiKnowledgeManagementService, 'createCustomQa'>;
 
 export async function handleAiUnansweredLearningInteraction(
   interaction: Interaction,
   knowledgeService: AiCustomQaCreator = new AiKnowledgeManagementService(),
 ): Promise<boolean> {
+  if (
+    interaction.isButton() &&
+    interaction.customId.startsWith(AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX)
+  ) {
+    if (!interaction.guildId) {
+      await interaction.reply({
+        content: 'This correction action can only be used inside a server.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    if (!hasAdministratorPermission(interaction)) {
+      await interaction.reply({
+        content: 'You need the Discord Administrator permission to correct AI answers.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    const ref = parseAnswerCorrectionRef(
+      interaction.customId,
+      AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX,
+    );
+    if (!ref) {
+      await interaction.reply({
+        content: 'This correction button is missing its original message reference.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    await interaction.showModal(buildAnswerCorrectionModal({ ref }));
+    return true;
+  }
+
   if (interaction.isButton() && interaction.customId === AI_UNANSWERED_ADD_QA_CUSTOM_ID) {
     if (!interaction.guildId) {
       await interaction.reply({
@@ -244,7 +387,7 @@ export async function handleAiUnansweredLearningInteraction(
       return true;
     }
 
-    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    if (!hasAdministratorPermission(interaction)) {
       await interaction.reply({
         content: 'You need the Discord Administrator permission to add AI Q&A entries.',
         flags: MessageFlags.Ephemeral,
@@ -262,6 +405,93 @@ export async function handleAiUnansweredLearningInteraction(
     }
 
     await interaction.showModal(buildAddQaModal(question));
+    return true;
+  }
+
+  if (
+    interaction.isModalSubmit() &&
+    interaction.customId.startsWith(AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX)
+  ) {
+    if (!interaction.guildId) {
+      await interaction.reply({
+        content: 'This correction action can only be used inside a server.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    if (!hasAdministratorPermission(interaction)) {
+      await interaction.reply({
+        content: 'You need the Discord Administrator permission to correct AI answers.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    const ref = parseAnswerCorrectionRef(
+      interaction.customId,
+      AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX,
+    );
+    if (!ref) {
+      await interaction.reply({
+        content: 'This correction modal is missing its original message reference.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    await interaction.deferReply({
+      flags: MessageFlags.Ephemeral,
+    });
+
+    const submittedQuestion = interaction.fields
+      .getTextInputValue(AI_UNANSWERED_QUESTION_FIELD_ID)
+      .trim();
+    const question =
+      submittedQuestion.length > 0 ? submittedQuestion : await fetchOriginalMessageQuestion(interaction, ref);
+
+    if (!question) {
+      await interaction.editReply({
+        content: 'Original question could not be loaded. Submit again and fill the Question field.',
+      });
+      return true;
+    }
+
+    const result = await knowledgeService.createCustomQa({
+      guildId: interaction.guildId,
+      question,
+      answer: interaction.fields.getTextInputValue(AI_UNANSWERED_ANSWER_FIELD_ID),
+      actorDiscordUserId: interaction.user.id,
+    });
+
+    if (result.isErr()) {
+      await interaction.editReply({
+        content: result.error.message,
+      });
+      return true;
+    }
+
+    await interaction.editReply({
+      content: 'Correction saved. Future matching questions can use this answer.',
+    });
+
+    if (interaction.isFromMessage?.()) {
+      try {
+        await interaction.message.edit({
+          components: buildCompletedAnswerCorrectionComponents(ref),
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            guildId: interaction.guildId,
+            messageId: interaction.message.id,
+          },
+          'ai-worker failed to mark answer correction as saved',
+        );
+      }
+    }
+
     return true;
   }
 
@@ -377,9 +607,19 @@ export async function processIncomingMessage(
     const thread = isThreadChannel(message.channel)
       ? message.channel
       : await message.startThread({ name: `ai-${message.id}` });
-    await thread.send(result.content);
+    await thread.send(
+      buildAiAnswerPayload({
+        content: result.content,
+        ref: { channelId: message.channelId, messageId: message.id },
+      }),
+    );
     return;
   }
 
-  await message.reply(result.content);
+  await message.reply(
+    buildAiAnswerPayload({
+      content: result.content,
+      ref: { channelId: message.channelId, messageId: message.id },
+    }),
+  );
 }

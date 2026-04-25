@@ -43,6 +43,8 @@ vi.mock('@voodoo/core', () => {
 
 import { handleAiMessage, type AiMessageRuntimeDependencies } from './message-runtime.js';
 import {
+  AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX,
+  AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX,
   AI_UNANSWERED_ADD_QA_CUSTOM_ID,
   AI_UNANSWERED_MODAL_CUSTOM_ID,
   handleAiUnansweredLearningInteraction,
@@ -436,7 +438,23 @@ describe('AI message runtime', () => {
 
     await processIncomingMessage({} as never, message, dependencies);
 
-    expect(reply).toHaveBeenCalledWith('Grounded answer');
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'Grounded answer',
+        components: expect.any(Array),
+      }),
+    );
+    const replyCalls = reply.mock.calls as unknown as Array<[
+      {
+        components: Array<{ components: Array<{ data: { custom_id: string; label: string } }> }>;
+      },
+    ]>;
+    expect(replyCalls[0]?.[0].components[0]?.components[0]?.data).toEqual(
+      expect.objectContaining({
+        custom_id: `${AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX}allowed-channel:msg-1`,
+        label: 'Mark wrong',
+      }),
+    );
     expect(startThread).not.toHaveBeenCalled();
   });
 
@@ -451,7 +469,12 @@ describe('AI message runtime', () => {
     await processIncomingMessage({} as never, message, dependencies);
 
     expect(startThread).toHaveBeenCalledWith({ name: 'ai-msg-1' });
-    expect(send).toHaveBeenCalledWith('Grounded answer');
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'Grounded answer',
+        components: expect.any(Array),
+      }),
+    );
   });
 
   it('skips sending and logs when required Discord permissions are missing', async () => {
@@ -539,6 +562,67 @@ describe('AI message runtime', () => {
         content: expect.stringContaining('Administrator'),
       }),
     );
+  });
+
+  it('rejects Mark wrong button clicks from non-admin members', async () => {
+    const reply = vi.fn(async () => undefined);
+    const interaction = {
+      isButton: () => true,
+      isModalSubmit: () => false,
+      customId: `${AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX}allowed-channel:msg-1`,
+      guildId: 'guild-1',
+      memberPermissions: {
+        has: vi.fn(() => false),
+      },
+      reply,
+    } as never;
+
+    const handled = await handleAiUnansweredLearningInteraction(interaction);
+
+    expect(handled).toBe(true);
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Administrator'),
+      }),
+    );
+  });
+
+  it('opens a correction modal for admin Mark wrong clicks without fetching before acknowledgement', async () => {
+    const showModal = vi.fn(async () => undefined);
+    const fetchChannel = vi.fn(async () => ({
+      messages: {
+        fetch: vi.fn(),
+      },
+    }));
+    const interaction = {
+      isButton: () => true,
+      isModalSubmit: () => false,
+      customId: `${AI_ANSWER_MARK_WRONG_CUSTOM_ID_PREFIX}allowed-channel:msg-1`,
+      guildId: 'guild-1',
+      memberPermissions: {
+        has: vi.fn(() => true),
+      },
+      client: {
+        channels: {
+          fetch: fetchChannel,
+        },
+      },
+      showModal,
+    } as never;
+
+    const handled = await handleAiUnansweredLearningInteraction(interaction);
+
+    expect(handled).toBe(true);
+    expect(fetchChannel).not.toHaveBeenCalled();
+    expect(showModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          custom_id: `${AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX}allowed-channel:msg-1`,
+        }),
+      }),
+    );
+    const showModalCalls = showModal.mock.calls as unknown as Array<[unknown]>;
+    expect(JSON.stringify(showModalCalls[0]?.[0])).toContain('Leave blank to use the original message.');
   });
 
   it('opens an Add Q&A modal for admin button clicks', async () => {
@@ -669,6 +753,143 @@ describe('AI message runtime', () => {
       expect.objectContaining({
         label: 'Reply created',
         disabled: true,
+      }),
+    );
+  });
+
+  it('saves a Custom Q&A entry from the correction modal submission and disables the button', async () => {
+    const deferReply = vi.fn(async () => undefined);
+    const editReply = vi.fn(async () => undefined);
+    const edit = vi.fn(async () => undefined);
+    const createCustomQa = vi.fn(async () =>
+      createOkResult({
+        customQaId: 'qa-1',
+        question: 'What is the refund policy?',
+        answer: 'Refunds last 14 days.',
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    const interaction = {
+      isButton: () => false,
+      isModalSubmit: () => true,
+      isFromMessage: () => true,
+      customId: `${AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX}allowed-channel:msg-1`,
+      guildId: 'guild-1',
+      user: { id: 'admin-1' },
+      memberPermissions: {
+        has: vi.fn(() => true),
+      },
+      message: { edit },
+      fields: {
+        getTextInputValue: vi.fn((fieldId: string) =>
+          fieldId === 'question' ? 'What is the refund policy?' : 'Refunds last 14 days.',
+        ),
+      },
+      deferReply,
+      editReply,
+    } as never;
+
+    const handled = await handleAiUnansweredLearningInteraction(interaction, {
+      createCustomQa,
+    } as never);
+
+    expect(handled).toBe(true);
+    expect(createCustomQa).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      question: 'What is the refund policy?',
+      answer: 'Refunds last 14 days.',
+      actorDiscordUserId: 'admin-1',
+    });
+    expect(deferReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: expect.any(Number),
+      }),
+    );
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Correction saved'),
+      }),
+    );
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        components: expect.any(Array),
+      }),
+    );
+    const editCalls = edit.mock.calls as unknown as Array<[
+      {
+        components: Array<{ components: Array<{ data: { label: string; disabled: boolean } }> }>;
+      },
+    ]>;
+    expect(editCalls[0]?.[0].components[0]?.components[0]?.data).toEqual(
+      expect.objectContaining({
+        label: 'Correction saved',
+        disabled: true,
+      }),
+    );
+  });
+
+  it('uses the original message as the correction question when the modal question is blank', async () => {
+    const deferReply = vi.fn(async () => undefined);
+    const editReply = vi.fn(async () => undefined);
+    const fetchMessage = vi.fn(async () => ({ content: 'What is the refund policy?' }));
+    const fetchChannel = vi.fn(async () => ({
+      messages: {
+        fetch: fetchMessage,
+      },
+    }));
+    const createCustomQa = vi.fn(async () =>
+      createOkResult({
+        customQaId: 'qa-1',
+        question: 'What is the refund policy?',
+        answer: 'Refunds last 14 days.',
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    const interaction = {
+      isButton: () => false,
+      isModalSubmit: () => true,
+      isFromMessage: () => false,
+      customId: `${AI_ANSWER_CORRECTION_MODAL_CUSTOM_ID_PREFIX}allowed-channel:msg-1`,
+      guildId: 'guild-1',
+      user: { id: 'admin-1' },
+      memberPermissions: {
+        has: vi.fn(() => true),
+      },
+      client: {
+        channels: {
+          fetch: fetchChannel,
+        },
+      },
+      fields: {
+        getTextInputValue: vi.fn((fieldId: string) =>
+          fieldId === 'question' ? '   ' : 'Refunds last 14 days.',
+        ),
+      },
+      deferReply,
+      editReply,
+    } as never;
+
+    const handled = await handleAiUnansweredLearningInteraction(interaction, {
+      createCustomQa,
+    } as never);
+
+    expect(handled).toBe(true);
+    expect(deferReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: expect.any(Number),
+      }),
+    );
+    expect(fetchChannel).toHaveBeenCalledWith('allowed-channel');
+    expect(fetchMessage).toHaveBeenCalledWith('msg-1');
+    expect(createCustomQa).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      question: 'What is the refund policy?',
+      answer: 'Refunds last 14 days.',
+      actorDiscordUserId: 'admin-1',
+    });
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Correction saved'),
       }),
     );
   });
