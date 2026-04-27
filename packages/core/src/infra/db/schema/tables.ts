@@ -923,6 +923,8 @@ export const aiWebsiteSources = mysqlTable(
     id: varchar('id', { length: 26 }).primaryKey(),
     guildId: varchar('guild_id', { length: 32 }).notNull(),
     url: varchar('url', { length: 512 }).notNull(),
+    sourceType: mysqlEnum('source_type', ['website', 'rss_feed']).notNull().default('website'),
+    crawlMode: mysqlEnum('crawl_mode', ['page', 'site']).notNull().default('page'),
     status: mysqlEnum('status', ['pending', 'syncing', 'ready', 'failed']).notNull().default('pending'),
     lastSyncedAt: timestamp('last_synced_at', { mode: 'date' }),
     lastSyncStartedAt: timestamp('last_sync_started_at', { mode: 'date' }),
@@ -930,6 +932,7 @@ export const aiWebsiteSources = mysqlTable(
     httpStatus: int('http_status'),
     contentHash: varchar('content_hash', { length: 64 }),
     pageTitle: varchar('page_title', { length: 255 }),
+    documentCount: int('document_count').notNull().default(0),
     createdByDiscordUserId: varchar('created_by_discord_user_id', { length: 32 }),
     updatedByDiscordUserId: varchar('updated_by_discord_user_id', { length: 32 }),
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
@@ -1006,6 +1009,29 @@ export const aiAnswerCorrectionContexts = mysqlTable(
       table.sourceMessageId,
     ),
     guildIdx: index('ai_answer_correction_contexts_guild_idx').on(table.guildId),
+  }),
+);
+
+export const aiConversationTurns = mysqlTable(
+  'ai_conversation_turns',
+  {
+    id: varchar('id', { length: 26 }).primaryKey(),
+    guildId: varchar('guild_id', { length: 32 }).notNull(),
+    channelId: varchar('channel_id', { length: 32 }).notNull(),
+    discordUserId: varchar('discord_user_id', { length: 32 }).notNull(),
+    userMessageId: varchar('user_message_id', { length: 32 }).notNull(),
+    botMessageId: varchar('bot_message_id', { length: 32 }),
+    userContent: text('user_content').notNull(),
+    botContent: text('bot_content').notNull(),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    scopeCreatedIdx: index('ai_conversation_turns_scope_created_idx').on(
+      table.guildId,
+      table.channelId,
+      table.discordUserId,
+      table.createdAt,
+    ),
   }),
 );
 

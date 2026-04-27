@@ -54,6 +54,8 @@ describe('ai website sources route', () => {
         method: 'POST',
         body: JSON.stringify({
           url: 'https://docs.example.com/faq',
+          sourceType: 'website',
+          crawlMode: 'site',
         }),
       }),
       {
@@ -65,6 +67,8 @@ describe('ai website sources route', () => {
     expect(createWebsiteSource).toHaveBeenCalledWith({
       guildId: 'guild-1',
       url: 'https://docs.example.com/faq',
+      sourceType: 'website',
+      crawlMode: 'site',
       actorDiscordUserId: 'discord-user-1',
     });
     const payload = (await response.json()) as { source: { sourceId: string } };

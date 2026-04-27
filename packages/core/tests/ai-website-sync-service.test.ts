@@ -118,4 +118,119 @@ describe('AiWebsiteSyncService', () => {
       updatedByDiscordUserId: null,
     });
   });
+
+  it('stores multiple same-origin pages when site crawl is enabled', async () => {
+    const repository = {
+      markSourceSyncStarted: vi.fn().mockResolvedValue(undefined),
+      replaceSourceDocuments: vi.fn().mockResolvedValue([{ id: 'doc-1' }, { id: 'doc-2' }]),
+      markSourceSyncCompleted: vi.fn().mockResolvedValue(undefined),
+      markSourceSyncFailed: vi.fn().mockResolvedValue(undefined),
+    };
+    const fetchPage = vi.fn(async ({ url }: { url: string }) => {
+      if (url === 'https://example.com/docs') {
+        return {
+          url,
+          httpStatus: 200,
+          title: 'Docs',
+          text: 'Start here.',
+          links: [
+            'https://example.com/docs/refunds',
+            'https://example.com/files/manual.pdf',
+            'https://other.example.com/docs',
+          ],
+        };
+      }
+
+      return {
+        url,
+        httpStatus: 200,
+        title: 'Refunds',
+        text: 'Refunds are accepted within fourteen days.',
+        links: [],
+      };
+    });
+    const service = new AiWebsiteSyncService(repository as never, { fetchPage });
+
+    const result = await service.syncSource({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      url: 'https://example.com/docs',
+      crawlMode: 'site',
+      sourceType: 'website',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(repository.replaceSourceDocuments).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      documents: [
+        expect.objectContaining({
+          documentType: 'website_page',
+          contentText: 'Start here.',
+          metadataJson: expect.objectContaining({ url: 'https://example.com/docs' }),
+        }),
+        expect.objectContaining({
+          documentType: 'website_page',
+          contentText: 'Refunds are accepted within fourteen days.',
+          metadataJson: expect.objectContaining({ url: 'https://example.com/docs/refunds' }),
+        }),
+      ],
+    });
+    expect(repository.markSourceSyncCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentCount: 2,
+        pageTitle: 'Docs',
+      }),
+    );
+  });
+
+  it('stores RSS feed items as knowledge documents', async () => {
+    const repository = {
+      markSourceSyncStarted: vi.fn().mockResolvedValue(undefined),
+      replaceSourceDocuments: vi.fn().mockResolvedValue([{ id: 'doc-1' }]),
+      markSourceSyncCompleted: vi.fn().mockResolvedValue(undefined),
+      markSourceSyncFailed: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new AiWebsiteSyncService(repository as never, {
+      fetchPage: vi.fn(),
+      fetchText: vi.fn().mockResolvedValue({
+        url: 'https://example.com/feed.xml',
+        httpStatus: 200,
+        text: `<?xml version="1.0"?>
+          <rss><channel><title>Updates</title><item>
+            <title>New setup guide</title>
+            <link>https://example.com/setup</link>
+            <pubDate>Mon, 27 Apr 2026 10:00:00 GMT</pubDate>
+            <description>Setup now takes five minutes.</description>
+          </item></channel></rss>`,
+      }),
+    });
+
+    const result = await service.syncSource({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      url: 'https://example.com/feed.xml',
+      sourceType: 'rss_feed',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.replaceSourceDocuments).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      documents: [
+        expect.objectContaining({
+          documentType: 'rss_item',
+          contentText: expect.stringContaining('Setup now takes five minutes.'),
+          metadataJson: {
+            title: 'New setup guide',
+            url: 'https://example.com/setup',
+            feedUrl: 'https://example.com/feed.xml',
+            publishedAt: 'Mon, 27 Apr 2026 10:00:00 GMT',
+            httpStatus: 200,
+          },
+        }),
+      ],
+    });
+  });
 });

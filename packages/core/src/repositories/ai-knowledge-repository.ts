@@ -1,9 +1,10 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import { getDb } from '../infra/db/client.js';
 import {
   aiAnswerCorrectionContexts,
+  aiConversationTurns,
   aiCustomQas,
   aiDiscordChannelCategorySources,
   aiDiscordChannelMessages,
@@ -14,6 +15,8 @@ import {
 import { isMysqlDuplicateEntryError } from '../utils/mysql-errors.js';
 
 export type AiWebsiteSourceStatus = 'pending' | 'syncing' | 'ready' | 'failed';
+export type AiWebsiteSourceType = 'website' | 'rss_feed';
+export type AiWebsiteCrawlMode = 'page' | 'site';
 export type AiDiscordChannelSourceStatus = 'pending' | 'syncing' | 'ready' | 'failed';
 
 export type AiAnswerCorrectionContextRecord = {
@@ -30,6 +33,8 @@ export type AiWebsiteSourceRecord = {
   id: string;
   guildId: string;
   url: string;
+  sourceType: AiWebsiteSourceType;
+  crawlMode: AiWebsiteCrawlMode;
   status: AiWebsiteSourceStatus;
   lastSyncedAt: Date | null;
   lastSyncStartedAt: Date | null;
@@ -37,10 +42,23 @@ export type AiWebsiteSourceRecord = {
   httpStatus: number | null;
   contentHash: string | null;
   pageTitle: string | null;
+  documentCount: number;
   createdByDiscordUserId: string | null;
   updatedByDiscordUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type AiConversationTurnRecord = {
+  id: string;
+  guildId: string;
+  channelId: string;
+  discordUserId: string;
+  userMessageId: string;
+  botMessageId: string | null;
+  userContent: string;
+  botContent: string;
+  createdAt: Date;
 };
 
 export type AiKnowledgeDocumentRecord = {
@@ -126,6 +144,16 @@ export type AiSyncDiscordChannelMessageInput = {
   metadataJson: Record<string, unknown>;
 };
 
+export type AiSaveConversationTurnInput = {
+  guildId: string;
+  channelId: string;
+  discordUserId: string;
+  userMessageId: string;
+  botMessageId: string | null;
+  userContent: string;
+  botContent: string;
+};
+
 export type AiRetrievedEvidence = {
   sourceType: 'website_document' | 'custom_qa' | 'discord_channel_message';
   sourceId: string;
@@ -172,6 +200,8 @@ function mapWebsiteSourceRow(row: typeof aiWebsiteSources.$inferSelect): AiWebsi
     id: row.id,
     guildId: row.guildId,
     url: row.url,
+    sourceType: row.sourceType,
+    crawlMode: row.crawlMode,
     status: row.status,
     lastSyncedAt: row.lastSyncedAt ?? null,
     lastSyncStartedAt: row.lastSyncStartedAt ?? null,
@@ -179,10 +209,25 @@ function mapWebsiteSourceRow(row: typeof aiWebsiteSources.$inferSelect): AiWebsi
     httpStatus: row.httpStatus ?? null,
     contentHash: row.contentHash ?? null,
     pageTitle: row.pageTitle ?? null,
+    documentCount: row.documentCount,
     createdByDiscordUserId: row.createdByDiscordUserId ?? null,
     updatedByDiscordUserId: row.updatedByDiscordUserId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function mapConversationTurnRow(row: typeof aiConversationTurns.$inferSelect): AiConversationTurnRecord {
+  return {
+    id: row.id,
+    guildId: row.guildId,
+    channelId: row.channelId,
+    discordUserId: row.discordUserId,
+    userMessageId: row.userMessageId,
+    botMessageId: row.botMessageId ?? null,
+    userContent: row.userContent,
+    botContent: row.botContent,
+    createdAt: row.createdAt,
   };
 }
 
@@ -344,6 +389,8 @@ export class AiKnowledgeRepository {
   public async createWebsiteSource(input: {
     guildId: string;
     url: string;
+    sourceType?: AiWebsiteSourceType;
+    crawlMode?: AiWebsiteCrawlMode;
     createdByDiscordUserId?: string | null;
   }): Promise<{ created: boolean; record: AiWebsiteSourceRecord }> {
     const existing = await this.db.query.aiWebsiteSources.findFirst({
@@ -354,6 +401,35 @@ export class AiKnowledgeRepository {
     });
 
     if (existing) {
+      const nextSourceType = input.sourceType ?? existing.sourceType;
+      const nextCrawlMode = input.crawlMode ?? existing.crawlMode;
+      if (existing.sourceType !== nextSourceType || existing.crawlMode !== nextCrawlMode) {
+        const now = new Date();
+        await this.db
+          .update(aiWebsiteSources)
+          .set({
+            sourceType: nextSourceType,
+            crawlMode: nextCrawlMode,
+            updatedByDiscordUserId: input.createdByDiscordUserId ?? null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(aiWebsiteSources.guildId, input.guildId),
+              eq(aiWebsiteSources.id, existing.id),
+            ),
+          );
+        const updated = await this.getWebsiteSource({
+          guildId: input.guildId,
+          sourceId: existing.id,
+        });
+
+        return {
+          created: false,
+          record: updated ?? mapWebsiteSourceRow(existing),
+        };
+      }
+
       return {
         created: false,
         record: mapWebsiteSourceRow(existing),
@@ -368,7 +444,10 @@ export class AiKnowledgeRepository {
         id: sourceId,
         guildId: input.guildId,
         url: input.url,
+        sourceType: input.sourceType ?? 'website',
+        crawlMode: input.crawlMode ?? 'page',
         status: 'pending',
+        documentCount: 0,
         createdByDiscordUserId: input.createdByDiscordUserId ?? null,
         updatedByDiscordUserId: input.createdByDiscordUserId ?? null,
         createdAt: now,
@@ -454,6 +533,52 @@ export class AiKnowledgeRepository {
           updatedAt: now,
         },
       });
+  }
+
+  public async listConversationTurns(input: {
+    guildId: string;
+    channelId: string;
+    discordUserId: string;
+    since: Date;
+    limit: number;
+  }): Promise<AiConversationTurnRecord[]> {
+    const rows = await this.db.query.aiConversationTurns.findMany({
+      where: and(
+        eq(aiConversationTurns.guildId, input.guildId),
+        eq(aiConversationTurns.channelId, input.channelId),
+        eq(aiConversationTurns.discordUserId, input.discordUserId),
+        gte(aiConversationTurns.createdAt, input.since),
+      ),
+      orderBy: (table, { desc }) => [desc(table.createdAt), desc(table.id)],
+      limit: input.limit,
+    });
+
+    return rows.map(mapConversationTurnRow).reverse();
+  }
+
+  public async saveConversationTurn(input: AiSaveConversationTurnInput): Promise<AiConversationTurnRecord> {
+    const now = new Date();
+    const id = ulid();
+    await this.db.insert(aiConversationTurns).values({
+      id,
+      guildId: input.guildId,
+      channelId: input.channelId,
+      discordUserId: input.discordUserId,
+      userMessageId: input.userMessageId,
+      botMessageId: input.botMessageId,
+      userContent: input.userContent,
+      botContent: input.botContent,
+      createdAt: now,
+    });
+
+    const row = await this.db.query.aiConversationTurns.findFirst({
+      where: eq(aiConversationTurns.id, id),
+    });
+    if (!row) {
+      throw new Error('Failed to save AI conversation turn');
+    }
+
+    return mapConversationTurnRow(row);
   }
 
   public async getAnswerCorrectionContext(input: {
@@ -987,6 +1112,7 @@ export class AiKnowledgeRepository {
     httpStatus: number;
     pageTitle: string | null;
     contentHash: string;
+    documentCount?: number;
     syncedAt?: Date;
     updatedByDiscordUserId?: string | null;
   }): Promise<void> {
@@ -1001,6 +1127,7 @@ export class AiKnowledgeRepository {
         httpStatus: input.httpStatus,
         pageTitle: input.pageTitle,
         contentHash: input.contentHash,
+        documentCount: input.documentCount ?? 1,
         updatedByDiscordUserId: input.updatedByDiscordUserId ?? null,
         updatedAt: syncedAt,
       })
@@ -1025,6 +1152,7 @@ export class AiKnowledgeRepository {
         status: 'failed',
         lastSyncError: input.errorMessage,
         httpStatus: input.httpStatus ?? null,
+        documentCount: 0,
         updatedByDiscordUserId: input.updatedByDiscordUserId ?? null,
         updatedAt: failedAt,
       })

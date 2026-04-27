@@ -70,9 +70,9 @@ Copy `.env.example` to `.env` and fill values.
 
 ## AI Knowledge Sources
 
-Voodoo AI separates where the bot replies from what the bot can use as evidence. Reply channels control where the bot answers. Website sources, custom Q&A, and Discord knowledge channels control what the bot can cite when generating answers.
+Voodoo AI separates where the bot replies from what the bot can use as evidence. Reply channels control where the bot answers. Website sources, RSS feeds, custom Q&A, and Discord knowledge channels control what the bot can cite when generating answers.
 
-Discord knowledge channels are intended for read-only, announcement, forum, or media channels. Selecting one backfills the latest 500 messages, stores message text plus Discord embed text as grounding material, refreshes selected channels four times per day, and removes deleted messages from stored knowledge when Discord emits a delete event. Forum and media channels are read through their post threads, including channels whose direct history endpoint returns no messages. Categories can also be auto-selected so every current and future text, announcement, forum, or media channel inside the category is backfilled and refreshed automatically. Website sources are also refreshed four times per day so updated docs or blogs are picked up automatically. If the AI cannot ground an answer in approved evidence, it stays silent instead of posting a fallback refusal. If an answer is wrong, Discord administrators can use the persistent `Mark wrong` button on the AI reply to open a correction modal with the original question prefilled, then save the right answer as Custom Q&A for future matching questions.
+Discord knowledge channels are intended for read-only, announcement, forum, or media channels. Selecting one backfills the latest 500 messages, stores message text plus Discord embed text as grounding material, refreshes selected channels four times per day, and removes deleted messages from stored knowledge when Discord emits a delete event. Forum and media channels are read through their post threads, including channels whose direct history endpoint returns no messages. Categories can also be auto-selected so every current and future text, announcement, forum, or media channel inside the category is backfilled and refreshed automatically. Website sources can be a single page, a bounded same-site crawl, or an RSS/Atom feed; all are refreshed four times per day so updated docs, blogs, and announcements are picked up automatically. The AI keeps the last six successful turns for the same Discord user in the same channel for 30 minutes so follow-up questions can resolve context without mixing customers. If the AI cannot ground an answer in approved evidence, it stays silent instead of posting a fallback refusal. If an answer is wrong, Discord administrators can use the persistent `Mark wrong` button on the AI reply to open a correction modal with the original question prefilled, then save the right answer as Custom Q&A for future matching questions.
 
 ## Commands
 
@@ -232,12 +232,12 @@ Discord knowledge channels are intended for read-only, announcement, forum, or m
   - persistent `Mark wrong` buttons on AI answers so server administrators can save corrected answers as Custom Q&A with the source question prefilled
   - allowlist/blocklist role rules
   - tone preset plus custom instructions
-  - manual website sources with sync-on-save and manual re-sync
+  - website page, same-site crawl, and RSS feed sources with sync-on-save and manual re-sync
   - Discord knowledge channels and category auto-select rules for current/future text, announcement, forum, and media channels
   - custom Q&A entries
   - activation state, bot presence, and diagnostics
 - The Voodoo AI dashboard uses a black-and-white interactive Three.js control surface with Framer Motion transitions, persisted dark/light mode, and shadcn controls around live bot configuration.
-- The AI runtime only answers in configured channels or auto-selected reply categories, only for roles allowed by the guild rule set, and only from grounded website/Discord/custom-Q&A evidence. If retrieval is weak, it stays silent instead of falling back to general model knowledge, and can log the unanswered question for administrators to turn into a saved Q&A.
+- The AI runtime only answers in configured channels or auto-selected reply categories, only for roles allowed by the guild rule set, and only from grounded website/RSS/Discord/custom-Q&A evidence. It includes bounded same-user conversation memory for follow-up wording, but still treats approved knowledge as the only factual source. If retrieval is weak, it stays silent instead of falling back to general model knowledge, and can log the unanswered question for administrators to turn into a saved Q&A.
 
 ## Ticket Sale Flow
 

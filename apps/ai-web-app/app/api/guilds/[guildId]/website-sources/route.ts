@@ -9,6 +9,8 @@ const knowledgeManagementService = new AiKnowledgeManagementService();
 
 type CreateWebsiteSourceBody = {
   url: string;
+  sourceType?: 'website' | 'rss_feed';
+  crawlMode?: 'page' | 'site';
 };
 
 export async function POST(
@@ -26,6 +28,8 @@ export async function POST(
     const result = await knowledgeManagementService.createWebsiteSource({
       guildId,
       url: body.url,
+      sourceType: body.sourceType,
+      crawlMode: body.crawlMode,
       actorDiscordUserId: access.value.session.discordUserId,
     });
 

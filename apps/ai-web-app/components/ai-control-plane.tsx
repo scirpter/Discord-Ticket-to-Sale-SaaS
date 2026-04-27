@@ -12,6 +12,7 @@ import {
   MessagesSquare,
   Plus,
   RefreshCcw,
+  Rss,
   Save,
   ShieldCheck,
   Sparkles,
@@ -28,6 +29,8 @@ type TonePreset = 'professional' | 'standard' | 'witty' | 'cheeky';
 type RoleMode = 'allowlist' | 'blocklist';
 type ReplyMode = 'inline' | 'thread';
 type ReplyFrequency = 'low' | 'mid' | 'max';
+type WebsiteSourceType = 'website' | 'rss_feed';
+type WebsiteCrawlMode = 'page' | 'site';
 
 type SnapshotPayload = {
   guild: AiDashboardGuild;
@@ -84,6 +87,8 @@ type SnapshotPayload = {
   websiteSources: Array<{
     sourceId: string;
     url: string;
+    sourceType: WebsiteSourceType;
+    crawlMode: WebsiteCrawlMode;
     status: 'pending' | 'syncing' | 'ready' | 'failed';
     lastSyncedAt: string | null;
     lastSyncStartedAt: string | null;
@@ -91,6 +96,7 @@ type SnapshotPayload = {
     httpStatus: number | null;
     contentHash: string | null;
     pageTitle: string | null;
+    documentCount: number;
     createdAt: string;
     updatedAt: string;
   }>;
@@ -262,6 +268,8 @@ export function AiControlPlane({
   const [formState, setFormState] = useState<SettingsFormState | null>(null);
   const [qaDrafts, setQaDrafts] = useState<Record<string, { question: string; answer: string }>>({});
   const [websiteUrl, setWebsiteUrl] = useState('');
+  const [websiteSourceType, setWebsiteSourceType] = useState<WebsiteSourceType>('website');
+  const [websiteCrawlMode, setWebsiteCrawlMode] = useState<WebsiteCrawlMode>('page');
   const [newQaQuestion, setNewQaQuestion] = useState('');
   const [newQaAnswer, setNewQaAnswer] = useState('');
   const [selectedReplyCategoryId, setSelectedReplyCategoryId] = useState<string | null>(null);
@@ -418,7 +426,11 @@ export function AiControlPlane({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: websiteUrl }),
+        body: JSON.stringify({
+          url: websiteUrl,
+          sourceType: websiteSourceType,
+          crawlMode: websiteSourceType === 'website' ? websiteCrawlMode : 'page',
+        }),
       });
 
       if (!response.ok) {
@@ -427,7 +439,13 @@ export function AiControlPlane({
       }
 
       setWebsiteUrl('');
-      setStatusMessage({ kind: 'success', text: 'Website source saved and synced.' });
+      setStatusMessage({
+        kind: 'success',
+        text:
+          websiteSourceType === 'rss_feed'
+            ? 'RSS feed saved and synced.'
+            : 'Website source saved and synced.',
+      });
       await loadGuildPanel(selectedGuildId);
     });
   }
@@ -1312,19 +1330,41 @@ export function AiControlPlane({
                       Website source
                     </p>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Paste one exact URL. The panel ingests it immediately and refreshes it automatically four times per day.
+                      Add one page, a same-site crawl, or an RSS feed. The panel ingests it immediately and refreshes it automatically four times per day.
                     </p>
                   </div>
-                  <Globe className="mt-1 size-5 text-primary" />
+                  {websiteSourceType === 'rss_feed' ? (
+                    <Rss className="mt-1 size-5 text-primary" />
+                  ) : (
+                    <Globe className="mt-1 size-5 text-primary" />
+                  )}
                 </div>
 
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_auto]">
                   <input
                     value={websiteUrl}
                     onChange={(event) => setWebsiteUrl(event.target.value)}
-                    placeholder="https://docs.example.com/faq"
+                    placeholder={
+                      websiteSourceType === 'rss_feed'
+                        ? 'https://example.com/feed.xml'
+                        : 'https://docs.example.com/faq'
+                    }
                     className="h-12 flex-1 rounded-md border border-input bg-card px-4 text-sm text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
                   />
+                  <select
+                    value={websiteSourceType}
+                    onChange={(event) => {
+                      const nextType = event.target.value as WebsiteSourceType;
+                      setWebsiteSourceType(nextType);
+                      if (nextType === 'rss_feed') {
+                        setWebsiteCrawlMode('page');
+                      }
+                    }}
+                    className="h-12 rounded-md border border-input bg-card px-4 text-sm font-semibold text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+                  >
+                    <option value="website">Website</option>
+                    <option value="rss_feed">RSS feed</option>
+                  </select>
                   <button
                     type="submit"
                     disabled={isMutating}
@@ -1334,6 +1374,20 @@ export function AiControlPlane({
                     Add and sync
                   </button>
                 </div>
+
+                {websiteSourceType === 'website' ? (
+                  <label className="mt-3 flex items-center gap-3 text-sm font-semibold text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={websiteCrawlMode === 'site'}
+                      onChange={(event) =>
+                        setWebsiteCrawlMode(event.target.checked ? 'site' : 'page')
+                      }
+                      className="size-4 rounded border-input accent-primary"
+                    />
+                    Scan whole site
+                  </label>
+                ) : null}
               </form>
 
               <div className="space-y-3">
@@ -1353,6 +1407,13 @@ export function AiControlPlane({
                           >
                             {source.status}
                           </StatusPill>
+                          <StatusPill status="neutral">
+                            {source.sourceType === 'rss_feed'
+                              ? 'RSS'
+                              : source.crawlMode === 'site'
+                                ? 'Site'
+                                : 'Page'}
+                          </StatusPill>
                           <span className="text-[0.66rem] uppercase text-muted-foreground">
                             {source.pageTitle || 'Untitled source'}
                           </span>
@@ -1360,6 +1421,9 @@ export function AiControlPlane({
                         <p className="break-all text-sm font-semibold text-foreground">{source.url}</p>
                         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                           <span>HTTP {source.httpStatus ?? 'n/a'}</span>
+                          <span>
+                            {source.documentCount} doc{source.documentCount === 1 ? '' : 's'}
+                          </span>
                           <span>Last sync {formatDateTime(source.lastSyncedAt)}</span>
                           <span>Updated {formatDateTime(source.updatedAt)}</span>
                         </div>

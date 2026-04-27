@@ -90,6 +90,7 @@ function createGuildState(overrides?: Partial<Awaited<ReturnType<AiMessageRuntim
 
 function createDependencies(input?: {
   state?: Awaited<ReturnType<AiMessageRuntimeDependencies['loadGuildState']>>;
+  conversationTurns?: Array<{ userContent: string; botContent: string }>;
   answerResult?:
     | ReturnType<typeof createOkResult>
     | {
@@ -99,10 +100,14 @@ function createDependencies(input?: {
       };
 }): AiMessageRuntimeDependencies & {
   loadGuildState: ReturnType<typeof vi.fn>;
+  loadConversationTurns: ReturnType<typeof vi.fn>;
+  saveConversationTurn: ReturnType<typeof vi.fn>;
   answerMessage: ReturnType<typeof vi.fn>;
 } {
   return {
     loadGuildState: vi.fn().mockResolvedValue(input?.state ?? createGuildState()),
+    loadConversationTurns: vi.fn().mockResolvedValue(input?.conversationTurns ?? []),
+    saveConversationTurn: vi.fn().mockResolvedValue(undefined),
     answerMessage: vi
       .fn()
       .mockResolvedValue(
@@ -127,7 +132,7 @@ function createMessage(input?: {
   missingPermissions?: bigint[];
 }) {
   const send = vi.fn(async () => undefined);
-  const startThread = vi.fn(async () => ({ send }));
+  const startThread = vi.fn(async () => ({ id: 'created-thread', send }));
   const reply = vi.fn(async () => undefined);
   const missingPermissions = new Set(input?.missingPermissions ?? []);
 
@@ -317,13 +322,15 @@ describe('AI message runtime', () => {
       replyMode: 'thread',
       content: 'Grounded answer',
     });
-    expect(dependencies.answerMessage).toHaveBeenCalledWith({
-      guildId: 'guild-1',
-      question: 'refund policy?',
-      tonePreset: 'professional',
-      toneInstructions: '',
-      replyFrequency: 'mid',
-    });
+    expect(dependencies.answerMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: 'guild-1',
+        question: 'refund policy?',
+        tonePreset: 'professional',
+        toneInstructions: '',
+        replyFrequency: 'mid',
+      }),
+    );
   });
 
   it('allows replies through an auto-selected channel category', async () => {
@@ -381,6 +388,37 @@ describe('AI message runtime', () => {
       replyMode: 'thread',
       content: 'Grounded answer',
     });
+  });
+
+  it('loads same-user conversation memory before answering', async () => {
+    const dependencies = createDependencies({
+      conversationTurns: [{ userContent: 'Tell me about Pro.', botContent: 'Pro includes setup.' }],
+    });
+
+    const result = await handleAiMessage(
+      {
+        id: 'msg-1',
+        guildId: 'guild-1',
+        channelId: 'allowed-channel',
+        author: { bot: false, id: 'user-1' },
+        content: 'Does it include onboarding?',
+        memberRoleIds: ['role-1'],
+      },
+      dependencies,
+    );
+
+    expect(result).toMatchObject({ kind: 'reply' });
+    expect(dependencies.loadConversationTurns).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      channelId: 'allowed-channel',
+      discordUserId: 'user-1',
+    });
+    expect(dependencies.answerMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Does it include onboarding?',
+        conversationTurns: [{ userContent: 'Tell me about Pro.', botContent: 'Pro includes setup.' }],
+      }),
+    );
   });
 
   it('returns ignored when grounded answering returns a refusal and unanswered logging is disabled', async () => {
@@ -476,6 +514,15 @@ describe('AI message runtime', () => {
       sourceMessageId: 'msg-1',
       question: 'What is the refund policy?',
     });
+    expect(dependencies.saveConversationTurn).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      channelId: 'allowed-channel',
+      discordUserId: 'user-1',
+      userMessageId: 'msg-1',
+      botMessageId: null,
+      userContent: 'What is the refund policy?',
+      botContent: 'Grounded answer',
+    });
   });
 
   it('replies in a thread when thread mode is configured', async () => {
@@ -493,6 +540,13 @@ describe('AI message runtime', () => {
       expect.objectContaining({
         content: 'Grounded answer',
         components: expect.any(Array),
+      }),
+    );
+    expect(dependencies.saveConversationTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'created-thread',
+        userMessageId: 'msg-1',
+        botContent: 'Grounded answer',
       }),
     );
   });

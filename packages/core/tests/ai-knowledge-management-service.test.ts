@@ -18,6 +18,9 @@ describe('AiKnowledgeManagementService', () => {
           httpStatus: null,
           contentHash: null,
           pageTitle: null,
+          sourceType: 'website',
+          crawlMode: 'site',
+          documentCount: 0,
           createdByDiscordUserId: 'discord-user-1',
           updatedByDiscordUserId: 'discord-user-1',
           createdAt: new Date('2026-04-23T10:00:00.000Z'),
@@ -35,6 +38,9 @@ describe('AiKnowledgeManagementService', () => {
         httpStatus: 200,
         contentHash: 'hash-1',
         pageTitle: 'FAQ',
+        sourceType: 'website',
+        crawlMode: 'site',
+        documentCount: 3,
         createdByDiscordUserId: 'discord-user-1',
         updatedByDiscordUserId: 'discord-user-1',
         createdAt: new Date('2026-04-23T10:00:00.000Z'),
@@ -67,6 +73,8 @@ describe('AiKnowledgeManagementService', () => {
     const result = await service.createWebsiteSource({
       guildId: 'guild-1',
       url: ' https://docs.example.com/faq#intro ',
+      sourceType: 'website',
+      crawlMode: 'site',
       actorDiscordUserId: 'discord-user-1',
     });
 
@@ -74,12 +82,16 @@ describe('AiKnowledgeManagementService', () => {
     expect(repository.createWebsiteSource).toHaveBeenCalledWith({
       guildId: 'guild-1',
       url: 'https://docs.example.com/faq',
+      sourceType: 'website',
+      crawlMode: 'site',
       createdByDiscordUserId: 'discord-user-1',
     });
     expect(syncService.syncSource).toHaveBeenCalledWith({
       guildId: 'guild-1',
       sourceId: 'source-1',
       url: 'https://docs.example.com/faq',
+      sourceType: 'website',
+      crawlMode: 'site',
       updatedByDiscordUserId: 'discord-user-1',
     });
     if (result.isOk()) {

@@ -2,12 +2,17 @@ import {
   AiAccessService,
   AiAnswerService,
   AiConfigService,
+  AiKnowledgeRepository,
   type AiAnswerResult,
+  type AiAnswerConversationTurn,
   type AiReplyFrequency,
   type AiReplyMode,
   type AiRoleMode,
   type AiTonePreset,
 } from '@voodoo/core';
+
+const AI_CONVERSATION_TURN_LIMIT = 6;
+const AI_CONVERSATION_MEMORY_WINDOW_MS = 30 * 60 * 1000;
 
 export type AiRuntimeMessage = {
   id: string;
@@ -50,6 +55,8 @@ export type AiRuntimeReply = {
   content: string;
 };
 
+export type AiRuntimeConversationTurn = AiAnswerConversationTurn;
+
 export type AiRuntimeUnanswered = {
   kind: 'unanswered';
   guildId: string;
@@ -74,7 +81,22 @@ export type AiMessageRuntimeDependencies = {
     tonePreset: AiTonePreset;
     toneInstructions: string;
     replyFrequency: AiReplyFrequency;
+    conversationTurns?: AiRuntimeConversationTurn[];
   }): ReturnType<AiAnswerService['answerMessage']>;
+  loadConversationTurns(input: {
+    guildId: string;
+    channelId: string;
+    discordUserId: string;
+  }): Promise<AiRuntimeConversationTurn[]>;
+  saveConversationTurn(input: {
+    guildId: string;
+    channelId: string;
+    discordUserId: string;
+    userMessageId: string;
+    botMessageId: string | null;
+    userContent: string;
+    botContent: string;
+  }): Promise<void>;
 };
 
 function normalizeMessageContent(content: string): string {
@@ -109,10 +131,12 @@ export function createAiMessageRuntimeDependencies(input?: {
   accessService?: AiAccessService;
   configService?: AiConfigService;
   answerService?: AiAnswerService;
+  knowledgeRepository?: AiKnowledgeRepository;
 }): AiMessageRuntimeDependencies {
   const accessService = input?.accessService ?? new AiAccessService();
   const configService = input?.configService ?? new AiConfigService();
   const answerService = input?.answerService ?? new AiAnswerService();
+  const knowledgeRepository = input?.knowledgeRepository ?? new AiKnowledgeRepository();
 
   return {
     async loadGuildState({ guildId }) {
@@ -144,14 +168,39 @@ export function createAiMessageRuntimeDependencies(input?: {
         roleIds: settingsResult.value.roleIds,
       };
     },
-    answerMessage({ guildId, question, tonePreset, toneInstructions, replyFrequency }) {
+    answerMessage({
+      guildId,
+      question,
+      tonePreset,
+      toneInstructions,
+      replyFrequency,
+      conversationTurns,
+    }) {
       return answerService.answerMessage({
         guildId,
         question,
         tonePreset,
         toneInstructions,
         replyFrequency,
+        conversationTurns,
       });
+    },
+    async loadConversationTurns({ guildId, channelId, discordUserId }) {
+      const turns = await knowledgeRepository.listConversationTurns({
+        guildId,
+        channelId,
+        discordUserId,
+        since: new Date(Date.now() - AI_CONVERSATION_MEMORY_WINDOW_MS),
+        limit: AI_CONVERSATION_TURN_LIMIT,
+      });
+
+      return turns.map((turn) => ({
+        userContent: turn.userContent,
+        botContent: turn.botContent,
+      }));
+    },
+    async saveConversationTurn(input) {
+      await knowledgeRepository.saveConversationTurn(input);
     },
   };
 }
@@ -256,12 +305,27 @@ export async function handleAiMessage(
     return { kind: 'ignored' };
   }
 
+  let conversationTurns: AiRuntimeConversationTurn[];
+  try {
+    conversationTurns = await dependencies.loadConversationTurns({
+      guildId: message.guildId,
+      channelId: message.channelId,
+      discordUserId: message.author.id,
+    });
+  } catch (error) {
+    return {
+      kind: 'failed',
+      message: mapRuntimeError(error),
+    };
+  }
+
   const answerResult = await dependencies.answerMessage({
     guildId: message.guildId,
     question: normalizedContent,
     tonePreset: state.tonePreset,
     toneInstructions: state.toneInstructions,
     replyFrequency: state.replyFrequency,
+    conversationTurns,
   });
 
   if (answerResult.isErr()) {

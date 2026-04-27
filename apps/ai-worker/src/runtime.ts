@@ -23,6 +23,7 @@ import {
 } from '@voodoo/core';
 
 import {
+  createAiMessageRuntimeDependencies,
   handleAiMessage,
   type AiMessageRuntimeDependencies,
   type AiRuntimeUnanswered,
@@ -456,6 +457,54 @@ async function saveAnswerCorrectionContext(input: {
   }
 }
 
+function extractSentMessageId(sentMessage: unknown): string | null {
+  if (!sentMessage || typeof sentMessage !== 'object' || !('id' in sentMessage)) {
+    return null;
+  }
+
+  const messageId = (sentMessage as { id?: unknown }).id;
+  return typeof messageId === 'string' && messageId.trim().length > 0 ? messageId : null;
+}
+
+async function saveConversationTurnAfterReply(input: {
+  message: Message;
+  conversationChannelId?: string;
+  botMessageId: string | null;
+  botContent: string;
+  dependencies: AiMessageRuntimeDependencies;
+}): Promise<void> {
+  if (!input.message.guildId) {
+    return;
+  }
+
+  const userContent = input.message.content.trim();
+  if (!userContent || !input.botContent.trim()) {
+    return;
+  }
+
+  try {
+    await input.dependencies.saveConversationTurn({
+      guildId: input.message.guildId,
+      channelId: input.conversationChannelId ?? input.message.channelId,
+      discordUserId: input.message.author.id,
+      userMessageId: input.message.id,
+      botMessageId: input.botMessageId,
+      userContent,
+      botContent: input.botContent,
+    });
+  } catch (error) {
+    logger.warn(
+      {
+        err: error,
+        guildId: input.message.guildId,
+        channelId: input.message.channelId,
+        messageId: input.message.id,
+      },
+      'ai-worker failed to store conversation turn',
+    );
+  }
+}
+
 type AiCustomQaCreator = Pick<AiKnowledgeManagementService, 'createCustomQa'>;
 
 export async function handleAiUnansweredLearningInteraction(
@@ -680,6 +729,7 @@ export async function processIncomingMessage(
   dependencies?: AiMessageRuntimeDependencies,
   runtimeDependencies?: AiWorkerRuntimeDependencies,
 ): Promise<void> {
+  const messageRuntimeDependencies = dependencies ?? createAiMessageRuntimeDependencies();
   const result = await handleAiMessage(
     {
       id: message.id,
@@ -691,7 +741,7 @@ export async function processIncomingMessage(
       content: message.content,
       memberRoleIds: message.member?.roles.cache.map((role) => role.id) ?? [],
     },
-    dependencies,
+    messageRuntimeDependencies,
   );
 
   if (result.kind === 'ignored') {
@@ -735,7 +785,7 @@ export async function processIncomingMessage(
     const thread = isThreadChannel(message.channel)
       ? message.channel
       : await message.startThread({ name: `ai-${message.id}` });
-    await thread.send(
+    const sentMessage = await thread.send(
       buildAiAnswerPayload({
         content: result.content,
         ref: { channelId: message.channelId, messageId: message.id },
@@ -746,10 +796,17 @@ export async function processIncomingMessage(
       question: message.content,
       correctionContextStore: runtimeDependencies?.correctionContextStore,
     });
+    await saveConversationTurnAfterReply({
+      message,
+      conversationChannelId: thread.id,
+      botMessageId: extractSentMessageId(sentMessage),
+      botContent: result.content,
+      dependencies: messageRuntimeDependencies,
+    });
     return;
   }
 
-  await message.reply(
+  const sentMessage = await message.reply(
     buildAiAnswerPayload({
       content: result.content,
       ref: { channelId: message.channelId, messageId: message.id },
@@ -759,5 +816,11 @@ export async function processIncomingMessage(
     message,
     question: message.content,
     correctionContextStore: runtimeDependencies?.correctionContextStore,
+  });
+  await saveConversationTurnAfterReply({
+    message,
+    botMessageId: extractSentMessageId(sentMessage),
+    botContent: result.content,
+    dependencies: messageRuntimeDependencies,
   });
 }

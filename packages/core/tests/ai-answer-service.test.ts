@@ -250,4 +250,52 @@ describe('AiAnswerService', () => {
       }),
     );
   });
+
+  it('uses recent conversation turns to retrieve and answer follow-up questions', async () => {
+    const retrieveEvidence = vi.fn().mockResolvedValue([
+      {
+        sourceType: 'website_document',
+        sourceId: 'source-1',
+        content: 'The Pro plan includes priority setup support.',
+        title: 'Plans',
+        url: 'https://example.com/plans',
+        question: null,
+        answer: null,
+        channelId: null,
+        messageId: null,
+        score: 8,
+      },
+    ]);
+    const generateGroundedResponse = vi.fn().mockResolvedValue({
+      outputText: 'Yes. The Pro plan includes priority setup support.',
+      requestId: 'req_123',
+      model: 'gpt-4o-mini',
+    });
+    const service = new AiAnswerService({ retrieveEvidence }, { generateGroundedResponse });
+
+    const result = await service.answerMessage({
+      guildId: 'guild-1',
+      question: 'Does it include setup?',
+      tonePreset: 'professional',
+      toneInstructions: '',
+      conversationTurns: [
+        {
+          userContent: 'Tell me about the Pro plan.',
+          botContent: 'The Pro plan includes faster support and onboarding.',
+        },
+      ],
+    });
+
+    expect(retrieveEvidence).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      question: 'Tell me about the Pro plan.\nThe Pro plan includes faster support and onboarding.\nDoes it include setup?',
+    });
+    expect(generateGroundedResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Does it include setup?',
+        instructions: expect.stringContaining('Recent conversation with this same customer'),
+      }),
+    );
+    expect(result.isOk()).toBe(true);
+  });
 });

@@ -4,7 +4,9 @@ import { AppError } from '../domain/errors.js';
 import {
   AiKnowledgeRepository,
   type AiCustomQaRecord,
+  type AiWebsiteCrawlMode,
   type AiWebsiteSourceRecord,
+  type AiWebsiteSourceType,
 } from '../repositories/ai-knowledge-repository.js';
 import {
   AiWebsiteSyncService,
@@ -28,6 +30,8 @@ function mapWebsiteSourceSummary(source: AiWebsiteSourceRecord) {
     sourceId: source.id,
     guildId: source.guildId,
     url: source.url,
+    sourceType: source.sourceType,
+    crawlMode: source.crawlMode,
     status: source.status,
     lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
     lastSyncStartedAt: source.lastSyncStartedAt?.toISOString() ?? null,
@@ -35,11 +39,27 @@ function mapWebsiteSourceSummary(source: AiWebsiteSourceRecord) {
     httpStatus: source.httpStatus,
     contentHash: source.contentHash,
     pageTitle: source.pageTitle,
+    documentCount: source.documentCount,
     createdByDiscordUserId: source.createdByDiscordUserId,
     updatedByDiscordUserId: source.updatedByDiscordUserId,
     createdAt: source.createdAt.toISOString(),
     updatedAt: source.updatedAt.toISOString(),
   };
+}
+
+function normalizeSourceType(value: AiWebsiteSourceType | undefined): AiWebsiteSourceType {
+  return value === 'rss_feed' ? 'rss_feed' : 'website';
+}
+
+function normalizeCrawlMode(input: {
+  sourceType: AiWebsiteSourceType;
+  crawlMode: AiWebsiteCrawlMode | undefined;
+}): AiWebsiteCrawlMode {
+  if (input.sourceType === 'rss_feed') {
+    return 'page';
+  }
+
+  return input.crawlMode === 'site' ? 'site' : 'page';
 }
 
 function mapCustomQaSummary(customQa: AiCustomQaRecord) {
@@ -148,6 +168,8 @@ export class AiKnowledgeManagementService {
   public async createWebsiteSource(input: {
     guildId: string;
     url: string;
+    sourceType?: AiWebsiteSourceType;
+    crawlMode?: AiWebsiteCrawlMode;
     actorDiscordUserId: string;
   }): Promise<
     Result<
@@ -161,9 +183,13 @@ export class AiKnowledgeManagementService {
   > {
     try {
       const url = normalizeWebsiteUrl(input.url);
+      const sourceType = normalizeSourceType(input.sourceType);
+      const crawlMode = normalizeCrawlMode({ sourceType, crawlMode: input.crawlMode });
       const created = await this.repository.createWebsiteSource({
         guildId: input.guildId,
         url,
+        sourceType,
+        crawlMode,
         createdByDiscordUserId: input.actorDiscordUserId,
       });
 
@@ -172,6 +198,8 @@ export class AiKnowledgeManagementService {
         guildId: input.guildId,
         sourceId: created.record.id,
         url,
+        sourceType,
+        crawlMode,
         updatedByDiscordUserId: input.actorDiscordUserId,
       });
       if (syncAttempt.isErr()) {
@@ -222,6 +250,8 @@ export class AiKnowledgeManagementService {
         guildId: input.guildId,
         sourceId: source.id,
         url: source.url,
+        sourceType: source.sourceType,
+        crawlMode: source.crawlMode,
         updatedByDiscordUserId: input.actorDiscordUserId ?? null,
       });
     } catch (error) {

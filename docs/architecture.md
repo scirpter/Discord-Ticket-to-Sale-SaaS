@@ -37,6 +37,7 @@
 - Runs as a separate Next.js product surface on its own domain.
 - Handles Discord OAuth on the AI panel domain, guild access filtering for owners/admins, and all AI bot configuration flows.
 - Exposes guild-scoped API routes for AI settings, website sources, custom Q&A entries, bot resource discovery, and diagnostics snapshots.
+- Supports exact-page website sources, bounded same-site crawls, and RSS/Atom feed sources from the same knowledge-source panel.
 - Supports category-level reply and Discord knowledge source rules so newly created text, announcement, forum, and media channels can be picked up without reconfiguring the panel.
 - Lets admins configure reply frequency and an unanswered-question log channel for turning missed answers into Custom Q&A.
 
@@ -44,6 +45,7 @@
 - Runs as a separate Discord application/token dedicated to the AI bot.
 - Keeps `/activation` as the only slash-command surface.
 - Processes passive message replies in configured channels, enforces role allowlist/blocklist rules, retrieves grounded evidence, and posts inline or thread replies.
+- Loads the last six successful AI turns from the same Discord user in the same channel for 30 minutes, so follow-up questions can use local conversation wording without mixing customers or replacing approved evidence.
 - Logs unanswered qualifying questions to the configured admin channel and handles the Discord Add Q&A button/modal flow for members with Administrator permission. After a Q&A is saved from a log item, the original Add Q&A button is replaced with a disabled `Reply created` button so admins can see which questions were handled.
 
 ## Data Layer
@@ -68,10 +70,11 @@
   - `ai_reply_channels` for active AI reply lanes and per-channel inline/thread mode
   - `ai_reply_channel_categories` for active AI reply lanes that follow every current/future channel in a Discord category
   - `ai_role_rules` for allowlist/blocklist role filtering
-  - `ai_website_sources` for manual approved URLs and sync state
-  - `ai_knowledge_documents` for normalized synced website content
+  - `ai_website_sources` for approved website/RSS URLs, source type, crawl mode, document count, and sync state
+  - `ai_knowledge_documents` for normalized synced website pages and RSS items
   - `ai_discord_channel_sources` and `ai_discord_channel_category_sources` for synced Discord knowledge channels, forum/media post threads, and category auto-select rules. Forum/media sources fall back to post-thread sync when direct channel history is empty or unavailable.
   - `ai_custom_qas` for admin-authored grounded Q&A pairs
+  - `ai_conversation_turns` for bounded same-user/same-channel AI conversation context
 
 ## Security and Reliability
 

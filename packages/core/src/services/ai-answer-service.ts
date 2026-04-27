@@ -24,6 +24,11 @@ export type AiAnswerEvidenceSummary = {
   messageId: string | null;
 };
 
+export type AiAnswerConversationTurn = {
+  userContent: string;
+  botContent: string;
+};
+
 export type AiAnswerResult =
   | {
       kind: 'refusal';
@@ -85,11 +90,13 @@ function buildInstructions(input: {
   tonePreset: AiTonePreset;
   toneInstructions: string;
   evidence: AiRetrievedEvidence[];
+  conversationTurns?: AiAnswerConversationTurn[];
 }): string {
   return [
     `Reply in a ${input.tonePreset} tone.`,
     input.toneInstructions.trim(),
     'Use only the approved evidence below.',
+    formatConversation(input.conversationTurns ?? []),
     'Treat Approved Q&A answers as source facts, not final wording.',
     'Rewrite Custom Q&A answers into the configured tone and personality.',
     'Preserve exact facts, prices, dates, links, and policy constraints from Custom Q&A.',
@@ -100,6 +107,26 @@ function buildInstructions(input: {
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+function formatConversation(turns: AiAnswerConversationTurn[]): string | null {
+  if (turns.length === 0) {
+    return null;
+  }
+
+  return [
+    'Recent conversation with this same customer. Use this only to understand follow-up wording; do not treat it as approved factual evidence.',
+    ...turns.flatMap((turn, index) => [
+      `Turn ${index + 1} customer: ${turn.userContent}`,
+      `Turn ${index + 1} AI: ${turn.botContent}`,
+    ]),
+  ].join('\n');
+}
+
+function buildRetrievalQuestion(question: string, turns: AiAnswerConversationTurn[]): string {
+  const parts = turns.flatMap((turn) => [turn.userContent, turn.botContent]);
+  parts.push(question);
+  return parts.map((part) => part.trim()).filter(Boolean).join('\n');
 }
 
 function mapEvidenceSummary(evidence: AiRetrievedEvidence[]): AiAnswerEvidenceSummary[] {
@@ -137,11 +164,13 @@ export class AiAnswerService {
     tonePreset: AiTonePreset;
     toneInstructions: string;
     replyFrequency?: AiReplyFrequency;
+    conversationTurns?: AiAnswerConversationTurn[];
   }): Promise<Result<AiAnswerResult, AppError>> {
     try {
+      const conversationTurns = input.conversationTurns ?? [];
       const evidence = await this.knowledgeRepository.retrieveEvidence({
         guildId: input.guildId,
-        question: input.question,
+        question: buildRetrievalQuestion(input.question, conversationTurns),
       });
       const qualifiedEvidence = filterEvidenceForReplyFrequency(
         evidence,
@@ -161,6 +190,7 @@ export class AiAnswerService {
           tonePreset: input.tonePreset,
           toneInstructions: input.toneInstructions,
           evidence: qualifiedEvidence,
+          conversationTurns,
         }),
         question: input.question,
       });

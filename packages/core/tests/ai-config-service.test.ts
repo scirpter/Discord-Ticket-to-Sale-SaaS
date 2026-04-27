@@ -9,6 +9,7 @@ import {
   aiReplyChannels,
   aiRoleRules,
   aiWebsiteSources,
+  aiConversationTurns,
   aiKnowledgeDocuments,
   aiCustomQas,
   aiAnswerCorrectionContexts,
@@ -76,6 +77,7 @@ describe('AI env and schema foundation', () => {
     expect(aiReplyChannels).toBeDefined();
     expect(aiRoleRules).toBeDefined();
     expect(aiWebsiteSources).toBeDefined();
+    expect(aiConversationTurns).toBeDefined();
     expect(aiKnowledgeDocuments).toBeDefined();
     expect(aiCustomQas).toBeDefined();
     expect(aiAnswerCorrectionContexts).toBeDefined();
@@ -145,6 +147,37 @@ describe('AI env and schema foundation', () => {
       onDelete: 'cascade',
       onUpdate: 'cascade',
       referencesWebsiteSources: true,
+    });
+  });
+
+  it('defines AI website source modes and bounded conversation memory', () => {
+    const sourceConfig = getTableConfig(aiWebsiteSources);
+    const sourceColumns = sourceConfig.columns.map((column) => column.name);
+    expect(sourceColumns).toEqual(expect.arrayContaining(['source_type', 'crawl_mode', 'document_count']));
+
+    const turnConfig = getTableConfig(aiConversationTurns);
+    const turnColumns = turnConfig.columns.map((column) => column.name);
+    const indexSummary = turnConfig.indexes.map((index) => ({
+      columns: index.config.columns.map((column) => column.name),
+      name: index.config.name,
+      unique: index.config.unique,
+    }));
+
+    expect(turnColumns).toEqual(
+      expect.arrayContaining([
+        'guild_id',
+        'channel_id',
+        'discord_user_id',
+        'user_message_id',
+        'bot_message_id',
+        'user_content',
+        'bot_content',
+      ]),
+    );
+    expect(indexSummary).toContainEqual({
+      columns: ['guild_id', 'channel_id', 'discord_user_id', 'created_at'],
+      name: 'ai_conversation_turns_scope_created_idx',
+      unique: false,
     });
   });
 });
