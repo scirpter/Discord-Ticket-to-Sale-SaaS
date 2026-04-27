@@ -23,6 +23,7 @@ import { useEffect, useEffectEvent, useState, useTransition, type FormEvent, typ
 
 import { AI_APP_BRAND } from '@/lib/ai-design-tokens';
 import type { AiDashboardGuild } from '@/lib/ai-session';
+import { inferWebsiteSourceTypeFromUrl } from '@/lib/ai-website-source-url';
 import { buildDashboardGuildUrl } from '@/lib/dashboard-url';
 
 type TonePreset = 'professional' | 'standard' | 'witty' | 'cheeky';
@@ -1343,7 +1344,14 @@ export function AiControlPlane({
                 <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_auto]">
                   <input
                     value={websiteUrl}
-                    onChange={(event) => setWebsiteUrl(event.target.value)}
+                    onChange={(event) => {
+                      const nextUrl = event.target.value;
+                      setWebsiteUrl(nextUrl);
+                      if (inferWebsiteSourceTypeFromUrl(nextUrl) === 'rss_feed') {
+                        setWebsiteSourceType('rss_feed');
+                        setWebsiteCrawlMode('page');
+                      }
+                    }}
                     placeholder={
                       websiteSourceType === 'rss_feed'
                         ? 'https://example.com/feed.xml'

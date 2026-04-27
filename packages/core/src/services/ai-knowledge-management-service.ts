@@ -47,8 +47,27 @@ function mapWebsiteSourceSummary(source: AiWebsiteSourceRecord) {
   };
 }
 
-function normalizeSourceType(value: AiWebsiteSourceType | undefined): AiWebsiteSourceType {
-  return value === 'rss_feed' ? 'rss_feed' : 'website';
+function isLikelyFeedUrl(url: string): boolean {
+  const parsed = new URL(url);
+  const pathname = parsed.pathname.toLowerCase();
+  const combined = `${pathname}${parsed.search.toLowerCase()}`;
+
+  return (
+    /\.(?:rss|atom|xml)$/u.test(pathname) ||
+    /(?:^|\/)(?:rss|atom|feed)(?:\/|$|\.)/u.test(pathname) ||
+    /(?:[?&](?:format|type)=)(?:rss|atom|xml)(?:&|$)/u.test(combined)
+  );
+}
+
+function normalizeSourceType(input: {
+  url: string;
+  sourceType: AiWebsiteSourceType | undefined;
+}): AiWebsiteSourceType {
+  if (input.sourceType === 'rss_feed' || isLikelyFeedUrl(input.url)) {
+    return 'rss_feed';
+  }
+
+  return 'website';
 }
 
 function normalizeCrawlMode(input: {
@@ -183,7 +202,7 @@ export class AiKnowledgeManagementService {
   > {
     try {
       const url = normalizeWebsiteUrl(input.url);
-      const sourceType = normalizeSourceType(input.sourceType);
+      const sourceType = normalizeSourceType({ url, sourceType: input.sourceType });
       const crawlMode = normalizeCrawlMode({ sourceType, crawlMode: input.crawlMode });
       const created = await this.repository.createWebsiteSource({
         guildId: input.guildId,

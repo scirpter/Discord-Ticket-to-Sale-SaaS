@@ -238,6 +238,7 @@ function parseFeedItems(feedXml: string, feedUrl: string, httpStatus: number): A
     const body =
       extractXmlValue(entryXml, 'description') ??
       extractXmlValue(entryXml, 'summary') ??
+      extractXmlValue(entryXml, 'encoded') ??
       extractXmlValue(entryXml, 'content');
     const contentText = normalizeContentText([title, link, publishedAt, body].filter(Boolean).join('\n'));
     if (!contentText) {

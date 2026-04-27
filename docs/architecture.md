@@ -37,7 +37,7 @@
 - Runs as a separate Next.js product surface on its own domain.
 - Handles Discord OAuth on the AI panel domain, guild access filtering for owners/admins, and all AI bot configuration flows.
 - Exposes guild-scoped API routes for AI settings, website sources, custom Q&A entries, bot resource discovery, and diagnostics snapshots.
-- Supports exact-page website sources, bounded same-site crawls, and RSS/Atom feed sources from the same knowledge-source panel.
+- Supports exact-page website sources, bounded same-site crawls, and RSS/Atom feed sources from the same knowledge-source panel. Feed-looking URLs are auto-normalized to RSS to avoid accidental HTML sync attempts.
 - Supports category-level reply and Discord knowledge source rules so newly created text, announcement, forum, and media channels can be picked up without reconfiguring the panel.
 - Lets admins configure reply frequency and an unanswered-question log channel for turning missed answers into Custom Q&A.
 

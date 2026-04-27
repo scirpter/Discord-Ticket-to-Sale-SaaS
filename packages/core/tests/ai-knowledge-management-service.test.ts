@@ -100,6 +100,99 @@ describe('AiKnowledgeManagementService', () => {
     }
   });
 
+  it('auto-detects feed URLs as RSS sources even when website mode is selected', async () => {
+    const repository = {
+      createWebsiteSource: vi.fn().mockResolvedValue({
+        created: true,
+        record: {
+          id: 'source-1',
+          guildId: 'guild-1',
+          url: 'https://example.com/feed.xml',
+          status: 'pending',
+          lastSyncedAt: null,
+          lastSyncStartedAt: null,
+          lastSyncError: null,
+          httpStatus: null,
+          contentHash: null,
+          pageTitle: null,
+          sourceType: 'rss_feed',
+          crawlMode: 'page',
+          documentCount: 0,
+          createdByDiscordUserId: 'discord-user-1',
+          updatedByDiscordUserId: 'discord-user-1',
+          createdAt: new Date('2026-04-23T10:00:00.000Z'),
+          updatedAt: new Date('2026-04-23T10:00:00.000Z'),
+        },
+      }),
+      getWebsiteSource: vi.fn().mockResolvedValue({
+        id: 'source-1',
+        guildId: 'guild-1',
+        url: 'https://example.com/feed.xml',
+        status: 'ready',
+        lastSyncedAt: new Date('2026-04-23T10:05:00.000Z'),
+        lastSyncStartedAt: new Date('2026-04-23T10:04:55.000Z'),
+        lastSyncError: null,
+        httpStatus: 200,
+        contentHash: 'hash-1',
+        pageTitle: 'Updates',
+        sourceType: 'rss_feed',
+        crawlMode: 'page',
+        documentCount: 1,
+        createdByDiscordUserId: 'discord-user-1',
+        updatedByDiscordUserId: 'discord-user-1',
+        createdAt: new Date('2026-04-23T10:00:00.000Z'),
+        updatedAt: new Date('2026-04-23T10:05:00.000Z'),
+      }),
+      listWebsiteSources: vi.fn(),
+      deleteWebsiteSource: vi.fn(),
+      listCustomQas: vi.fn(),
+      createCustomQa: vi.fn(),
+      updateCustomQa: vi.fn(),
+      deleteCustomQa: vi.fn(),
+    };
+    const syncService = {
+      syncSource: vi.fn().mockResolvedValue({
+        isErr: () => false,
+        value: {
+          sourceId: 'source-1',
+          url: 'https://example.com/feed.xml',
+          pageTitle: 'Updates',
+          httpStatus: 200,
+          contentHash: 'hash-1',
+          documentCount: 1,
+          status: 'ready',
+          syncedAt: '2026-04-23T10:05:00.000Z',
+        },
+      }),
+    };
+    const service = new AiKnowledgeManagementService(repository as never, syncService as never);
+
+    const result = await service.createWebsiteSource({
+      guildId: 'guild-1',
+      url: 'https://example.com/feed.xml',
+      sourceType: 'website',
+      crawlMode: 'site',
+      actorDiscordUserId: 'discord-user-1',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.createWebsiteSource).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      url: 'https://example.com/feed.xml',
+      sourceType: 'rss_feed',
+      crawlMode: 'page',
+      createdByDiscordUserId: 'discord-user-1',
+    });
+    expect(syncService.syncSource).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      url: 'https://example.com/feed.xml',
+      sourceType: 'rss_feed',
+      crawlMode: 'page',
+      updatedByDiscordUserId: 'discord-user-1',
+    });
+  });
+
   it('rejects invalid website URLs before persistence', async () => {
     const service = new AiKnowledgeManagementService(
       {

@@ -233,4 +233,45 @@ describe('AiWebsiteSyncService', () => {
       ],
     });
   });
+
+  it('reads namespaced RSS content bodies', async () => {
+    const repository = {
+      markSourceSyncStarted: vi.fn().mockResolvedValue(undefined),
+      replaceSourceDocuments: vi.fn().mockResolvedValue([{ id: 'doc-1' }]),
+      markSourceSyncCompleted: vi.fn().mockResolvedValue(undefined),
+      markSourceSyncFailed: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new AiWebsiteSyncService(repository as never, {
+      fetchPage: vi.fn(),
+      fetchText: vi.fn().mockResolvedValue({
+        url: 'https://example.com/rss.xml',
+        httpStatus: 200,
+        text: `<?xml version="1.0"?>
+          <rss><channel><title>Updates</title><item>
+            <title>Deep update</title>
+            <link>https://example.com/deep-update</link>
+            <content:encoded><![CDATA[Full RSS article content from namespaced field.]]></content:encoded>
+          </item></channel></rss>`,
+      }),
+    });
+
+    const result = await service.syncSource({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      url: 'https://example.com/rss.xml',
+      sourceType: 'rss_feed',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.replaceSourceDocuments).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      sourceId: 'source-1',
+      documents: [
+        expect.objectContaining({
+          documentType: 'rss_item',
+          contentText: expect.stringContaining('Full RSS article content from namespaced field.'),
+        }),
+      ],
+    });
+  });
 });
