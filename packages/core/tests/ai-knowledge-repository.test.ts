@@ -64,6 +64,27 @@ function customQa(overrides: Partial<AiCustomQaRecord>): AiCustomQaRecord {
   };
 }
 
+function discordMessage(
+  overrides: Partial<AiDiscordChannelMessageRecord>,
+): AiDiscordChannelMessageRecord {
+  return {
+    id: 'message-1',
+    guildId: 'guild-1',
+    sourceId: 'discord-source-1',
+    channelId: 'channel-1',
+    messageId: 'discord-message-1',
+    authorId: null,
+    contentText: '',
+    contentHash: 'discord-message-hash-1',
+    messageCreatedAt: now,
+    messageEditedAt: null,
+    metadataJson: {},
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
 function mockRepositoryLists(
   repository: AiKnowledgeRepository,
   input: {
@@ -249,5 +270,66 @@ describe('AiKnowledgeRepository evidence retrieval', () => {
       sourceId: 'sport-source',
       url: 'https://dailysportsguide.co.uk/football/',
     });
+  });
+
+  it('keeps relevant Q&A and Discord evidence when websites also match', async () => {
+    const repository = new AiKnowledgeRepository();
+    mockRepositoryLists(repository, {
+      sources: [
+        websiteSource({ id: 'site-1', url: 'https://docs-1.example.com/' }),
+        websiteSource({ id: 'site-2', url: 'https://docs-2.example.com/' }),
+        websiteSource({ id: 'site-3', url: 'https://docs-3.example.com/' }),
+        websiteSource({ id: 'site-4', url: 'https://docs-4.example.com/' }),
+        websiteSource({ id: 'site-5', url: 'https://docs-5.example.com/' }),
+      ],
+      documents: Array.from({ length: 5 }, (_, index) =>
+        knowledgeDocument({
+          id: `site-doc-${index + 1}`,
+          sourceId: `site-${index + 1}`,
+          contentText:
+            'Support contact options include opening a support ticket and using the contact form.',
+          metadataJson: {
+            title: 'Support contact docs',
+            url: `https://docs-${index + 1}.example.com/support/contact/`,
+          },
+        }),
+      ),
+      customQas: [
+        customQa({
+          id: 'qa-support',
+          question: 'How do customers contact support?',
+          answer: 'Customers can open a ticket in the support channel.',
+        }),
+      ],
+      discordMessages: [
+        discordMessage({
+          id: 'discord-support',
+          sourceId: 'discord-source-1',
+          channelId: 'support-channel',
+          messageId: 'support-message',
+          contentText: 'Support contact update: open a ticket in #support for account help.',
+        }),
+      ],
+    });
+
+    const evidence = await repository.retrieveEvidence({
+      guildId: 'guild-1',
+      question: 'how do customers contact support',
+      limit: 5,
+    });
+
+    expect(evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: 'custom_qa',
+          sourceId: 'qa-support',
+        }),
+        expect.objectContaining({
+          sourceType: 'discord_channel_message',
+          channelId: 'support-channel',
+          messageId: 'support-message',
+        }),
+      ]),
+    );
   });
 });

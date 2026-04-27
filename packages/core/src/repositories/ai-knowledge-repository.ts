@@ -514,9 +514,43 @@ function selectDiverseEvidence(
   const selectedItems = new Set<AiRetrievedEvidence>();
   const websiteBucketCounts = new Map<string, number>();
 
+  const addCandidate = (candidate: AiRetrievedEvidence): void => {
+    selected.push(candidate);
+    selectedItems.add(candidate);
+
+    const bucket = getWebsiteEvidenceBucket(candidate);
+    if (bucket) {
+      websiteBucketCounts.set(bucket, (websiteBucketCounts.get(bucket) ?? 0) + 1);
+    }
+  };
+
+  const firstCandidate = candidates[0];
+  if (firstCandidate && selected.length < limit) {
+    addCandidate(firstCandidate);
+  }
+
+  for (const sourceType of ['custom_qa', 'discord_channel_message'] as const) {
+    if (selected.length >= limit || selected.some((item) => item.sourceType === sourceType)) {
+      continue;
+    }
+
+    const minimumScore = sourceType === 'custom_qa' ? 4 : 3;
+    const candidate = candidates.find(
+      (item) => item.sourceType === sourceType && item.score >= minimumScore,
+    );
+
+    if (candidate) {
+      addCandidate(candidate);
+    }
+  }
+
   for (const candidate of candidates) {
     if (selected.length >= limit) {
       break;
+    }
+
+    if (selectedItems.has(candidate)) {
+      continue;
     }
 
     const bucket = getWebsiteEvidenceBucket(candidate);
@@ -526,12 +560,7 @@ function selectDiverseEvidence(
       continue;
     }
 
-    selected.push(candidate);
-    selectedItems.add(candidate);
-
-    if (bucket) {
-      websiteBucketCounts.set(bucket, bucketCount + 1);
-    }
+    addCandidate(candidate);
   }
 
   for (const candidate of candidates) {
