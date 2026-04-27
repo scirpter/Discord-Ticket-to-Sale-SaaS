@@ -404,6 +404,37 @@ const AI_RETRIEVAL_STOP_WORDS = new Set([
   'your',
 ]);
 
+const AI_BROADCAST_QUERY_TOKENS = new Set([
+  'broadcast',
+  'broadcasts',
+  'channel',
+  'channels',
+  'coverage',
+  'live',
+  'stream',
+  'streaming',
+  'tv',
+  'watch',
+]);
+
+const AI_BROADCAST_EVIDENCE_PHRASES = [
+  'amazon',
+  'bt sport',
+  'channel 4',
+  'channel 5',
+  'dazn',
+  'espn',
+  'fite',
+  'live events',
+  'premier sports',
+  'ppv',
+  'sky sports',
+  'tnt sports',
+  'todays live events',
+  'vod',
+  'watch live',
+];
+
 function tokenize(value: string, options: { filterStopWords?: boolean } = {}): string[] {
   const tokens = value
     .toLowerCase()
@@ -417,6 +448,10 @@ function tokenize(value: string, options: { filterStopWords?: boolean } = {}): s
     );
 
   return [...new Set(tokens)];
+}
+
+function hasBroadcastIntent(tokens: string[]): boolean {
+  return tokens.some((token) => AI_BROADCAST_QUERY_TOKENS.has(token));
 }
 
 function normalizeSearchText(value: string): string {
@@ -433,6 +468,22 @@ function countTokenMatches(tokens: string[], haystack: string, weight = 1): numb
   }
 
   return score;
+}
+
+function scoreBroadcastEvidence(hasBroadcastQueryIntent: boolean, haystack: string): number {
+  if (!hasBroadcastQueryIntent) {
+    return 0;
+  }
+
+  let matches = 0;
+
+  for (const phrase of AI_BROADCAST_EVIDENCE_PHRASES) {
+    if (haystack.includes(phrase)) {
+      matches += 1;
+    }
+  }
+
+  return Math.min(matches, 3) * 2;
 }
 
 function normalizeEvidenceHost(url: string | null): string | null {
@@ -1310,8 +1361,10 @@ export class AiKnowledgeRepository {
     question: string;
     limit?: number;
   }): Promise<AiRetrievedEvidence[]> {
+    const rawQueryTokens = tokenize(input.question);
     const queryTokens = tokenize(input.question, { filterStopWords: true });
     const normalizedQuestion = normalizeSearchText(queryTokens.join(' '));
+    const hasBroadcastQueryIntent = hasBroadcastIntent(rawQueryTokens);
 
     if (queryTokens.length === 0 || !normalizedQuestion) {
       return [];
@@ -1340,6 +1393,7 @@ export class AiKnowledgeRepository {
         countTokenMatches(queryTokens, contentText) +
         countTokenMatches(queryTokens, titleText, 3) +
         countTokenMatches(queryTokens, urlText, 2) +
+        scoreBroadcastEvidence(hasBroadcastQueryIntent, searchable) +
         (searchable.includes(normalizedQuestion) ? 4 : 0) +
         (`${titleText} ${urlText}`.trim().includes(normalizedQuestion) ? 4 : 0) +
         (source?.status === 'ready' ? 1 : 0);
@@ -1366,6 +1420,7 @@ export class AiKnowledgeRepository {
       const searchable = normalizeSearchText(message.contentText);
       const score =
         countTokenMatches(queryTokens, searchable) +
+        scoreBroadcastEvidence(hasBroadcastQueryIntent, searchable) +
         (searchable.includes(normalizedQuestion) ? 4 : 0) +
         1;
 

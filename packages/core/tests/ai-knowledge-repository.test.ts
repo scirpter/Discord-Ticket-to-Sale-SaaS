@@ -199,4 +199,55 @@ describe('AiKnowledgeRepository evidence retrieval', () => {
       2,
     );
   });
+
+  it('favours broadcast listing pages for football TV questions', async () => {
+    const repository = new AiKnowledgeRepository();
+    mockRepositoryLists(repository, {
+      sources: [
+        websiteSource({
+          id: 'bbc-source',
+          url: 'https://www.bbc.co.uk/sport/football',
+          pageTitle: 'BBC Football',
+        }),
+        websiteSource({
+          id: 'sport-source',
+          url: 'https://dailysportsguide.co.uk/',
+          pageTitle: 'Daily Sports Guide',
+        }),
+      ],
+      documents: [
+        knowledgeDocument({
+          id: 'bbc-football',
+          sourceId: 'bbc-source',
+          contentText:
+            'BBC Sport football scores, fixtures, tables and headlines with news, video and analysis.',
+          metadataJson: {
+            title: 'Scores & Fixtures - Football - BBC Sport',
+            url: 'https://www.bbc.co.uk/sport/football/scores-fixtures',
+          },
+        }),
+        knowledgeDocument({
+          id: 'sport-football',
+          sourceId: 'sport-source',
+          contentText:
+            'Daily sports guide football schedule with todays live events, PPV, VOD, Dazn, TNT Sports, Sky Sports and Amazon listings.',
+          metadataJson: {
+            title: 'Daily Sports Guide',
+            url: 'https://dailysportsguide.co.uk/football/',
+          },
+        }),
+      ],
+    });
+
+    const evidence = await repository.retrieveEvidence({
+      guildId: 'guild-1',
+      question: 'what football is on tv today',
+      limit: 3,
+    });
+
+    expect(evidence[0]).toMatchObject({
+      sourceId: 'sport-source',
+      url: 'https://dailysportsguide.co.uk/football/',
+    });
+  });
 });
