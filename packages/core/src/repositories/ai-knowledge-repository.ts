@@ -328,13 +328,93 @@ function mapDiscordChannelMessageRow(
   };
 }
 
-function tokenize(value: string): string[] {
+const AI_RETRIEVAL_STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'all',
+  'also',
+  'am',
+  'an',
+  'and',
+  'any',
+  'are',
+  'as',
+  'at',
+  'be',
+  'been',
+  'being',
+  'by',
+  'can',
+  'could',
+  'did',
+  'do',
+  'does',
+  'for',
+  'from',
+  'had',
+  'has',
+  'have',
+  'he',
+  'her',
+  'here',
+  'him',
+  'his',
+  'how',
+  'if',
+  'in',
+  'is',
+  'it',
+  'its',
+  'me',
+  'my',
+  'of',
+  'on',
+  'or',
+  'our',
+  'she',
+  'should',
+  'that',
+  'the',
+  'their',
+  'them',
+  'then',
+  'there',
+  'these',
+  'they',
+  'this',
+  'those',
+  'to',
+  'today',
+  'tomorrow',
+  'tonight',
+  'was',
+  'we',
+  'were',
+  'what',
+  'when',
+  'where',
+  'which',
+  'who',
+  'why',
+  'will',
+  'with',
+  'would',
+  'you',
+  'your',
+]);
+
+function tokenize(value: string, options: { filterStopWords?: boolean } = {}): string[] {
   const tokens = value
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .split(/\s+/u)
-    .filter((token) => token.length >= 2);
+    .filter(
+      (token) =>
+        token.length >= 2 &&
+        (!options.filterStopWords || !AI_RETRIEVAL_STOP_WORDS.has(token)),
+    );
 
   return [...new Set(tokens)];
 }
@@ -343,16 +423,80 @@ function normalizeSearchText(value: string): string {
   return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
-function countTokenMatches(tokens: string[], haystack: string): number {
+function countTokenMatches(tokens: string[], haystack: string, weight = 1): number {
   let score = 0;
 
   for (const token of tokens) {
     if (haystack.includes(token)) {
-      score += 1;
+      score += weight;
     }
   }
 
   return score;
+}
+
+function normalizeEvidenceHost(url: string | null): string | null {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./u, '');
+  } catch {
+    return null;
+  }
+}
+
+function getWebsiteEvidenceBucket(evidence: AiRetrievedEvidence): string | null {
+  if (evidence.sourceType !== 'website_document') {
+    return null;
+  }
+
+  return normalizeEvidenceHost(evidence.url) ?? evidence.sourceId;
+}
+
+function selectDiverseEvidence(
+  candidates: AiRetrievedEvidence[],
+  limit: number,
+): AiRetrievedEvidence[] {
+  const selected: AiRetrievedEvidence[] = [];
+  const selectedItems = new Set<AiRetrievedEvidence>();
+  const websiteBucketCounts = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    if (selected.length >= limit) {
+      break;
+    }
+
+    const bucket = getWebsiteEvidenceBucket(candidate);
+    const bucketCount = bucket ? (websiteBucketCounts.get(bucket) ?? 0) : 0;
+
+    if (bucket && bucketCount >= 2) {
+      continue;
+    }
+
+    selected.push(candidate);
+    selectedItems.add(candidate);
+
+    if (bucket) {
+      websiteBucketCounts.set(bucket, bucketCount + 1);
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (selected.length >= limit) {
+      break;
+    }
+
+    if (selectedItems.has(candidate)) {
+      continue;
+    }
+
+    selected.push(candidate);
+    selectedItems.add(candidate);
+  }
+
+  return selected;
 }
 
 export class AiKnowledgeRepository {
@@ -1166,8 +1310,8 @@ export class AiKnowledgeRepository {
     question: string;
     limit?: number;
   }): Promise<AiRetrievedEvidence[]> {
-    const queryTokens = tokenize(input.question);
-    const normalizedQuestion = normalizeSearchText(input.question);
+    const queryTokens = tokenize(input.question, { filterStopWords: true });
+    const normalizedQuestion = normalizeSearchText(queryTokens.join(' '));
 
     if (queryTokens.length === 0 || !normalizedQuestion) {
       return [];
@@ -1187,11 +1331,18 @@ export class AiKnowledgeRepository {
       const title =
         typeof document.metadataJson.title === 'string' ? document.metadataJson.title : null;
       const url = typeof document.metadataJson.url === 'string' ? document.metadataJson.url : null;
-      const searchable = normalizeSearchText(`${title ?? ''} ${document.contentText}`);
+      const source = sourceById.get(document.sourceId);
+      const titleText = normalizeSearchText(title ?? '');
+      const urlText = normalizeSearchText(`${url ?? ''} ${source?.url ?? ''}`);
+      const contentText = normalizeSearchText(document.contentText);
+      const searchable = `${titleText} ${urlText} ${contentText}`.trim();
       const score =
-        countTokenMatches(queryTokens, searchable) +
+        countTokenMatches(queryTokens, contentText) +
+        countTokenMatches(queryTokens, titleText, 3) +
+        countTokenMatches(queryTokens, urlText, 2) +
         (searchable.includes(normalizedQuestion) ? 4 : 0) +
-        (sourceById.get(document.sourceId)?.status === 'ready' ? 1 : 0);
+        (`${titleText} ${urlText}`.trim().includes(normalizedQuestion) ? 4 : 0) +
+        (source?.status === 'ready' ? 1 : 0);
 
       if (score <= 0) {
         continue;
@@ -1262,9 +1413,11 @@ export class AiKnowledgeRepository {
       });
     }
 
-    return candidates
-      .sort((left, right) => right.score - left.score || left.sourceId.localeCompare(right.sourceId))
-      .slice(0, input.limit ?? 5);
+    const sortedCandidates = candidates.sort(
+      (left, right) => right.score - left.score || left.sourceId.localeCompare(right.sourceId),
+    );
+
+    return selectDiverseEvidence(sortedCandidates, input.limit ?? 5);
   }
 
   public async getGuildDiagnostics(input: {

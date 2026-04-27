@@ -45,6 +45,7 @@
 - Runs as a separate Discord application/token dedicated to the AI bot.
 - Keeps `/activation` as the only slash-command surface.
 - Processes passive message replies in configured channels, enforces role allowlist/blocklist rules, retrieves grounded evidence, and posts inline or thread replies.
+- Ranks evidence by meaningful query terms, page titles, URLs, and source readiness, then diversifies website results by domain before building the grounded answer prompt.
 - Loads the last six successful AI turns from the same Discord user in the same channel for 30 minutes, so follow-up questions can use local conversation wording without mixing customers or replacing approved evidence.
 - Logs unanswered qualifying questions to the configured admin channel and handles the Discord Add Q&A button/modal flow for members with Administrator permission. After a Q&A is saved from a log item, the original Add Q&A button is replaced with a disabled `Reply created` button so admins can see which questions were handled.
 
