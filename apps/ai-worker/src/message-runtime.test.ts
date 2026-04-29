@@ -30,6 +30,12 @@ vi.mock('@voodoo/core', () => {
     }
   }
 
+  class AiDiscordChannelSyncService {
+    public async syncMessage(): Promise<never> {
+      throw new Error('Mock syncMessage not implemented');
+    }
+  }
+
   class AiKnowledgeRepository {
     public async saveAnswerCorrectionContext(): Promise<never> {
       throw new Error('Mock saveAnswerCorrectionContext not implemented');
@@ -45,6 +51,7 @@ vi.mock('@voodoo/core', () => {
     AiConfigService,
     AiAnswerService,
     AiKnowledgeManagementService,
+    AiDiscordChannelSyncService,
     AiKnowledgeRepository,
     logger: {
       warn: loggerWarn,
@@ -60,6 +67,7 @@ import {
   AI_UNANSWERED_MODAL_CUSTOM_ID,
   handleAiUnansweredLearningInteraction,
   processIncomingMessage,
+  syncIncomingKnowledgeMessage,
 } from './runtime.js';
 
 function createOkResult<T>(value: T): { isErr: () => false; isOk: () => true; value: T } {
@@ -980,6 +988,38 @@ describe('AI message runtime', () => {
     expect(editReply).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining('Correction saved'),
+      }),
+    );
+  });
+
+  it('syncs incoming Discord knowledge messages using the parent channel as source for threads', async () => {
+    const syncMessage = vi.fn(async () =>
+      createOkResult({ synced: true, sourceId: 'source-1', messageId: 'msg-1' }),
+    );
+    const { message } = createMessage({ threadChannel: true, channelId: 'thread-1' });
+    Object.assign(message, {
+      channel: {
+        isThread: () => true,
+        parentId: 'forum-channel',
+        permissionsFor: vi.fn(),
+      },
+      createdAt: new Date('2026-04-23T12:00:00.000Z'),
+      editedAt: null,
+      embeds: [],
+      attachments: {
+        map: vi.fn(() => []),
+      },
+    });
+
+    await syncIncomingKnowledgeMessage(message, { syncMessage } as never);
+
+    expect(syncMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: 'guild-1',
+        sourceChannelId: 'forum-channel',
+        messageChannelId: 'thread-1',
+        messageId: 'msg-1',
+        content: 'What is the refund policy?',
       }),
     );
   });

@@ -556,4 +556,87 @@ describe('AI Discord channel sync service', () => {
       updatedByDiscordUserId: null,
     });
   });
+
+  it('upserts a newly posted message for a configured Discord knowledge source', async () => {
+    const source = {
+      id: 'source-1',
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+      status: 'ready' as const,
+      lastSyncedAt: new Date('2026-04-23T00:00:00.000Z'),
+      lastSyncStartedAt: new Date('2026-04-23T00:00:00.000Z'),
+      lastSyncError: null,
+      lastMessageId: 'old-message',
+      messageCount: 1,
+      createdByDiscordUserId: 'user-1',
+      updatedByDiscordUserId: 'user-1',
+      createdAt: new Date('2026-04-23T00:00:00.000Z'),
+      updatedAt: new Date('2026-04-23T00:00:00.000Z'),
+    };
+    const repository = {
+      getDiscordChannelSource: vi.fn(),
+      getDiscordChannelSourceByChannelId: vi.fn().mockResolvedValue(source),
+      listDiscordChannelSources: vi.fn(),
+      listDiscordChannelCategorySources: vi.fn(),
+      createDiscordChannelSource: vi.fn(),
+      createDiscordChannelCategorySource: vi.fn(),
+      deleteDiscordChannelSource: vi.fn(),
+      deleteDiscordChannelCategorySource: vi.fn(),
+      markDiscordChannelSyncStarted: vi.fn(),
+      replaceDiscordChannelMessages: vi.fn(),
+      saveDiscordChannelMessage: vi.fn().mockResolvedValue({
+        id: 'message-row-1',
+        guildId: 'guild-1',
+        sourceId: 'source-1',
+        channelId: 'channel-1',
+        messageId: 'message-1',
+        authorId: 'author-1',
+        contentText: 'Fresh answer',
+        contentHash: 'hash',
+        messageCreatedAt: new Date('2026-04-23T12:00:00.000Z'),
+        messageEditedAt: null,
+        metadataJson: {},
+        createdAt: new Date('2026-04-23T12:00:00.000Z'),
+        updatedAt: new Date('2026-04-23T12:00:00.000Z'),
+      }),
+      markDiscordChannelSyncCompleted: vi.fn(),
+      markDiscordChannelSyncFailed: vi.fn(),
+      deleteDiscordChannelMessage: vi.fn(),
+    };
+    const service = new AiDiscordChannelSyncService(repository, vi.fn() as typeof fetch);
+
+    const result = await service.syncMessage({
+      guildId: 'guild-1',
+      sourceChannelId: 'channel-1',
+      messageChannelId: 'channel-1',
+      messageId: 'message-1',
+      authorId: 'author-1',
+      authorBot: false,
+      content: 'Fresh answer',
+      embeds: [],
+      attachments: [],
+      timestamp: '2026-04-23T12:00:00.000Z',
+      editedTimestamp: null,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+    expect(result.value).toEqual({
+      synced: true,
+      sourceId: 'source-1',
+      messageId: 'message-1',
+    });
+    expect(repository.saveDiscordChannelMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: 'guild-1',
+        sourceId: 'source-1',
+        channelId: 'channel-1',
+        messageId: 'message-1',
+        authorId: 'author-1',
+        contentText: 'Fresh answer',
+      }),
+    );
+  });
 });

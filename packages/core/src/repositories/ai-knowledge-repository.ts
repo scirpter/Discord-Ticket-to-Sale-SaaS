@@ -952,6 +952,20 @@ export class AiKnowledgeRepository {
     return row ? mapDiscordChannelSourceRow(row) : null;
   }
 
+  public async getDiscordChannelSourceByChannelId(input: {
+    guildId: string;
+    channelId: string;
+  }): Promise<AiDiscordChannelSourceRecord | null> {
+    const row = await this.db.query.aiDiscordChannelSources.findFirst({
+      where: and(
+        eq(aiDiscordChannelSources.guildId, input.guildId),
+        eq(aiDiscordChannelSources.channelId, input.channelId),
+      ),
+    });
+
+    return row ? mapDiscordChannelSourceRow(row) : null;
+  }
+
   public async listDiscordChannelSources(input: {
     guildId?: string;
   } = {}): Promise<AiDiscordChannelSourceRecord[]> {
@@ -1169,6 +1183,65 @@ export class AiKnowledgeRepository {
 
       return rows.map(mapDiscordChannelMessageRow);
     });
+  }
+
+  public async saveDiscordChannelMessage(input: {
+    guildId: string;
+    sourceId: string;
+    channelId: string;
+    messageId: string;
+    authorId: string | null;
+    contentText: string;
+    contentHash: string;
+    messageCreatedAt: Date | null;
+    messageEditedAt: Date | null;
+    metadataJson: Record<string, unknown>;
+  }): Promise<AiDiscordChannelMessageRecord> {
+    const now = new Date();
+
+    await this.db
+      .insert(aiDiscordChannelMessages)
+      .values({
+        id: ulid(),
+        guildId: input.guildId,
+        sourceId: input.sourceId,
+        channelId: input.channelId,
+        messageId: input.messageId,
+        authorId: input.authorId,
+        contentText: input.contentText,
+        contentHash: input.contentHash,
+        messageCreatedAt: input.messageCreatedAt,
+        messageEditedAt: input.messageEditedAt,
+        metadataJson: input.metadataJson,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          sourceId: input.sourceId,
+          authorId: input.authorId,
+          contentText: input.contentText,
+          contentHash: input.contentHash,
+          messageCreatedAt: input.messageCreatedAt,
+          messageEditedAt: input.messageEditedAt,
+          metadataJson: input.metadataJson,
+          updatedAt: now,
+        },
+      });
+
+    const row = await this.db.query.aiDiscordChannelMessages.findFirst({
+      where: and(
+        eq(aiDiscordChannelMessages.guildId, input.guildId),
+        eq(aiDiscordChannelMessages.channelId, input.channelId),
+        eq(aiDiscordChannelMessages.messageId, input.messageId),
+      ),
+    });
+
+    if (!row) {
+      throw new Error('Failed to save AI Discord channel message');
+    }
+
+    return mapDiscordChannelMessageRow(row);
   }
 
   public async listDiscordChannelMessages(input: {

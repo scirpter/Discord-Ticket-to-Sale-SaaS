@@ -129,6 +129,30 @@ function buildRetrievalQuestion(question: string, turns: AiAnswerConversationTur
   return parts.map((part) => part.trim()).filter(Boolean).join('\n');
 }
 
+function isLikelyFollowUpQuestion(question: string): boolean {
+  const normalized = question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^(and|also|then|else)\b/u.test(normalized)) {
+    return true;
+  }
+
+  if (/^(what|how)\s+about\b/u.test(normalized)) {
+    return true;
+  }
+
+  if (/^(does|is|are|can|could|will|would|should|do|did)\s+(it|this|that|they|them|these|those|there|one|ones)\b/u.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized.split(/\s+/u).filter(Boolean);
+  const contextTokens = new Set(['it', 'this', 'that', 'they', 'them', 'these', 'those', 'there', 'one', 'ones']);
+
+  return tokens.length <= 8 && tokens.some((token) => contextTokens.has(token));
+}
+
 function mapEvidenceSummary(evidence: AiRetrievedEvidence[]): AiAnswerEvidenceSummary[] {
   return evidence.map((item) => ({
     sourceType: item.sourceType,
@@ -168,9 +192,13 @@ export class AiAnswerService {
   }): Promise<Result<AiAnswerResult, AppError>> {
     try {
       const conversationTurns = input.conversationTurns ?? [];
+      const contextualConversationTurns =
+        conversationTurns.length > 0 && isLikelyFollowUpQuestion(input.question)
+          ? conversationTurns
+          : [];
       const evidence = await this.knowledgeRepository.retrieveEvidence({
         guildId: input.guildId,
-        question: buildRetrievalQuestion(input.question, conversationTurns),
+        question: buildRetrievalQuestion(input.question, contextualConversationTurns),
       });
       const qualifiedEvidence = filterEvidenceForReplyFrequency(
         evidence,
@@ -190,7 +218,7 @@ export class AiAnswerService {
           tonePreset: input.tonePreset,
           toneInstructions: input.toneInstructions,
           evidence: qualifiedEvidence,
-          conversationTurns,
+          conversationTurns: contextualConversationTurns,
         }),
         question: input.question,
       });

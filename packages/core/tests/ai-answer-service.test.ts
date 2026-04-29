@@ -298,4 +298,64 @@ describe('AiAnswerService', () => {
     );
     expect(result.isOk()).toBe(true);
   });
+
+  it('retrieves standalone new questions without previous conversation terms', async () => {
+    const retrieveEvidence = vi.fn().mockImplementation(async ({ question }: { question: string }) => {
+      if (question === 'What is the warranty policy?') {
+        return [
+          {
+            sourceType: 'discord_channel_message',
+            sourceId: 'discord-source-1',
+            content: 'Warranty claims are covered for 30 days after purchase.',
+            title: '#faq',
+            url: null,
+            question: null,
+            answer: null,
+            channelId: 'faq-channel',
+            messageId: 'warranty-message',
+            score: 8,
+          },
+        ];
+      }
+
+      return [];
+    });
+    const generateGroundedResponse = vi.fn().mockResolvedValue({
+      outputText: 'Warranty claims are covered for 30 days after purchase.',
+      requestId: 'req_123',
+      model: 'gpt-4o-mini',
+    });
+    const service = new AiAnswerService({ retrieveEvidence }, { generateGroundedResponse });
+
+    const result = await service.answerMessage({
+      guildId: 'guild-1',
+      question: 'What is the warranty policy?',
+      tonePreset: 'professional',
+      toneInstructions: '',
+      conversationTurns: [
+        {
+          userContent: 'What is the refund policy?',
+          botContent: 'Refunds are available for 14 days.',
+        },
+      ],
+    });
+
+    expect(retrieveEvidence).toHaveBeenCalledWith({
+      guildId: 'guild-1',
+      question: 'What is the warranty policy?',
+    });
+    expect(generateGroundedResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining('Warranty claims are covered for 30 days after purchase.'),
+      }),
+    );
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      return;
+    }
+    expect(result.value).toMatchObject({
+      kind: 'answer',
+      content: 'Warranty claims are covered for 30 days after purchase.',
+    });
+  });
 });

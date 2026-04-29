@@ -104,6 +104,26 @@ export type AiDiscordChannelSyncResult = {
   lastMessageId: string | null;
 };
 
+export type AiDiscordChannelMessageSyncInput = {
+  guildId: string;
+  sourceChannelId: string;
+  messageChannelId: string;
+  messageId: string;
+  authorId: string | null;
+  authorBot: boolean;
+  content: string;
+  embeds: DiscordEmbedPayload[];
+  attachments: DiscordAttachmentPayload[];
+  timestamp: string | null;
+  editedTimestamp: string | null;
+};
+
+export type AiDiscordChannelMessageSyncResult = {
+  synced: boolean;
+  sourceId: string | null;
+  messageId: string;
+};
+
 export type AiDiscordChannelCategoryReconcileResult = {
   categoryCount: number;
   channelCount: number;
@@ -115,6 +135,7 @@ export type AiDiscordChannelCategoryReconcileResult = {
 export type AiDiscordChannelSyncRepositoryLike = Pick<
   AiKnowledgeRepository,
   | 'getDiscordChannelSource'
+  | 'getDiscordChannelSourceByChannelId'
   | 'listDiscordChannelSources'
   | 'listDiscordChannelCategorySources'
   | 'createDiscordChannelSource'
@@ -123,6 +144,7 @@ export type AiDiscordChannelSyncRepositoryLike = Pick<
   | 'deleteDiscordChannelCategorySource'
   | 'markDiscordChannelSyncStarted'
   | 'replaceDiscordChannelMessages'
+  | 'saveDiscordChannelMessage'
   | 'markDiscordChannelSyncCompleted'
   | 'markDiscordChannelSyncFailed'
   | 'deleteDiscordChannelMessage'
@@ -578,6 +600,87 @@ export class AiDiscordChannelSyncService {
           'Synced Discord message could not be removed due to an internal error.',
           500,
         ),
+      );
+    }
+  }
+
+  public async syncMessage(
+    input: AiDiscordChannelMessageSyncInput,
+  ): Promise<Result<AiDiscordChannelMessageSyncResult, AppError>> {
+    try {
+      const source = await this.repository.getDiscordChannelSourceByChannelId({
+        guildId: input.guildId,
+        channelId: input.sourceChannelId,
+      });
+
+      if (!source) {
+        return ok({
+          synced: false,
+          sourceId: null,
+          messageId: input.messageId,
+        });
+      }
+
+      const contentText = extractDiscordMessageKnowledgeText({
+        id: input.messageId,
+        channel_id: input.messageChannelId,
+        author: {
+          id: input.authorId ?? undefined,
+          bot: input.authorBot,
+        },
+        content: input.content,
+        embeds: input.embeds,
+        attachments: input.attachments,
+        timestamp: input.timestamp ?? undefined,
+        edited_timestamp: input.editedTimestamp,
+      });
+
+      if (!contentText) {
+        await this.repository.deleteDiscordChannelMessage({
+          guildId: input.guildId,
+          channelId: input.messageChannelId,
+          messageId: input.messageId,
+        });
+        return ok({
+          synced: false,
+          sourceId: source.id,
+          messageId: input.messageId,
+        });
+      }
+
+      await this.repository.saveDiscordChannelMessage({
+        guildId: input.guildId,
+        sourceId: source.id,
+        channelId: input.messageChannelId,
+        messageId: input.messageId,
+        authorId: input.authorId,
+        contentText,
+        contentHash: createHash('sha256').update(contentText).digest('hex'),
+        messageCreatedAt: parseDiscordTimestamp(input.timestamp),
+        messageEditedAt: parseDiscordTimestamp(input.editedTimestamp),
+        metadataJson: {
+          channelId: source.channelId,
+          messageChannelId: input.messageChannelId,
+          authorId: input.authorId,
+          authorBot: input.authorBot,
+          discordTimestamp: input.timestamp,
+        },
+      });
+
+      return ok({
+        synced: true,
+        sourceId: source.id,
+        messageId: input.messageId,
+      });
+    } catch (error) {
+      return err(
+        error instanceof AppError
+          ? error
+          : new AppError(
+              'AI_DISCORD_CHANNEL_MESSAGE_SYNC_FAILED',
+              fromUnknownError(error).message || 'Discord channel message could not be synced.',
+              502,
+            ),
       );
     }
   }

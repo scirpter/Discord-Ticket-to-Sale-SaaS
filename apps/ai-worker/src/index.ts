@@ -15,6 +15,7 @@ import {
   handleAiUnansweredLearningInteraction,
   mapAiWorkerError,
   processIncomingMessage,
+  syncIncomingKnowledgeMessage,
 } from './runtime.js';
 
 type Command = {
@@ -88,7 +89,16 @@ client.on(Events.InteractionCreate, (interaction: Interaction) => {
 });
 
 client.on(Events.MessageCreate, (message) => {
-  void processIncomingMessage(client, message);
+  void processIncomingMessage(client, message)
+    .catch((error) => {
+      logger.warn(
+        { err: error, guildId: message.guildId, channelId: message.channelId, messageId: message.id },
+        'ai-worker passive message processing crashed',
+      );
+    })
+    .finally(() => {
+      void syncIncomingKnowledgeMessage(message, channelSyncService);
+    });
 });
 
 client.on(Events.MessageDelete, (message) => {

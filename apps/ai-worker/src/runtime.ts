@@ -16,9 +16,11 @@ import {
   type Message,
 } from 'discord.js';
 import {
+  AiDiscordChannelSyncService,
   AiKnowledgeRepository,
   AiKnowledgeManagementService,
   logger,
+  type AiDiscordChannelMessageSyncInput,
   type AiReplyMode,
 } from '@voodoo/core';
 
@@ -62,6 +64,8 @@ type AiAnswerCorrectionContextStore = {
 type AiWorkerRuntimeDependencies = {
   correctionContextStore?: AiAnswerCorrectionContextStore;
 };
+
+type AiIncomingKnowledgeSyncService = Pick<AiDiscordChannelSyncService, 'syncMessage'>;
 
 type AiAnswerCorrectionBackingRepository = {
   saveAnswerCorrectionContext(input: {
@@ -464,6 +468,77 @@ function extractSentMessageId(sentMessage: unknown): string | null {
 
   const messageId = (sentMessage as { id?: unknown }).id;
   return typeof messageId === 'string' && messageId.trim().length > 0 ? messageId : null;
+}
+
+function mapMessageEmbeds(message: Message): AiDiscordChannelMessageSyncInput['embeds'] {
+  return message.embeds.map((embed) => {
+    const json = embed.toJSON();
+    return {
+      title: json.title ?? null,
+      description: json.description ?? null,
+      url: json.url ?? null,
+      author: json.author
+        ? {
+            name: json.author.name ?? null,
+            url: json.author.url ?? null,
+          }
+        : null,
+      fields: json.fields?.map((field) => ({
+        name: field.name ?? null,
+        value: field.value ?? null,
+      })),
+      footer: json.footer
+        ? {
+            text: json.footer.text ?? null,
+          }
+        : null,
+    };
+  });
+}
+
+function mapMessageAttachments(message: Message): AiDiscordChannelMessageSyncInput['attachments'] {
+  return message.attachments.map((attachment) => ({
+    filename: attachment.name ?? null,
+    title: attachment.title ?? null,
+    description: attachment.description ?? null,
+    url: attachment.url ?? null,
+  }));
+}
+
+export async function syncIncomingKnowledgeMessage(
+  message: Message,
+  channelSyncService: AiIncomingKnowledgeSyncService = new AiDiscordChannelSyncService(),
+): Promise<void> {
+  if (!message.guildId) {
+    return;
+  }
+
+  const sourceChannelId = getParentChannelId(message) ?? message.channelId;
+  const result = await channelSyncService.syncMessage({
+    guildId: message.guildId,
+    sourceChannelId,
+    messageChannelId: message.channelId,
+    messageId: message.id,
+    authorId: message.author.id,
+    authorBot: message.author.bot,
+    content: message.content,
+    embeds: mapMessageEmbeds(message),
+    attachments: mapMessageAttachments(message),
+    timestamp: message.createdAt.toISOString(),
+    editedTimestamp: message.editedAt?.toISOString() ?? null,
+  });
+
+  if (result.isErr()) {
+    logger.warn(
+      {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        messageId: message.id,
+        errorMessage: result.error.message,
+      },
+      'ai-worker failed to sync incoming knowledge message',
+    );
+  }
 }
 
 async function saveConversationTurnAfterReply(input: {
